@@ -1,4 +1,4 @@
-# LocalDrop — design
+# Harbor — design
 
 Distilled from [the research thread](research-thread.md), 2026-11-03. This is the *current best
 shape*, not a spec. Anything marked **OPEN** is genuinely undecided — see
@@ -61,8 +61,8 @@ build embedded, shipped as a small Docker image, updated by a host-side watcher.
 
 ### The build
 
-- **Backend:** Go, module `github.com/AutumnsGrove/LocalDrop`, server under `server/`, entry point
-  `server/cmd/localdrop`. Static binary, `CGO_ENABLED=0`, distroless final image, non-root.
+- **Backend:** Go, module `github.com/AutumnsGrove/Harbor`, server under `server/`, entry point
+  `server/cmd/harbor`. Static binary, `CGO_ENABLED=0`, distroless final image, non-root.
 - **Frontend:** SvelteKit in `web/`, built to static `web/build`, embedded with
   `//go:embed all:build` (see Warbler's `web/embed.go`). No Node at runtime; one artifact to ship.
 - **SQLite:** [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) — pure Go, no cgo, so
@@ -74,7 +74,7 @@ build embedded, shipped as a small Docker image, updated by a host-side watcher.
   - `provider/openrouter` + `deepseek/deepseek-v4.1-flash-1017` for **tags, summary, title**, and
     the same model (it accepts image input) for **OCR / image description / image tags**.
   - `embed` + `perplexity/pplx-embed-v1-0.6b` (1024 dims) for **vectors**. Nova's embed primitive
-    is issue [#49](https://github.com/AutumnsGrove/nova/issues/49); LocalDrop is its first
+    is issue [#49](https://github.com/AutumnsGrove/nova/issues/49); Harbor is its first
     consumer, and semantic search waits on it.
   Enrichment is a pipeline of one-shot calls, not an agent loop. `message.Parts` carries images to
   the vision-capable chat model.
@@ -94,17 +94,17 @@ lock apply to the UI and the API identically — there is no separate static ori
 ```yaml
 # docker-compose.yml at the repo root, like Warbler's, so Meridian's compose actions find it
 services:
-  localdrop:
+  harbor:
     build: .
-    image: ${LOCALDROP_IMAGE:-ghcr.io/autumnsgrove/localdrop:latest}
+    image: ${HARBOR_IMAGE:-ghcr.io/autumnsgrove/harbor:latest}
     restart: unless-stopped
-    user: "${LOCALDROP_UID:-1000}:${LOCALDROP_GID:-1000}"
+    user: "${HARBOR_UID:-1000}:${HARBOR_GID:-1000}"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     tmpfs: ["/tmp"]
     ports:
-      - "127.0.0.1:${LOCALDROP_PORT:-8895}:8080"
+      - "127.0.0.1:${HARBOR_PORT:-8895}:8080"
     volumes:
       - ./data:/data
       - ./update-signal:/update-signal
@@ -112,9 +112,9 @@ services:
 
 - **Port 8895** (8893 is reserved for Cairn, 8894 for Coffer) — loopback only; `tailscale serve` is
   the only way in. Confirm it's free with `ss -ltn` before first install.
-- **Data:** `~/LocalDrop/data/` — `localdrop.db` (+ WAL), `archives/` if anything is ever stored
+- **Data:** `~/Harbor/data/` — `harbor.db` (+ WAL), `archives/` if anything is ever stored
   locally, `backups/` for the pre-update snapshot.
-- **Deployment mode:** `LOCALDROP_DEPLOYMENT=docker`, surfaced in Settings.
+- **Deployment mode:** `HARBOR_DEPLOYMENT=docker`, surfaced in Settings.
 
 ### The update path (inherited, not reinvented)
 
@@ -123,14 +123,14 @@ homelab:
 
 ```
 Settings ──[Check]──► update-signal/check
-                            │  localdrop-update.path sees the file
+                            │  harbor-update.path sees the file
                             ▼
-                    localdrop-update.service (oneshot)
+                    harbor-update.service (oneshot)
                             │  resolve :latest -> digest
                             ▼
                     update-signal/available.json
 Settings ──[Update]─► update-signal/requested (contents: "latest")
-Meridian tap ───────► systemctl start localdrop-update.service  (no file)
+Meridian tap ───────► systemctl start harbor-update.service  (no file)
                             │
                             ▼
                     1. pin the new digest in .env
@@ -143,15 +143,15 @@ Meridian tap ───────► systemctl start localdrop-update.service  
 
 - The app **never names an image**. It writes `requested` with the literal `latest`; the watcher
   owns the allowed repository and accepts only `<repo>@sha256:<64 hex>`.
-- A `localdrop-tick.timer` every 10 minutes refreshes a heartbeat and catches missed signals. It
+- A `harbor-tick.timer` every 10 minutes refreshes a heartbeat and catches missed signals. It
   never updates on its own.
 - Endpoints: `GET /healthz` (public to Docker/Meridian, two fields), `GET /api/version`,
   `POST /api/update/check`, `GET /api/update/available`, `POST /api/update/start`,
   `GET /api/update/status`, `GET /api/busy`.
-- Meridian target: `kind: compose`, `dir: /home/autumn/LocalDrop`, `service: localdrop`,
-  `update: { kind: unit, unit: localdrop-update.service }`.
+- Meridian target: `kind: compose`, `dir: /home/autumn/Harbor`, `service: harbor`,
+  `update: { kind: unit, unit: harbor-update.service }`.
 - The watcher never updates `docker-compose.yml`, the units, or the script themselves — those come
-  from the checkout on the potato (`cd ~/LocalDrop && git pull && deploy/install.sh`).
+  from the checkout on the potato (`cd ~/Harbor && git pull && deploy/install.sh`).
 - Rollback matters more here than for Warbler: SQLite migrations only go forward, so the snapshot
   restore is not optional.
 
@@ -159,7 +159,7 @@ Meridian tap ───────► systemctl start localdrop-update.service  
 
 Same four layers as Warbler: tailnet → `Host` check → Tailscale identity lock
 (`Tailscale-User-Login`) → app (no CORS, strict CSP, bundled assets, non-root, read-only rootfs).
-**One deliberate difference:** LocalDrop must make outbound calls (OpenRouter, and the Cloudflare
+**One deliberate difference:** Harbor must make outbound calls (OpenRouter, and the Cloudflare
 Worker poll), so the image is not "no outside traffic" in the way Warbler is. Egress is allowlisted
 in the security notes to exactly `openrouter.ai` and the Worker's hostname; nothing else.
 
@@ -167,7 +167,7 @@ in the security notes to exactly `openrouter.ai` and the Worker's hostname; noth
 
 On every push: `gofmt`, `go vet`, `go test -race`, pnpm check/test/build, the no-outside-addresses
 frontend check. On a push to `main` that passes: build `linux/amd64` + `linux/arm64`, publish
-`ghcr.io/autumnsgrove/localdrop` tagged `latest` and the short SHA. The potato only ever pulls; it
+`ghcr.io/autumnsgrove/harbor` tagged `latest` and the short SHA. The potato only ever pulls; it
 never builds.
 
 ## 4. Architecture
@@ -564,7 +564,7 @@ The research thread kept circling a `search_bookmarks()` tool for Polaris, but P
 support MCP servers today and this is not a v1 concern. Parked deliberately: no MCP endpoint, no
 read-only SQLite mount, no schema coupling.
 
-If it comes back, the likely shape is a small read-only HTTP/MCP surface owned by LocalDrop, not
+If it comes back, the likely shape is a small read-only HTTP/MCP surface owned by Harbor, not
 Polaris reading the database directly. Until then, the library's job is to be good on its own.
 
 ---
@@ -684,7 +684,7 @@ MCP tool (deferred; Polaris has no MCP support today).
   `deepseek/deepseek-v4.1-flash-1017` through `provider/openrouter`.
 - Embeddings use `perplexity/pplx-embed-v1-0.6b` (1024 dims, unnormalized → cosine) through
   Nova's `embed` primitive, which is issue
-  [#49](https://github.com/AutumnsGrove/nova/issues/49). LocalDrop is its first consumer.
+  [#49](https://github.com/AutumnsGrove/nova/issues/49). Harbor is its first consumer.
 - Highlight anchors are quote + prefix/suffix against a versioned extraction (see H2).
 - Smart Spaces are user-defined rules plus AI suggestions the user can accept (see H3).
 - Images are read by the same `deepseek/deepseek-v4.1-flash-1017` model as text enrichment;
@@ -718,6 +718,8 @@ MCP tool (deferred; Polaris has no MCP support today).
 - First run offers Import or a first link; no multi-step wizard.
 - Archived HTML renders in a sandboxed, script-disabled viewer; the reader is the default.
 - Structured logs + a Settings Status page; no telemetry.
+- The name is **Harbor**. The CNCF Harbor container-registry collision is accepted: this is a
+  personal project, not a registry, and the gesture meaning is the point.
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
   read path is built for it.
 - Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.
@@ -737,7 +739,6 @@ MCP tool (deferred; Polaris has no MCP support today).
 
 **Still open**
 
-- The **name** (LocalDrop is a placeholder).
 - Hybrid ranking weights (keyword vs semantic) — tune once there is real search data.
 - The five spikes in [open-questions.md](open-questions.md#g-things-to-verify-with-a-spike-not-decisions)
   (streaming upload, D1 claim, vector cache, Browser Rendering, Nova embed).

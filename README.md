@@ -1,7 +1,9 @@
-# LocalDrop
+# Harbor
 
-> **Status: concept.** No code yet. Name is a placeholder. The goal of this repo right now is to
-> nail the shape of the thing before any of it exists.
+> **Status: concept.** No code yet. Name is settled: **Harbor** — a place to bring things in and
+> keep them safe. The collision with CNCF Harbor (the container registry) is known and accepted;
+> this is a personal library, not a registry. The goal of this repo right now is to nail the shape
+> of the thing before any of it exists.
 
 A personal save-anything library for one person, built to replace a Raindrop Pro + mymind
 subscription ($157/year) with something owned outright.
@@ -65,7 +67,7 @@ it safe on the public internet.
 
 ## Deployment shape
 
-- `~/LocalDrop` on the potato, Compose project `localdrop`, data in `~/LocalDrop/data`.
+- `~/Harbor` on the potato, Compose project `harbor`, data in `~/Harbor/data`.
 - Port **8895** (proposed; 8893 Cairn and 8894 Coffer are already reserved), loopback only behind
   `tailscale serve`.
 - Update path is Warbler's: Settings → signal file → host watcher → digest pin → health check →

@@ -4,7 +4,7 @@ The refinement agenda, worked through on 2026-11-03. Almost everything is now se
 answers are folded into [design.md](design.md) and recorded here with the reasoning that produced
 them.
 
-**Still open:** A5 (the name) and the spikes in section G. Everything else is decided.
+**Still open:** hybrid ranking weights and the spikes in section G. Everything else is decided.
 
 Format: ~~question~~ → **decision** → why the alternatives lost.
 
@@ -31,9 +31,11 @@ Home is search, Smart Space chips, pending cards, then the recent items in a **m
 (variable-height cards, responsive columns). Top of Mind / serendipity is a later addition, not
 v1.
 
-### A5. Name — **direction settled: gesture family, name it now**
-Not an astral name. The name should describe the act (keep / catch / stow / tuck), be short, and
-work as a repo, module, and image name. The specific name is the one thing still being chosen.
+### A5. ~~Name~~ — **settled: Harbor**
+Gesture-family name, chosen now: a harbor is where you bring things in and keep them safe.
+`Harbor` is the repo, `harbor` the binary/service/image, and `github.com/AutumnsGrove/Harbor` the
+module. Known collision: CNCF Harbor is a container registry; accepted deliberately for a personal
+project.
 
 ---
 
@@ -62,7 +64,7 @@ HTTPS + MagicDNS, app bound to `127.0.0.1:8895` in Compose. Confirm the port is 
 - `/presign` signs short-lived R2 reads for the UI.
 
 ### B5. ~~Where does the SQLite file live, and how is it deployed?~~ — **settled: Compose + host bind mount**
-`~/LocalDrop` on the potato, `docker-compose.yml` at the repo root, `./data:/data`, `./update-signal`
+`~/Harbor` on the potato, `docker-compose.yml` at the repo root, `./data:/data`, `./update-signal`
 mailbox, loopback port 8895 behind `tailscale serve`, image pinned by digest in `.env`. Warbler's
 watcher handles updates. Backup remains open (E2): in-app nightly `VACUUM INTO` → R2, plus a
 documented, actually-run restore drill.
@@ -96,7 +98,7 @@ the archive job retries — it never blocks the save.
 - **Normalization:** Perplexity vectors are **unnormalized** — compare with cosine, never inner
   product.
 - **Where:** Nova's `embed` primitive (issue
-  [#49](https://github.com/AutumnsGrove/nova/issues/49)); LocalDrop is its first consumer and
+  [#49](https://github.com/AutumnsGrove/nova/issues/49)); Harbor is its first consumer and
   added a [requirements comment](https://github.com/AutumnsGrove/nova/issues/49#issuecomment-6595253006).
   This is a hard dependency for semantic search, not for steps 0–7.
 - **Storage:** 1024 × 4 bytes ≈ 4 KB per item; 10k items ≈ 40 MB in RAM. Store `model`, `dims`,
@@ -178,8 +180,8 @@ The thread's `search_bookmarks()` tool was the original motivation, but Polaris 
 MCP servers today and this is explicitly not a v1 concern. No work is planned here: no MCP
 endpoint, no read-only SQLite mount, no schema coupling.
 
-If it returns: a small read-only surface owned by LocalDrop (HTTP or MCP over the tailnet), not
-Polaris opening `localdrop.db` directly.
+If it returns: a small read-only surface owned by Harbor (HTTP or MCP over the tailnet), not
+Polaris opening `harbor.db` directly.
 
 ---
 
@@ -195,7 +197,7 @@ Polaris opening `localdrop.db` directly.
 4. **Browser Rendering from a Worker on the free plan** — confirm browser hours accounting and
    whether screenshot/PDF/HTML can be captured in one session.
 5. **Nova `embed` (#49)** — confirm `pplx-embed-v1-0.6b` really returns 1024 dimensions and that
-   vectors arrive unnormalized, and that the `embed` surface lands before LocalDrop's
+   vectors arrive unnormalized, and that the `embed` surface lands before Harbor's
    semantic-search step.
 6. **PDF text extraction in Go** — pick and prove a pure-Go library on a real text PDF and a real
    scan; measure extraction quality and RSS. The scan-detection threshold depends on this.

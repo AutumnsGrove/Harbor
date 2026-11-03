@@ -1,4 +1,4 @@
-# Research thread: Raindrop, mymind, and the LocalDrop idea
+# Research thread: Raindrop, mymind, and the Harbor idea
 
 Verbatim export of the Polaris thread that started this project.
 
