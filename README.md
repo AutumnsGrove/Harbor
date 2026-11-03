@@ -13,12 +13,14 @@ library that assembles itself behind it.
 **Design principle:** the save path must never fail. Everything else is enrichment that can be
 added, rebuilt, or skipped without breaking it.
 
-**The payoff:** Polaris gets a `search_bookmarks()` MCP tool, so the assistant can search the
-library. That integration is the one thing no product can sell.
+**The point:** your library, in a file you own, that no product can take away. A Polaris
+`search_bookmarks()` tool was the original motivation; it's deferred (Polaris doesn't support MCP
+yet) and not part of v1.
 
-**Stack (settled):** Go + embedded SvelteKit in a single static binary, SQLite (`modernc`), shipped
-as a distroless Docker image on `ghcr.io`, updated by the same digest-pinned systemd watcher as
-Warbler. Python was ruled out on deployment/memory cost — the parser has to work in Go.
+**Stack (settled):** Go + embedded SvelteKit in a single static binary, SQLite (`modernc`), all AI
+through **Nova** with one OpenRouter key, shipped as a distroless Docker image on `ghcr.io`,
+updated by the same digest-pinned systemd watcher as Warbler. Python was ruled out on
+deployment/memory cost — the parser has to work in Go.
 
 ---
 
@@ -43,8 +45,8 @@ The Worker can't reach the tailnet, so the potato polls the Worker — the potat
 never the server. The Worker can only *append*; it can never read the library. That's what makes
 it safe on the public internet.
 
-- **The potato holds the irreplaceable thing** (the SQLite library + local media) → back it up
-  nightly to R2.
+- **The potato holds the irreplaceable thing** (the SQLite library + local media) → nightly
+  snapshot to R2 (30 days) plus an rsync copy to this MacBook Air.
 - **The Worker holds a durable queue and the intake copy of every remote blob** → saves survive
   potato downtime, reboots, and a dying fan. Remote images are in R2 before the potato ever sees
   them; in-app images mirror up afterwards.

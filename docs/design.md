@@ -61,6 +61,10 @@ build embedded, shipped as a small Docker image, updated by a host-side watcher.
   `//go:embed all:build` (see Warbler's `web/embed.go`). No Node at runtime; one artifact to ship.
 - **SQLite:** [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) — pure Go, no cgo, so
   cross-compiles stay trivial. Same as Polaris and Ivy.
+- **AI:** all text and vision calls go through **Nova** (`github.com/AutumnsGrove/nova`), the
+  in-house Go agent harness — `provider/openrouter` for completions, `message.Parts` for images —
+  so there is one OpenRouter key and one integration to maintain. Enrichment uses the provider
+  layer directly (a one-shot structured call), not the full agent loop.
 - **Version string:** `r<commit count>.<short sha>`, stamped with `-ldflags -X`, shown in Settings
   and in `/healthz`.
 - **Makefile** with the usual targets: `dev`, `web`, `build`, `test`, `docker`, `docker-run`,
@@ -435,14 +439,14 @@ surface.
 
 ---
 
-## 10. Polaris integration (the payoff)
+## 10. Polaris integration (deferred — not in v1)
 
-An MCP tool — `search_bookmarks(query, limit?)` — pointed at the potato's SQLite. This is the
-reason the project is worth building instead of self-hosting Karakeep: Polaris already has the
-agent harness, the MCP pattern, and the tailnet.
+The research thread kept circling a `search_bookmarks()` tool for Polaris, but Polaris does not
+support MCP servers today and this is not a v1 concern. Parked deliberately: no MCP endpoint, no
+read-only SQLite mount, no schema coupling.
 
-Possible surface: `search_bookmarks`, `save_bookmark`, `get_bookmark`, `list_recent`. **OPEN:**
-read-only vs read-write, and whether save-by-voice ("Polaris, save this") is in scope.
+If it comes back, the likely shape is a small read-only HTTP/MCP surface owned by LocalDrop, not
+Polaris reading the database directly. Until then, the library's job is to be good on its own.
 
 ---
 
@@ -463,16 +467,21 @@ read-only vs read-write, and whether save-by-voice ("Polaris, save this") is in 
   reverse case — a job row whose object is gone — is a retryable `failed` job, not data loss.
 - **Backup:** nightly `VACUUM INTO` (never `.backup` — the online-backup API livelocked against a
   live writer on this box once already; see `homelab/docs/coffer.md`), compressed and tiered from
-  day one, → R2. The database **and** the media mirror are both required for a real restore. Test
-  the restore.
+  day one, → R2 with **30 daily snapshots**, plus an `rsync` copy to the MacBook Air
+  (`100.94.193.102`) when it's online. This is the Vaultwarden pattern, reused. The database
+  **and** the media mirror are both required for a real restore. Test the restore.
 - **Pre-update snapshot:** `VACUUM INTO data/backups/pre-update.db` through the running container,
   restored automatically if the new image fails its health check.
 - **Disk guardrails:** per-file upload cap (~25 MB), a storage number in Settings, and a warning
   before the SD card gets close. The potato has room, but not infinite room.
 - **Export:** JSON + Markdown + Netscape HTML, one command. Data ownership is the point — never
   build a roach motel like mymind's one-way export.
-- **Secrets:** `SAVE_TOKEN` in a Worker secret; `OPENROUTER_API_KEY` held by the potato. Rotate
-  the token without redeploying the potato where possible.
+- **Secrets:** per-source write tokens (`telegram`, `shortcut`, `quick`) stored **hashed** in D1,
+  so one can be revoked without touching the others. `OPENROUTER_API_KEY` is held by the potato;
+  the Worker never needs it.
+- **R2 reads:** the bucket stays private. The browser gets a **short-lived presigned URL**
+  (signed by the Worker, ~5 minutes) and fetches directly from R2, so archive bytes never pass
+  through the potato.
 - **Rate limiting:** Workers rate-limit binding on `/save` (a few/min/IP). Treat as
   abuse-dampening, not a hard guarantee.
 - **Cost guardrails:** cap LLM tokens per page, cap page bytes, cap archive size; alert if D1/R2
@@ -499,10 +508,10 @@ rest adds the v1 scope without ever breaking the save path.
 | 7 | Manual tags + Smart Spaces (rules, chips, saved queries) | Browsing by theme, not just search | a weekend |
 | 8 | Brute-force vector search (hybrid ranking) | "That article about the thing" | 1 evening |
 | 9 | Archive rendering via Worker → R2 | Links keep their contents | a weekend |
-| 10 | MCP tool → Polaris | The payoff | 1 evening |
-| 11 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
+| 10 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
 
-Deliberately absent: extension, native apps, sharing, collaboration, import UI.
+Deliberately absent: extension, native apps, sharing, collaboration, import UI, and the Polaris
+MCP tool (deferred; Polaris has no MCP support today).
 
 ---
 
@@ -533,8 +542,14 @@ Deliberately absent: extension, native apps, sharing, collaboration, import UI.
   locally and mirror up. R2 is both the durable intake buffer and the off-box copy.
 - Worker-rendered archives are written straight to R2 and referenced by key; they are never pulled
   down to the potato.
-- Cheap remote models for AI; nothing runs locally.
-- Polaris MCP integration is the reason to build it.
+- All AI goes through Nova with one OpenRouter key: `provider/openrouter` for text/vision
+  completions, OpenRouter `/embeddings` for vectors. Nothing runs locally.
+- Embeddings come from OpenRouter, not Workers AI — one key, one bill, one provider.
+- The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
+  read path is built for it.
+- Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.
+- Backups: nightly `VACUUM INTO` → zstd → R2 (30 daily snapshots) + rsync to the MacBook Air;
+  media mirrors continuously to R2.
 
 **Leaning (not locked)**
 
@@ -550,7 +565,9 @@ Deliberately absent: extension, native apps, sharing, collaboration, import UI.
 
 **Still open** (see [open-questions.md](open-questions.md))
 
-- Embedding model + dimensions; hybrid ranking weights.
+- Exact OpenRouter embedding model + dimensions (1536 for `text-embedding-3-small` is the lean);
+  hybrid ranking weights.
+- Whether to add an embeddings surface to Nova (preferred) or keep a thin client in LocalDrop.
 - Highlight anchor edge cases and re-anchoring UX.
 - Smart Space rule vocabulary.
 - R2 access (presigned vs proxy) for archives.

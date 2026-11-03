@@ -96,16 +96,19 @@ HTML-only fallback (monolith) if the Worker is down?
 - **Lean:** HTML (single-file) always; screenshot for cards; PDF only on demand. Fall back to
   `monolith`-style local capture when the Worker isn't available.
 
-### C3. Embeddings: Workers AI or OpenRouter, and what dimensions?
-Which model, and what triggers re-embedding?
+### C3. ~~Embeddings: Workers AI or OpenRouter?~~ — **settled: OpenRouter**
+One key for everything. Nova's `provider/openrouter` handles text/vision completions; embeddings
+call OpenRouter's `POST /embeddings` (it supports `openai/text-embedding-3-small`,
+`qwen/qwen3-embedding-0.6b`, and multimodal embedding models).
 
-- **Why:** dimension affects the in-memory cache and re-embed cost. Store `model` + `content_hash`
-  per row so a model swap is detectable and only changed rows are re-embedded.
-- **Settled by stack:** exact brute-force cosine in Go over a process-local slice, no
-  `sqlite-vec` (cgo would break the static cross-compiled binary; Polaris set this precedent and
-  documented ~50k vectors as the revisit point).
-- **Lean:** Workers AI (free tier) for embeddings; cheap OpenRouter model for classification.
-  **OPEN:** exact embedding model + dimension.
+- **Lean:** `openai/text-embedding-3-small`, **1536 dimensions**, chosen for cost/quality at this
+  scale. Store `model` + `content_hash` per row so a swap is detectable and only changed rows are
+  re-embedded.
+- **OPEN:** confirm the model + dimension against OpenRouter's current list before writing the
+  table, and **whether the embeddings client lives in Nova or LocalDrop**. Nova has no embeddings
+  surface today (only providers that stream chat completions), so the clean answer is to add a
+  small `provider/embeddings/openrouter` to Nova; the fallback is a thin client inside LocalDrop
+  using the same key.
 
 ### C4. Failed jobs: what does the user see?
 Retry N times, then park as `failed`; surface failures in the UI, or silently drop after logging?
@@ -150,22 +153,16 @@ Not one of the chosen doors. It can be added later as another Worker route writi
 
 ## E. Security & operations
 
-### E1. Auth model for the write endpoint?
-Single bearer token in a Shortcut/bookmarklet/Telegram config? Per-source tokens? Signed URLs?
+### E1. ~~Auth model for the write endpoint?~~ — **settled: per-source tokens**
+One bearer token per source (`telegram`, `shortcut`, `quick`), stored **hashed** in D1, revocable
+individually. The token also identifies the source, so the item records which door it came from.
 
-- **Why:** a leaked token can only append, but per-source tokens make revocation sane.
-- **Lean:** one bearer token per source (`shortcut`, `floccus`, `telegram`), stored as Worker
-  secrets/rows; revoke one without breaking the others.
-
-### E2. Backup destination and retention.
-R2 nightly snapshot with 30-day retention? Litestream-style continuous? Local copy on the NAS/mini
-too?
-
-- **Why:** the database is irreplaceable; remote blobs already have a copy in R2, but in-app
-  images exist only on the SD card until the mirror runs.
-- **Lean:** nightly `VACUUM INTO` → R2 (30 days) **and** a copy to `mini` if it's always-on; the
-  media mirror is continuous/retrying rather than nightly. Restore drill documented and actually
-  run once — restoring the DB without the media is not a restore.
+### E2. ~~Backup destination and retention.~~ — **settled**
+Nightly `VACUUM INTO` → zstd → **R2 with 30 daily snapshots**, plus an `rsync` copy to the
+**MacBook Air** (`100.94.193.102`, this machine) when it's online — not the mini. This is
+Vaultwarden's existing backup pattern, reused. The media mirror is continuous and retrying, not
+nightly. Restore drill documented and actually run once; restoring the DB without the media is not
+a restore.
 
 ### E3. Export format and commitment.
 JSON + Markdown + Netscape HTML, one CLI command? Guarantee it never becomes a roach motel.
@@ -174,13 +171,9 @@ JSON + Markdown + Netscape HTML, one CLI command? Guarantee it never becomes a r
   tale.
 - **Lean:** `localsave export --format {json,md,html}` from day one, tested in CI with a fixture.
 
-### E4. How does the browser reach archived files in R2?
-Public bucket, presigned URLs, or proxied through the Worker / potato?
-
-- **Why:** a public bucket makes every archive guessable and leaks the library; presigned URLs need
-  the Worker to sign; proxying through the potato burns bandwidth it doesn't have.
-- **Lean:** private R2 bucket + short-lived presigned URLs signed by the Worker, fetched by the
-  potato on demand and cached briefly in memory. Confirm before building the archive UI.
+### E4. ~~How does the browser reach archived files in R2?~~ — **settled: presigned URLs**
+Private bucket. The potato asks the Worker for a short-lived signed URL (~5 minutes) and the
+browser fetches directly from R2; archive bytes never pass through the potato.
 
 ### E5. ~~Public sharing — confirm it's out.~~ — **settled: skip entirely**
 No public read path exists. The Worker stays write-only. Revisit only if sharing becomes a real
@@ -203,36 +196,20 @@ a D1 row?
 
 - **Why:** the token is append-only, but append-only storage can still be used as free file
   hosting. R2 free tier is 10 GB; abuse is a bill, not a data breach.
-- **Lean:** 25 MB per-object cap, content-type allowlist (images/PDF/text), rate limit per token
-  and per IP, `incoming/` prefix with a 7-day orphan sweep, and an alert at a storage threshold.
-  **OPEN:** whether uploads should be signed per-source rather than one shared bearer token.
+- **Lean:** 25 MB per-object cap, content-type allowlist (images/PDF/text), per-source token rate
+  limit and per-IP limit, `incoming/` prefix with a 7-day orphan sweep, and an alert at a storage
+  threshold. Per-source tokens are settled (E1), so abuse is at least attributable and revocable.
 
 ---
 
-## F. Polaris integration
+## F. Polaris integration — **parked (not v1)**
 
-### F1. How does Polaris reach the library?
-Direct read of the SQLite file (same host, read-only), or an HTTP API on the potato?
+The thread's `search_bookmarks()` tool was the original motivation, but Polaris does not support
+MCP servers today and this is explicitly not a v1 concern. No work is planned here: no MCP
+endpoint, no read-only SQLite mount, no schema coupling.
 
-- **Why:** direct file reads are simplest but couple the schemas and risk locking; HTTP is clean
-  but needs a service and auth. Polaris runs in Docker on the same potato.
-- **Lean:** small read-only HTTP API (`GET /api/search?q=`) mounted read-only into Polaris's
-  network; keeps the schema private and survives SQLite/WAL quirks. Alternatively a read-only bind
-  mount of the DB if WAL mode allows it safely.
-
-### F2. Which MCP tools, and read-only or read-write?
-`search_bookmarks` only? Add `save_bookmark`, `get_bookmark`, `list_recent`?
-
-- **Why:** read-write means Polaris can save things you mention in chat — powerful, but a new
-  write path with its own trust questions.
-- **Lean:** `search_bookmarks` + `get_bookmark` read-only in v1; `save_bookmark` right after
-  (it's the same `POST /save`).
-
-### F3. Does "Polaris, save this" matter?
-Voice/chat-initiated saves through the assistant, vs only the dedicated front doors.
-
-- **Why:** it's the most "mymind" gesture of all, and Polaris is already the thing you talk to.
-- **Lean:** yes, but only after `save_bookmark` exists; no special-casing needed.
+If it returns: a small read-only surface owned by LocalDrop (HTTP or MCP over the tailnet), not
+Polaris opening `localdrop.db` directly.
 
 ---
 
@@ -247,8 +224,9 @@ Voice/chat-initiated saves through the assistant, vs only the dedicated front do
    library size (10k vectors × 768 dims), and confirm the startup load time is acceptable.
 4. **Browser Rendering from a Worker on the free plan** — confirm browser hours accounting and
    whether screenshot/PDF/HTML can be captured in one session.
-5. **Polaris read path** — read-only bind mount of a WAL-mode DB from another container: safe, or
-   does it need the HTTP API?
+5. **OpenRouter embeddings + Nova** — confirm the exact embedding model/dimension against the live
+   model list, and decide whether to add an embeddings surface to Nova or keep a thin client in
+   LocalDrop.
 
 ---
 
