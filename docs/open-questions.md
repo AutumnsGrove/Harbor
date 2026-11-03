@@ -10,30 +10,19 @@ Format: **question → why it matters → current lean.** Quoted answers get fol
 
 ## A. Product shape
 
-### A1. What is the minimum item type set for v1?
-Links only? Links + freeform notes? Links + notes + images?
+### A1. ~~What is the minimum item type set for v1?~~ — **settled: links, notes, and images**
+Images land on the potato's disk first (there is room), content-addressed by SHA-256; R2 is an
+asynchronous mirror. Vision + OCR are part of the image pipeline. See design §6–7.
 
-- **Why:** the `items` schema, the parser, and the UI all fork on this. Images imply uploads,
-  storage, and vision models — a different cost profile than URLs.
-- **Lean:** links + notes in v1 (a note is a row with no URL). Images are v1.5 via the Telegram
-  bot, reusing the same row with a blob in R2.
+### A2. ~~What does "it organizes itself" mean, concretely?~~ — **settled: all of it**
+AI `kind`, AI tags, **optional manual tags**, and **Smart Spaces** as a first-class navigation
+surface. The schema now has `tags` with per-link `source` (`ai|manual`), plus `spaces` /
+`space_items`. The remaining questions are the rule vocabulary for Spaces (H3) and tag
+merging/synonyms.
 
-### A2. What does "it organizes itself" mean, concretely?
-A fixed `kind` taxonomy + AI tags? Or auto-assembled "spaces" (mymind's Smart Spaces) as a
-first-class feature?
-
-- **Why:** tags are a weekend; spaces are a query engine plus a UI concept. Choosing spaces early
-  changes the schema (saved queries, membership) and the nav.
-- **Lean:** fixed kind + AI tags in v1; tags are the only organizing axis. "Spaces" = saved
-  searches later, once there's enough library to want them.
-
-### A3. Do you actually want to read articles in this thing?
-Reader view, highlights, annotations, PDF/EPUB reading — or is this purely "save, find, open in
-the original tab"?
-
-- **Why:** reader mode is cheap (Readability/trafilatura), but highlights + annotations are a
-  second product surface (selection UI, anchoring, sync).
-- **Lean:** clean reader view in v1 (you already extract the text); highlights in v1.5.
+### A3. ~~Do you actually want to read articles in this thing?~~ — **settled: reader + highlights + annotations**
+Full reading surface in v1: extracted article view, select-to-highlight, an annotation on each
+highlight, and highlights listed on the item. The hard part is anchoring (H2), not the UI.
 
 ### A4. Is the UI one screen forever?
 Grid + search + pending cards, or do you want the mymind-style "Top of Mind" / serendipity
@@ -78,7 +67,8 @@ D1 schema, and the shape of the poll API (`GET /jobs?after=` vs `POST /jobs/clai
 - **Why:** the poll/claim protocol determines retry semantics and whether two potato instances
   could double-process. Plain module + a few routes is probably enough.
 - **Lean:** Hono for routing ergonomics; claim-by-update (one worker, but correctness is free);
-  `GET /jobs` returns queued rows, `POST /jobs/:id/{done,failed}` closes them.
+  `GET /jobs` returns queued rows including `r2_key` for blobs, `POST /jobs/:id/{done,failed}`
+  closes them. `/upload` streams to `incoming/` and creates the row after the object exists.
 
 ### B5. ~~Where does the SQLite file live, and how is it deployed?~~ — **settled: Compose + host bind mount**
 `~/LocalDrop` on the potato, `docker-compose.yml` at the repo root, `./data:/data`, `./update-signal`
@@ -135,15 +125,10 @@ Retry N times, then park as `failed`; surface failures in the UI, or silently dr
 
 ## D. Front doors
 
-### D1. Is floccus actually viable, and how?
-floccus syncs browser bookmarks to **WebDAV, Nextcloud Bookmarks, Google Drive, or a local file**
-— it does *not* POST arbitrary JSON to an HTTP endpoint. So "floccus → your API" needs either a
-tiny WebDAV surface (on the Worker or potato) or a different bridge.
-
-- **Why:** this was the "sneaky-best" save path in the thread, and the feasibility detail matters.
-- **Lean:** confirm exact floccus target support; if generic POST isn't possible, expose a minimal
-  WebDAV `PUT` on the potato (tailnet) or use a browser-side bookmark sync to the Worker later.
-  **Needs a verification spike before committing to it.**
+### D1. ~~Is floccus viable?~~ — **dropped**
+It targets WebDAV/Nextcloud Bookmarks/Google Drive/local files, not arbitrary JSON. The chosen
+front doors are in-app, Telegram, iOS Shortcut / PWA share, and the quick-save page — no WebDAV
+surface to maintain.
 
 ### D2. Telegram bot: new bot or extend Mira?
 Where does the webhook live (Worker), and does it accept photos/files or just links/text?
@@ -153,17 +138,13 @@ Where does the webhook live (Worker), and does it accept photos/files or just li
 - **Lean:** a dedicated bot + Worker webhook; accept text/URL/photo/forwarded messages; reuse the
   same `POST /save` path internally.
 
-### D3. Is the iOS Shortcut worth it if the PWA share target exists?
-- **Why:** Shortcuts work in every app on iOS; a PWA share target covers Android more cleanly.
-  Both hit the same Worker endpoint.
-- **Lean:** yes, publish a Shortcut recipe in the README; it's ~10 minutes once `/save` exists.
+### D3. ~~Is the iOS Shortcut worth it if the PWA share target exists?~~ — **settled: both**
+Publish a Shortcut recipe and a PWA manifest `share_target`; both hit the same Worker endpoint.
+Remaining detail (H4): what the Shortcut sends for a page with no metadata beyond the URL.
 
-### D4. Email-to-save in v1?
-Cloudflare Email Routing → Worker.
-
-- **Why:** newsletters and receipts are exactly the things you'd never bother saving otherwise;
-  but it's more Worker surface and another failure path.
-- **Lean:** v1.5, after the core loop is trusted.
+### D4. ~~Email-to-save in v1?~~ — **dropped**
+Not one of the chosen doors. It can be added later as another Worker route writing to the same
+`jobs` table without touching the rest of the system.
 
 ---
 
@@ -180,9 +161,11 @@ Single bearer token in a Shortcut/bookmarklet/Telegram config? Per-source tokens
 R2 nightly snapshot with 30-day retention? Litestream-style continuous? Local copy on the NAS/mini
 too?
 
-- **Why:** the potato's SD card is the single point of failure for the only irreplaceable data.
-- **Lean:** nightly `VACUUM INTO` → R2 (30 days) **and** a copy to `mini` if it's always-on.
-  Restore drill documented and actually run once.
+- **Why:** the database is irreplaceable; remote blobs already have a copy in R2, but in-app
+  images exist only on the SD card until the mirror runs.
+- **Lean:** nightly `VACUUM INTO` → R2 (30 days) **and** a copy to `mini` if it's always-on; the
+  media mirror is continuous/retrying rather than nightly. Restore drill documented and actually
+  run once — restoring the DB without the media is not a restore.
 
 ### E3. Export format and commitment.
 JSON + Markdown + Netscape HTML, one CLI command? Guarantee it never becomes a roach motel.
@@ -199,11 +182,9 @@ Public bucket, presigned URLs, or proxied through the Worker / potato?
 - **Lean:** private R2 bucket + short-lived presigned URLs signed by the Worker, fetched by the
   potato on demand and cached briefly in memory. Confirm before building the archive UI.
 
-### E5. Public sharing — confirm it's out.
-- **Why:** the tailnet-only UI makes it impossible without a second read path; it's also the main
-  thing that would force auth/multi-user.
-- **Lean:** skip entirely. Revisit with a Worker-rendered read-only snapshot only if you ever
-  actually need it.
+### E5. ~~Public sharing — confirm it's out.~~ — **settled: skip entirely**
+No public read path exists. The Worker stays write-only. Revisit only if sharing becomes a real
+need, with a narrow Worker-rendered snapshot rather than exposing the UI.
 
 ### E6. Cost/usage guardrails.
 Max page bytes, max LLM tokens, max archive size, rate limit on `/save`, and what happens when a
@@ -213,6 +194,18 @@ free tier is exceeded?
   bill or an OOM.
 - **Lean:** 5 MB page cap, 8k input tokens, 20 MB archive cap, 10 saves/min/IP; queue pauses
   instead of erroring.
+
+---
+
+### E7. R2 upload abuse and orphan cleanup
+What stops a leaked write token from filling the bucket, and what cleans up objects that never got
+a D1 row?
+
+- **Why:** the token is append-only, but append-only storage can still be used as free file
+  hosting. R2 free tier is 10 GB; abuse is a bill, not a data breach.
+- **Lean:** 25 MB per-object cap, content-type allowlist (images/PDF/text), rate limit per token
+  and per IP, `incoming/` prefix with a 7-day orphan sweep, and an alert at a storage threshold.
+  **OPEN:** whether uploads should be signed per-source rather than one shared bearer token.
 
 ---
 
@@ -245,7 +238,9 @@ Voice/chat-initiated saves through the assistant, vs only the dedicated front do
 
 ## G. Things to verify with a spike (not decisions)
 
-1. **floccus target support** — can it POST to a custom endpoint, or only WebDAV/Nextcloud?
+1. **Worker streaming upload** — confirm `env.BUCKET.put(key, request.body)` handles a 25 MB
+   body on the free plan without buffering or hitting CPU/time limits, and that R2-then-D1 ordering
+   leaves a recoverable state when the second step fails.
 2. **Worker → D1 queue claim semantics** — confirm the atomic update pattern works with D1's
    consistency model, and what happens on duplicate delivery.
 3. **Brute-force vector cache** — measure RSS and search latency on the potato at a realistic
@@ -254,3 +249,55 @@ Voice/chat-initiated saves through the assistant, vs only the dedicated front do
    whether screenshot/PDF/HTML can be captured in one session.
 5. **Polaris read path** — read-only bind mount of a WAL-mode DB from another container: safe, or
    does it need the HTTP API?
+
+---
+
+## H. Opened by the v1 scope answers
+
+### H1. Image pipeline details
+Which vision model, what exactly is extracted (OCR + description + tags + dominant colours?), and
+what are the size/dimension caps?
+
+- **Why:** vision calls cost more than text calls and OCR quality drives searchability; caps
+  protect the SD card.
+- **Lean:** one cheap vision-capable model call per image returning
+  `{kind, tags, ocr_text, description, colors}`; store a max-1600px thumbnail; original capped at
+  25 MB; dedupe by SHA-256 on the potato after pull, before any model call. **OPEN:** whether
+  thumbnails are generated on the potato (Go `image`) or by the Worker at intake — on the potato
+  keeps the Worker tiny and avoids a second image pipeline.
+
+### H2. Highlight anchoring
+Text-quote selector (quote + prefix/suffix + ordinal) vs stored DOM offsets vs a rendered plain-text
+index?
+
+- **Why:** articles change; a highlight that silently drifts to the wrong sentence is worse than
+  no highlight. This is the riskiest part of the reading feature.
+- **Lean:** text-quote selector stored in `anchor_json`, re-anchored against the current extracted
+  text; if it fails, show the highlight detached ("couldn't re-anchor") rather than guessing.
+  Store the exact extracted text version the highlight was made against.
+
+### H3. Smart Space rule vocabulary
+What can a Space be defined by — tags, kind, date range, source, text query, similarity to an
+item? Who creates them: you, the AI, or both?
+
+- **Why:** the rule schema is user-facing and hard to change later without migrating saved spaces.
+- **Lean:** rules = `{tags_all, tags_any, kinds, sources, after, before, text, similar_to_item}`;
+  `auto` spaces evaluate live; `saved` spaces are explicit queries. AI may *suggest* a Space, but
+  you name and keep it.
+
+### H4. What the in-app composer can save
+URL, note, and image uploads — but does it also support pasted rich text, quotes, or multiple
+images in one save?
+
+- **Why:** it is the one door you control completely; scope creep here is easy.
+- **Lean:** URL + note + up to N images per save (N=4), one `items` row. Quotes are just a note
+  with `kind=quote`.
+
+### H5. Telegram media handling
+Photos only, or documents/PDFs/albums too? What becomes the title when a photo has no caption?
+
+- **Why:** Telegram albums arrive as separate updates; handling them properly needs grouping.
+- **Lean:** photos, documents, and text; album grouping by `media_group_id`; title falls back to
+  the AI description, then the filename.
+
+---

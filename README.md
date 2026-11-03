@@ -29,8 +29,8 @@ Warbler. Python was ruled out on deployment/memory cost — the parser has to wo
                  │  HTTPS, always works
                  ▼
      Cloudflare Worker  ── public, write-only
-     POST /save → D1 queue
-     Browser Rendering, R2 archives, Workers AI embeddings
+     POST /save + /upload → D1 queue + R2 intake
+     Browser Rendering, Workers AI embeddings
                  ▲
                  │  potato polls outbound (no tunnel, no open ports)
                  ▼
@@ -43,9 +43,11 @@ The Worker can't reach the tailnet, so the potato polls the Worker — the potat
 never the server. The Worker can only *append*; it can never read the library. That's what makes
 it safe on the public internet.
 
-- **The potato holds the irreplaceable thing** (the SQLite library) → back it up nightly to R2.
-- **The Worker holds a durable queue** you could lose without caring → saves survive potato
-  downtime, reboots, and a dying fan.
+- **The potato holds the irreplaceable thing** (the SQLite library + local media) → back it up
+  nightly to R2.
+- **The Worker holds a durable queue and the intake copy of every remote blob** → saves survive
+  potato downtime, reboots, and a dying fan. Remote images are in R2 before the potato ever sees
+  them; in-app images mirror up afterwards.
 - **Heavy work goes to the edge** (headless Chromium, embeddings, LLM calls) because the potato
   is already running her-go, SearXNG, AdGuard, Unbound, and Polaris.
 
