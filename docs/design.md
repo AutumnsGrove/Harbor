@@ -27,6 +27,11 @@ UI, multi-user, public profiles. (See §11 for why each is deferred.)
 - **Read:** reader view, **highlights, and annotations on highlights**.
 - **Front doors:** in-app save composer, Telegram bot, iOS Shortcut / PWA share target, tailnet
   quick-save page.
+- **Import:** Raindrop CSV and Netscape HTML, so the switch from the paid service is real.
+- **Read later:** an optional hand-curated collection, not a read/unread state. The library stays
+  a library; a queue product is a later version if it's ever wanted.
+- **Editing:** Markdown notes, and every field (title, note, tags, kind, Read later) editable.
+- **Delete:** Recently deleted for 30 days, then purge.
 - **Not:** browser extension, native app, public sharing, collaboration, multi-user.
 
 This is bigger than the original "weekend MVP". The build order phases it so save + search is
@@ -256,6 +261,28 @@ Considered and dropped: floccus (it targets WebDAV/Nextcloud, not arbitrary JSON
 bookmarklet, email-to-save, and a browser extension (Manifest V3 + store review + breaking on
 Chrome updates is the single biggest reason not to build this yourself).
 
+### Re-saving is a merge, not a duplicate
+
+One canonical item per canonical URL. Saving an existing URL:
+
+- appends the new note (separated, timestamped), unions tags, keeps Read later state,
+- refreshes metadata, archive, and screenshot,
+- bumps `updated_at` so the item resurfaces.
+
+Canonicalisation lowercases the host, strips the fragment and common tracking parameters
+(`utm_*`, `fbclid`), and keeps the rest of the query. A manual **Refresh** action on an item runs
+the same path without adding a note. `items.url` carries a partial unique index.
+
+### Import
+
+`Settings → Import` (and a CLI for big files) accepts **Raindrop CSV** and **Netscape HTML**:
+
+- CSV: title, note, excerpt, URL, tags, created date, cover, and highlights are preserved;
+  Raindrop collections become **manual Spaces**.
+- HTML: URL, title, and folder; folders become manual Spaces.
+- Import is idempotent by canonical URL and merges like a re-save, so running it twice is safe.
+- Imported items enter the normal enrichment queue — no special pipeline.
+
 ### The pending window
 
 Remote doors have a gap between "save accepted" and "item in the library" (poll interval, or
@@ -339,11 +366,15 @@ CREATE TABLE items (
   summary       TEXT NOT NULL DEFAULT '',
   content_text  TEXT NOT NULL DEFAULT '',   -- extracted text, feeds FTS5
   og_json       TEXT NOT NULL DEFAULT '{}', -- cover, description, site, author, published
-  source        TEXT NOT NULL DEFAULT 'app', -- app|telegram|shortcut|quick
+  source        TEXT NOT NULL DEFAULT 'app', -- app|telegram|shortcut|quick|import
+  import_ref    TEXT NOT NULL DEFAULT '',    -- Raindrop id / bookmark path, for re-import
   state         TEXT NOT NULL DEFAULT 'queued', -- queued|enriching|ready|failed
+  deleted_at    DATETIME,                    -- NULL = live; purged after 30 days
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX items_by_url ON items(url)
+  WHERE url IS NOT NULL AND url <> '';
 
 CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
 CREATE TABLE item_tags (
@@ -381,7 +412,8 @@ CREATE TABLE highlights (
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Smart Spaces: 'auto' is rule-driven, 'saved' is an explicit query.
+-- Smart Spaces: 'auto' is rule-driven, 'saved' is an explicit query,
+-- 'manual' is hand-curated (Read later, imported Raindrop collections).
 CREATE TABLE spaces (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,
@@ -453,14 +485,17 @@ Five surfaces, no folders and no settings maze:
   grid. Cards show media, kind, title, tags.
 - **Save composer** — URL, note, image upload. Reachable from Home and from the quick-save page on
   the phone. Same endpoint shape as the remote doors, written locally.
-- **Item** — media, AI + manual tags, summary, source, archive link, related items.
+- **Item** — media, AI + manual tags, Markdown note (rendered with a preview toggle), summary,
+  source, archive link, related items. Every field editable; **Delete** moves it to Recently
+  deleted. **Refresh** re-runs metadata/archive.
 - **Reader** — extracted article view with select-to-highlight and an annotation field. Highlights
   are also listed on the item.
 - **Settings** — version, update check/apply (Warbler pattern), export, storage/mirror status.
 
 Smart Spaces appear as a horizontal row of chips below search; `auto` spaces evaluate live from
-their rule, `saved` ones open a query. Masonry columns are responsive: 1 on phone, 2–4 on desktop.
-Colour/brand/visual search is a later addition, not a v1 surface.
+their rule, `saved` ones open a query, `manual` ones (Read later, imported collections) open their
+membership. Masonry columns are responsive: 1 on phone, 2–4 on desktop. Colour/brand/visual search
+is a later addition, not a v1 surface.
 
 ---
 
@@ -497,6 +532,10 @@ Polaris reading the database directly. Until then, the library's job is to be go
   **and** the media mirror are both required for a real restore. Test the restore.
 - **Pre-update snapshot:** `VACUUM INTO data/backups/pre-update.db` through the running container,
   restored automatically if the new image fails its health check.
+- **Deletion:** `deleted_at` is a soft delete; the UI exposes **Recently deleted** for 30 days.
+  The purge task then deletes the row (cascading media/highlights/tags) and removes local media
+  plus the R2 keys — the Worker exposes a token-gated purge route so the potato never needs R2
+  credentials for ordinary deletes. A missed R2 delete is caught by the orphan sweep.
 - **Disk guardrails:** per-file upload cap (~25 MB), a storage number in Settings, and a warning
   before the SD card gets close. The potato has room, but not infinite room.
 - **Export:** one command writes **JSON, Markdown, and Netscape HTML**, plus a `media/` folder and
@@ -529,12 +568,13 @@ rest adds the v1 scope without ever breaking the save path.
 | 2 | Potato: poll loop, schema, in-app save composer | Saves land; links + notes usable | 1 evening |
 | 3 | Fetch + extract + classify + FTS5 | Library organizes itself and is searchable | a weekend |
 | 4 | Telegram bot, Shortcut/PWA share, quick-save page | The gesture works from every device | 1 evening each |
-| 5 | Images: Worker intake → R2, potato pull + hash, content-addressed local store, vision/OCR, thumbnails, mirror-up | Photos and screenshots save and search | a weekend |
-| 6 | Reader view + highlights + annotations | Reading happens in the app | a weekend |
-| 7 | Manual tags + Smart Spaces (rules, chips, saved queries) | Browsing by theme, not just search | a weekend |
-| 8 | Brute-force vector search (hybrid ranking) — needs Nova's `embed` primitive (#49) | "That article about the thing" | 1 evening |
-| 9 | Archive rendering via Worker → R2 | Links keep their contents | a weekend |
-| 10 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
+| 5 | Raindrop CSV + Netscape HTML import | The old library moves in; the switch is real | a weekend |
+| 6 | Images: Worker intake → R2, potato pull + hash, content-addressed local store, vision/OCR, thumbnails, mirror-up | Photos and screenshots save and search | a weekend |
+| 7 | Reader view + highlights + annotations | Reading happens in the app | a weekend |
+| 8 | Manual tags + Smart Spaces (rules, chips, saved queries, Read later) | Browsing by theme, not just search | a weekend |
+| 9 | Brute-force vector search (hybrid ranking) — needs Nova's `embed` primitive (#49) | "That article about the thing" | 1 evening |
+| 10 | Archive rendering via Worker → R2 | Links keep their contents | a weekend |
+| 11 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
 
 Deliberately absent: extension, native apps, sharing, collaboration, import UI, and the Polaris
 MCP tool (deferred; Polaris has no MCP support today).
@@ -583,6 +623,11 @@ MCP tool (deferred; Polaris has no MCP support today).
 - Telegram is a dedicated bot; it accepts links, text, photos, documents, and albums.
 - Failed jobs retry 3× over ~an hour, then surface in a "needs attention" strip.
 - Export is JSON + Markdown + Netscape HTML + a media manifest and files.
+- One canonical item per URL; re-saving **merges** (append note, union tags, refresh archive).
+- v1 imports **Raindrop CSV + Netscape HTML**; collections/folders become manual Spaces.
+- Read later is an optional **manual collection**, not a read/unread state or queue.
+- Deleting is soft for **30 days** (Recently deleted), then DB + media + R2 are purged together.
+- Notes are **Markdown**; title, note, tags, kind, and Read later are all editable.
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
   read path is built for it.
 - Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.
@@ -594,17 +639,11 @@ MCP tool (deferred; Polaris has no MCP support today).
 - Go for the potato service; SvelteKit embedded (Python loses on deployment and memory).
 - Port **8895** (8893 Cairn, 8894 Coffer already reserved); confirm free at install.
 - Notes and links share one `items` table; images are `items` with `media` rows.
-- Smart Spaces evaluate live from stored rules (`auto`), plus explicit saved queries (`saved`);
-  `space_items` exists only for manual pinning.
+- Smart Spaces evaluate live from stored rules (`auto`), plus explicit saved queries (`saved`) and
+  hand-curated `manual` collections; `space_items` is the membership table.
 - Highlights anchor with a text-quote selector (quote + prefix/suffix + ordinal + text hash), not
   DOM paths, so they can re-anchor after re-extraction.
-- Archiving is HTML + screenshot on every save, PDF on demand.
-- Failed jobs retry 3× over ~an hour, then surface in a "needs attention" strip.
-- Export is JSON + Markdown + Netscape HTML + a media manifest and files.
-- Backups: nightly `VACUUM INTO` → zstd → R2 (30 daily snapshots) + rsync to the MacBook Air;
-  media mirrors continuously to R2.
 - R2 stays private; the browser gets short-lived presigned URLs.
-- Per-source write tokens, hashed in D1, revocable individually.
 
 **Still open**
 

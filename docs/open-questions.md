@@ -242,3 +242,33 @@ Photos, documents, text, and albums (grouped by `media_group_id`). With no capti
 back to the AI description, then the filename.
 
 ---
+
+---
+
+## I. Adoption & lifecycle
+
+### I1. ~~Import the existing library?~~ — **settled: Raindrop CSV + Netscape HTML**
+Both importers in v1. CSV preserves title, note, excerpt, URL, tags, created date, cover, and
+highlights; collections become **manual Spaces**. HTML folders become manual Spaces. Import is
+idempotent by canonical URL and merges like a re-save. Available in Settings and as a CLI for big
+files.
+
+### I2. ~~Read state / reading queue?~~ — **settled: no read state**
+A library first. **Read later** is an optional hand-curated **manual Space**, not an unread/read
+boolean and not a queue. A real queue (progress, reminders, daily picks) is a later version if
+it's ever wanted.
+
+### I3. ~~Re-saving a duplicate URL?~~ — **settled: merge + refresh**
+One canonical item per URL. Append the new note, union tags, keep Read later membership, refresh
+metadata/archive/screenshot, bump `updated_at`. Canonicalisation drops fragments and tracking
+parameters. A manual Refresh does the same without adding a note.
+
+### I4. ~~Deleting an item?~~ — **settled: Recently deleted, 30 days**
+Soft delete with an undo window, then purge the DB row (cascading media/highlights/tags), local
+files, and R2 keys together. The Worker owns a token-gated purge route so the potato doesn't hold
+R2 credentials for ordinary deletes.
+
+### I5. ~~How editable is an item?~~ — **settled: Markdown, edit everything**
+Title, note, tags, kind, and Read later are all editable. Notes render Markdown with a preview
+toggle (sanitised server-side). The library is yours; the model's choice of kind is a default, not
+a verdict.
