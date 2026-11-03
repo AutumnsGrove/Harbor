@@ -23,7 +23,8 @@ UI, multi-user, public profiles. (See §11 for why each is deferred.)
   potato's disk first; remote saves (Telegram, Shortcut) are uploaded to R2 by the Worker at
   ingestion, then pulled down to the potato. Either way the potato keeps a local copy and R2 keeps
   a durable copy.
-- **Organize:** AI `kind` + AI tags + **optional manual tags** + **Smart Spaces**.
+- **Organize:** AI `kind` (12 kinds) + AI tags + **optional manual tags** + **Smart Spaces**,
+  with a global tag manager and multi-select bulk actions.
 - **Read:** reader view, **highlights, and annotations on highlights**.
 - **Front doors:** in-app save composer, Telegram bot, iOS Shortcut / PWA share target, tailnet
   quick-save page.
@@ -312,9 +313,10 @@ Per job:
    **screenshot** (used as the card); **PDF is on demand**. Bytes go to R2 and the potato stores
    the R2 key. Rendered archives are the one blob type that skips local storage.
 4. **Classify** through Nova's `decide` with Jev (`typesafe/jev-1.14`): a `choice` question over
-   the kind taxonomy (article / product / book / recipe / video / tweet / note / image), plus
-   optional `noul` checks (`is_paywalled`, `is_video`). Typed answers with probabilities, no text
-   to parse.
+   the 12 kinds — **article, product, book, recipe, video, tweet, note, image, paper, podcast,
+   place, movie** — plus optional `noul` checks (`is_paywalled`, `is_video`). `article` is the
+   catch-all for written pages and unclassifiable links (including code repos); the model is never
+   allowed to answer `unknown`. Typed answers with probabilities, no text to parse.
 5. **Tag + summarize** with `deepseek/deepseek-v4.1-flash-1017`: 3–6 tags, a two-sentence summary,
    a cleaned title. Free-form text, strict JSON schema, prompt version stored.
 6. **Embed** with Nova's `embed` surface and `perplexity/pplx-embed-v1-0.6b` (1024 dims). The
@@ -341,6 +343,18 @@ they travel depends on where they started:
 
 The same content-addressed layout means an image that arrives twice (once from Telegram, once
 pasted into the app) is stored once, whichever door got there first.
+
+**Document jobs** (PDFs, uploaded files, `application/pdf` URLs):
+
+1. **Extract the text layer locally** with a pure-Go PDF library; that text feeds FTS5 and the
+   embedding.
+2. **Detect a scan:** if the text layer is empty or tiny relative to the page count, render the
+   first ~10 pages and OCR them with `deepseek/deepseek-v4.1-flash-1017` (image input). Cap the
+   pages per document so a 400-page scan cannot run up a bill.
+3. **Store the file** content-addressed like any other blob; PDF archives stay on demand.
+4. **Write** the media row plus the extracted text, mark the job done.
+
+The cap and the text-vs-scan threshold are config values, not hard-coded guesses.
 
 Failures: retry **3× with backoff over ~an hour**, then park the job as `failed` with the error
 kept. The UI shows a dismissible **"needs attention"** strip with one-tap retry; failures are never
@@ -377,6 +391,9 @@ CREATE UNIQUE INDEX items_by_url ON items(url)
   WHERE url IS NOT NULL AND url <> '';
 
 CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);
+-- A merge leaves the old spelling behind as an alias, so a re-import or a
+-- future AI tag maps back to the canonical tag instead of recreating it.
+CREATE TABLE tag_aliases (alias TEXT PRIMARY KEY, tag_id INTEGER NOT NULL);
 CREATE TABLE item_tags (
   item_id TEXT NOT NULL,
   tag_id  INTEGER NOT NULL,
@@ -469,8 +486,10 @@ model swap detectable and re-embeddable, and the brute-force cache reads whateve
   normalize on write (or divide during cosine) — never use inner product on them. Vectors live in
   `item_embeddings.vec` as a `BLOB`; SQLite stays the source of truth, the in-memory slice is a
   cache with a rebuild path.
-- Combine keyword + semantic into one ranked list (reciprocal rank fusion or a weighted blend).
-  **OPEN:** ranking weights.
+- Combine keyword + semantic into one ranked list with reciprocal rank fusion. Ranking weights
+  are tunable and are the one thing left to fit against real data.
+- **Instant search:** results update as you type (~200 ms debounce, minimum 2 characters), with
+  filter chips for kind, tag, source, and date. There is no separate search page or submit step.
 - Later, maybe: colour/brand/visual search (mymind's "Same Vibe" is cosine similarity over
   embeddings you're already generating).
 
@@ -480,9 +499,11 @@ model swap detectable and re-embeddable, and the brute-force cache reads whateve
 
 Five surfaces, no folders and no settings maze:
 
-- **Home** — search box, Smart Space chips, pending cards, then the recent grid. **Masonry layout,
-  explicitly** — variable-height cards (covers, screenshots, images, note text), not a uniform
-  grid. Cards show media, kind, title, tags.
+- **Home** — search box (instant, hybrid, filter chips), Smart Space chips, pending cards, then
+  the recent grid. **Masonry layout, explicitly** — variable-height cards (covers, screenshots,
+  images, note text), not a uniform grid. Cards show media, kind, title, tags.
+- **Multi-select** — long-press or the select button enters a bulk bar: Delete, Tag, Add to Space,
+  Refresh. Built for cleaning up an import.
 - **Save composer** — URL, note, image upload. Reachable from Home and from the quick-save page on
   the phone. Same endpoint shape as the remote doors, written locally.
 - **Item** — media, AI + manual tags, Markdown note (rendered with a preview toggle), summary,
@@ -490,7 +511,8 @@ Five surfaces, no folders and no settings maze:
   deleted. **Refresh** re-runs metadata/archive.
 - **Reader** — extracted article view with select-to-highlight and an annotation field. Highlights
   are also listed on the item.
-- **Settings** — version, update check/apply (Warbler pattern), export, storage/mirror status.
+- **Settings** — version, update check/apply (Warbler pattern), import, tag manager (rename,
+  merge, delete), export, storage/mirror status.
 
 Smart Spaces appear as a horizontal row of chips below search; `auto` spaces evaluate live from
 their rule, `saved` ones open a query, `manual` ones (Read later, imported collections) open their
@@ -569,9 +591,9 @@ rest adds the v1 scope without ever breaking the save path.
 | 3 | Fetch + extract + classify + FTS5 | Library organizes itself and is searchable | a weekend |
 | 4 | Telegram bot, Shortcut/PWA share, quick-save page | The gesture works from every device | 1 evening each |
 | 5 | Raindrop CSV + Netscape HTML import | The old library moves in; the switch is real | a weekend |
-| 6 | Images: Worker intake → R2, potato pull + hash, content-addressed local store, vision/OCR, thumbnails, mirror-up | Photos and screenshots save and search | a weekend |
+| 6 | Images + documents: Worker intake → R2, local store, vision/OCR, thumbnails, PDF text/scan extraction, mirror-up | Photos, screenshots, and PDFs save and search | a weekend |
 | 7 | Reader view + highlights + annotations | Reading happens in the app | a weekend |
-| 8 | Manual tags + Smart Spaces (rules, chips, saved queries, Read later) | Browsing by theme, not just search | a weekend |
+| 8 | Tags + Smart Spaces: global tag manager (rename/merge/aliases), rules, chips, saved queries, Read later, bulk actions | Browsing by theme, not just search | a weekend |
 | 9 | Brute-force vector search (hybrid ranking) — needs Nova's `embed` primitive (#49) | "That article about the thing" | 1 evening |
 | 10 | Archive rendering via Worker → R2 | Links keep their contents | a weekend |
 | 11 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
@@ -628,6 +650,14 @@ MCP tool (deferred; Polaris has no MCP support today).
 - Read later is an optional **manual collection**, not a read/unread state or queue.
 - Deleting is soft for **30 days** (Recently deleted), then DB + media + R2 are purged together.
 - Notes are **Markdown**; title, note, tags, kind, and Read later are all editable.
+- Kinds are the 12: article, product, book, recipe, video, tweet, note, image, paper, podcast,
+  place, movie. `article` is the catch-all for written pages and unknown links.
+- Search is instant and hybrid (FTS5 + cosine, RRF) with kind/tag/source/date filter chips.
+- Bulk actions: delete, tag, add to Space, refresh.
+- PDFs get local text extraction; scans OCR the first ~10 pages via DeepSeek, with a per-document
+  cap.
+- Tags are normalized on write (case/whitespace + reuse of existing canonical tags); merge leaves
+  an alias behind, so re-imports don't resurrect the old spelling.
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
   read path is built for it.
 - Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.

@@ -201,6 +201,9 @@ Polaris opening `localdrop.db` directly.
 5. **Nova `embed` (#49)** — confirm `pplx-embed-v1-0.6b` really returns 1024 dimensions and that
    vectors arrive unnormalized, and that the `embed` surface lands before LocalDrop's
    semantic-search step.
+6. **PDF text extraction in Go** — pick and prove a pure-Go library on a real text PDF and a real
+   scan; measure extraction quality and RSS. The scan-detection threshold depends on this.
+7. **Port 8895** — confirm it is free on the potato (`ss -ltn`) before installing.
 
 ---
 
@@ -272,3 +275,32 @@ R2 credentials for ordinary deletes.
 Title, note, tags, kind, and Read later are all editable. Notes render Markdown with a preview
 toggle (sanitised server-side). The library is yours; the model's choice of kind is a default, not
 a verdict.
+
+---
+
+## J. Shape of the library
+
+### J1. ~~Kind taxonomy~~ — **settled: 12 kinds**
+article, product, book, recipe, video, tweet, note, image, paper, podcast, place, movie.
+`article` is the catch-all for written pages and unclassifiable links (including repos); the model
+is never allowed to return `unknown`. Quote folds into note.
+
+### J2. ~~Search behavior~~ — **settled: instant + hybrid + chips**
+Results update as you type (~200 ms debounce, 2-character minimum). FTS5 and vector results are
+merged with reciprocal rank fusion. Filter chips for kind, tag, source, and date. No separate
+search page.
+
+### J3. ~~Bulk actions~~ — **settled**
+Multi-select with a bulk bar: **Delete, Tag, Add to Space, Refresh**. Long-press on mobile. Built
+for cleaning up the Raindrop import.
+
+### J4. ~~PDFs and documents~~ — **settled**
+Local text-layer extraction for FTS5 and embeddings. If the text layer is empty or tiny compared
+to the page count, OCR the first ~10 pages with `deepseek/deepseek-v4.1-flash-1017`, capped per
+document. PDF archives stay on demand.
+
+### J5. ~~Tag management~~ — **settled: full manager + AI normalization**
+- On write: trim, collapse whitespace, lowercase, and **reuse an existing canonical tag** when one
+  fits (the enrichment prompt carries the current vocabulary).
+- Global tag manager: rename, merge, delete. A merge reassigns items and leaves the old spelling
+  in `tag_aliases`, so a re-import or a later AI tag maps back to the canonical tag.
