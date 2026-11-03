@@ -356,6 +356,21 @@ pasted into the app) is stored once, whichever door got there first.
 
 The cap and the text-vs-scan threshold are config values, not hard-coded guesses.
 
+**Video and podcast jobs** (YouTube and similar, v1):
+
+1. **Fetch the transcript on the potato**, not the Worker — YouTube treats datacenter IPs harshly
+   and the potato's residential egress is the better citizen. Extract the video id and request the
+   caption track in the preferred language.
+2. **Store it** in `transcript_text`, and feed it to FTS5 and the embedding alongside the title and
+   description.
+3. **If no captions exist**, mark the item `transcript_state = 'unavailable'` and keep it — a
+   missing transcript must never fail the save or the enrichment.
+4. **Podcasts** are best-effort the same way: use a published transcript if one exists; otherwise
+   leave the field empty rather than transcribing audio in v1.
+
+The exact transcript source is a spike (see open-questions G): the caption endpoint is not a
+stable public API, so the implementation needs a fallback and must degrade quietly.
+
 Failures: retry **3× with backoff over ~an hour**, then park the job as `failed` with the error
 kept. The UI shows a dismissible **"needs attention"** strip with one-tap retry; failures are never
 silent. A bad URL must never wedge the queue.
@@ -383,6 +398,10 @@ CREATE TABLE items (
   source        TEXT NOT NULL DEFAULT 'app', -- app|telegram|shortcut|quick|import
   import_ref    TEXT NOT NULL DEFAULT '',    -- Raindrop id / bookmark path, for re-import
   state         TEXT NOT NULL DEFAULT 'queued', -- queued|enriching|ready|failed
+  transcript_text TEXT NOT NULL DEFAULT '',  -- captions/transcript, feeds FTS5
+  transcript_state TEXT NOT NULL DEFAULT '', -- ''|ok|unavailable
+  link_status   TEXT NOT NULL DEFAULT 'ok',  -- ok|dead|error (scheduled checker)
+  last_checked_at DATETIME,                  -- last archive/link check
   deleted_at    DATETIME,                    -- NULL = live; purged after 30 days
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -446,14 +465,17 @@ CREATE TABLE space_items (
 
 -- Worker-rendered snapshots (never stored locally; referenced by key).
 CREATE TABLE archives (
-  item_id   TEXT PRIMARY KEY,
-  r2_key    TEXT,                      -- html / pdf / screenshot objects
-  bytes     INTEGER NOT NULL DEFAULT 0,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  item_id      TEXT PRIMARY KEY,
+  r2_key       TEXT,                   -- html / pdf / screenshot objects
+  bytes        INTEGER NOT NULL DEFAULT 0,
+  content_hash TEXT NOT NULL DEFAULT '', -- detect a changed page on re-archive
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE VIRTUAL TABLE items_fts USING fts5(
-  title, summary, content_text, note, content='items', content_rowid='rowid'
+  title, summary, content_text, transcript_text, note,
+  content='items', content_rowid='rowid'
 );
 
 CREATE TABLE item_embeddings (
@@ -519,6 +541,16 @@ their rule, `saved` ones open a query, `manual` ones (Read later, imported colle
 membership. Masonry columns are responsive: 1 on phone, 2–4 on desktop. Colour/brand/visual search
 is a later addition, not a v1 surface.
 
+### Visual direction (settled; mockups later)
+
+**Dark only.** No light mode, no theme switcher. The feel is calm editorial — generous
+whitespace, image-first masonry, quiet metadata — with hints of the homelab family (night-sky
+depth, amber accent) but its own distinct identity, not a Polaris clone. Mockups will be done
+separately with Claude; this is direction, not a spec, and it doesn't block plumbing.
+
+**PWA:** installable (manifest, icons, full-screen) and an Android `share_target`, **no service
+worker and no offline cache**. The tailnet is assumed up; offline reading is not a v1 promise.
+
 ---
 
 ## 10. Polaris integration (deferred — not in v1)
@@ -552,6 +584,9 @@ Polaris reading the database directly. Until then, the library's job is to be go
   day one, → R2 with **30 daily snapshots**, plus an `rsync` copy to the MacBook Air
   (`100.94.193.102`) when it's online. This is the Vaultwarden pattern, reused. The database
   **and** the media mirror are both required for a real restore. Test the restore.
+- **Encryption:** no extra client-side layer. The R2 bucket is private and R2 encrypts at rest;
+  the accepted risk is that anyone with bucket credentials can read the library. (Coffer encrypts
+  because it is financial data; this is not.)
 - **Pre-update snapshot:** `VACUUM INTO data/backups/pre-update.db` through the running container,
   restored automatically if the new image fails its health check.
 - **Deletion:** `deleted_at` is a soft delete; the UI exposes **Recently deleted** for 30 days.
@@ -573,6 +608,11 @@ Polaris reading the database directly. Until then, the library's job is to be go
   abuse-dampening, not a hard guarantee.
 - **Cost guardrails:** cap LLM tokens per page, cap page bytes, cap archive size; alert if D1/R2
   usage moves.
+- **Link checking / re-archive:** a daily scheduler picks a **staggered slice** of older items
+  (aged >30 days, capped ~50/day), re-fetches, refreshes the archive/screenshot, and records
+  `link_status` and `last_checked_at`. A 404/410 sets `dead` and keeps the last archive; a
+  transient error sets `error` and retries later. Re-archive only writes when the archive
+  `content_hash` changes, to limit churn.
 - **Deployment:** Docker Compose alongside the other potato services; health endpoint for the poll
   loop's last-success timestamp.
 
@@ -592,11 +632,12 @@ rest adds the v1 scope without ever breaking the save path.
 | 4 | Telegram bot, Shortcut/PWA share, quick-save page | The gesture works from every device | 1 evening each |
 | 5 | Raindrop CSV + Netscape HTML import | The old library moves in; the switch is real | a weekend |
 | 6 | Images + documents: Worker intake → R2, local store, vision/OCR, thumbnails, PDF text/scan extraction, mirror-up | Photos, screenshots, and PDFs save and search | a weekend |
-| 7 | Reader view + highlights + annotations | Reading happens in the app | a weekend |
-| 8 | Tags + Smart Spaces: global tag manager (rename/merge/aliases), rules, chips, saved queries, Read later, bulk actions | Browsing by theme, not just search | a weekend |
-| 9 | Brute-force vector search (hybrid ranking) — needs Nova's `embed` primitive (#49) | "That article about the thing" | 1 evening |
-| 10 | Archive rendering via Worker → R2 | Links keep their contents | a weekend |
-| 11 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
+| 7 | Video/podcast transcripts on the potato, into FTS5 + embeddings | Video is searchable by what's said | 1 evening + spike |
+| 8 | Reader view + highlights + annotations | Reading happens in the app | a weekend |
+| 9 | Tags + Smart Spaces: global tag manager (rename/merge/aliases), rules, chips, saved queries, Read later, bulk actions | Browsing by theme, not just search | a weekend |
+| 10 | Brute-force vector search (hybrid ranking) — needs Nova's `embed` primitive (#49) | "That article about the thing" | 1 evening |
+| 11 | Archive rendering via Worker → R2, then the scheduled re-archive + link checker | Links keep their contents and stay honest | a weekend |
+| 12 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
 
 Deliberately absent: extension, native apps, sharing, collaboration, import UI, and the Polaris
 MCP tool (deferred; Polaris has no MCP support today).
@@ -658,6 +699,13 @@ MCP tool (deferred; Polaris has no MCP support today).
   cap.
 - Tags are normalized on write (case/whitespace + reuse of existing canonical tags); merge leaves
   an alias behind, so re-imports don't resurrect the old spelling.
+- UI is **dark-only**, calm editorial + homelab hints, with its own identity; mockups come later.
+- PWA is installable with a share target; no service worker, no offline cache.
+- No extra backup encryption: private R2 bucket + server-side encryption is the accepted risk.
+- Video/podcast transcripts are v1, fetched on the potato, best-effort, never allowed to fail a
+  save.
+- Link rot is fought with a staggered scheduled re-archive + checker (~50/day, items >30 days),
+  not a crawler; `content_hash` limits churn.
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
   read path is built for it.
 - Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.

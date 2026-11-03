@@ -204,6 +204,9 @@ Polaris opening `localdrop.db` directly.
 6. **PDF text extraction in Go** — pick and prove a pure-Go library on a real text PDF and a real
    scan; measure extraction quality and RSS. The scan-detection threshold depends on this.
 7. **Port 8895** — confirm it is free on the potato (`ss -ltn`) before installing.
+8. **Video transcript source** — prove caption fetching from the potato's residential IP for a few
+   real videos, including a no-caption case and a non-English track. Decide whether a bundled
+   yt-dlp is needed or the caption endpoint alone is enough.
 
 ---
 
@@ -304,3 +307,32 @@ document. PDF archives stay on demand.
   fits (the enrichment prompt carries the current vocabulary).
 - Global tag manager: rename, merge, delete. A merge reassigns items and leaves the old spelling
   in `tag_aliases`, so a re-import or a later AI tag maps back to the canonical tag.
+
+---
+
+## K. Look, durability, and the wider web
+
+### K1. ~~Visual direction~~ — **settled: dark-only editorial, homelab-adjacent**
+Dark mode only. Calm editorial spacing, image-first masonry, a night-sky/amber hint from the
+homelab family but its own identity. Mockups are a separate pass with Claude; this is direction,
+not a spec.
+
+### K2. ~~Backup encryption~~ — **settled: none extra**
+Private R2 bucket + R2 server-side encryption. Accepted risk: anyone with bucket credentials can
+read the library. Coffer encrypts because it holds financial data; this is a personal library, not
+that.
+
+### K3. ~~PWA scope~~ — **settled: installable + share target**
+Manifest, icons, full-screen, Android `share_target`. **No service worker, no offline cache.**
+The tailnet is assumed up.
+
+### K4. ~~Video transcripts~~ — **settled: in v1, best-effort**
+Fetch captions on the potato (not the Worker — residential egress behaves better), store in
+`transcript_text`, feed FTS5 + embeddings. No captions → `transcript_state='unavailable'`, item
+still succeeds. Podcasts use a published transcript if one exists; no audio transcription in v1.
+Transcript source is a spike.
+
+### K5. ~~Link rot~~ — **settled: scheduled re-archive + checker**
+Daily staggered slice of items older than 30 days (capped ~50/day): refresh archive/screenshot,
+set `link_status` to `ok|dead|error`, keep the last archive on death, and skip writes when the
+archive `content_hash` is unchanged.
