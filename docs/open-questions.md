@@ -97,10 +97,10 @@ the archive job retries — it never blocks the save.
   retrieval disappoints.
 - **Normalization:** Perplexity vectors are **unnormalized** — compare with cosine, never inner
   product.
-- **Where:** Nova's `embed` primitive (issue
-  [#49](https://github.com/AutumnsGrove/nova/issues/49)); Harbor is its first consumer and
-  added a [requirements comment](https://github.com/AutumnsGrove/nova/issues/49#issuecomment-6595253006).
-  This is a hard dependency for semantic search, not for steps 0–7.
+- **Where:** Nova's `embed` primitive — **landed** on `main` (`embed`, `embed/openrouter`,
+  `embed.NewRoles`), issue [#49](https://github.com/AutumnsGrove/nova/issues/49) is still open for
+  bookkeeping. Nova's OpenRouter preset already defaults to `perplexity/pplx-embed-v1-0.6b`, and
+  the documented role pins `Dims: 1024`. Harbor is the first consumer; no blocker remains.
 - **Storage:** 1024 × 4 bytes ≈ 4 KB per item; 10k items ≈ 40 MB in RAM. Store `model`, `dims`,
   and `content_hash` per row so a model swap is detectable and only changed rows re-embed.
 
@@ -193,12 +193,11 @@ Polaris opening `harbor.db` directly.
 2. **Worker → D1 queue claim semantics** — confirm the atomic update pattern works with D1's
    consistency model, and what happens on duplicate delivery.
 3. **Brute-force vector cache** — measure RSS and search latency on the potato at a realistic
-   library size (10k vectors × 768 dims), and confirm the startup load time is acceptable.
+   library size (10k vectors × 1024 dims), and confirm the startup load time is acceptable.
 4. **Browser Rendering from a Worker on the free plan** — confirm browser hours accounting and
    whether screenshot/PDF/HTML can be captured in one session.
-5. **Nova `embed` (#49)** — confirm `pplx-embed-v1-0.6b` really returns 1024 dimensions and that
-   vectors arrive unnormalized, and that the `embed` surface lands before Harbor's
-   semantic-search step.
+5. **Nova `embed` integration** — the primitive has landed; verify one live call through the
+   `index` role returns 1024-dim unnormalized vectors and records usage/cost. Not a blocker.
 6. **PDF text extraction in Go** — pick and prove a pure-Go library on a real text PDF and a real
    scan; measure extraction quality and RSS. The scan-detection threshold depends on this.
 7. **Port 8895** — confirm it is free on the potato (`ss -ltn`) before installing.

@@ -74,8 +74,9 @@ build embedded, shipped as a small Docker image, updated by a host-side watcher.
   - `provider/openrouter` + `deepseek/deepseek-v4.1-flash-1017` for **tags, summary, title**, and
     the same model (it accepts image input) for **OCR / image description / image tags**.
   - `embed` + `perplexity/pplx-embed-v1-0.6b` (1024 dims) for **vectors**. Nova's embed primitive
-    is issue [#49](https://github.com/AutumnsGrove/nova/issues/49); Harbor is its first
-    consumer, and semantic search waits on it.
+    has landed (`embed`, `embed/openrouter`; issue
+    [#49](https://github.com/AutumnsGrove/nova/issues/49) is still open for bookkeeping). Harbor
+    is its first consumer and can use `embed.NewRoles` with an `index` role pinned to 1024 dims.
   Enrichment is a pipeline of one-shot calls, not an agent loop. `message.Parts` carries images to
   the vision-capable chat model.
 - **Version string:** `r<commit count>.<short sha>`, stamped with `-ldflags -X`, shown in Settings
@@ -654,7 +655,7 @@ rest adds the v1 scope without ever breaking the save path.
 | 7 | Video/podcast transcripts on the potato, into FTS5 + embeddings | Video is searchable by what's said | 1 evening + spike |
 | 8 | Reader view + highlights + annotations | Reading happens in the app | a weekend |
 | 9 | Tags + Smart Spaces: global tag manager (rename/merge/aliases), rules, chips, saved queries, Read later, bulk actions | Browsing by theme, not just search | a weekend |
-| 10 | Brute-force vector search (hybrid ranking) + related items — needs Nova's `embed` primitive (#49) | "That article about the thing", and what sits next to it | 1 evening |
+| 10 | Brute-force vector search (hybrid ranking) + related items via Nova's `embed` | "That article about the thing", and what sits next to it | 1 evening |
 | 11 | Archive rendering via Worker → R2, then the scheduled re-archive + link checker | Links keep their contents and stay honest | a weekend |
 | 12 | Export command, `harbor restore` + restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
 
@@ -757,8 +758,10 @@ MCP tool (deferred; Polaris has no MCP support today).
 **Still open**
 
 - Hybrid ranking weights (keyword vs semantic) — tune once there is real search data.
-- The five spikes in [open-questions.md](open-questions.md#g-things-to-verify-with-a-spike-not-decisions)
-  (streaming upload, D1 claim, vector cache, Browser Rendering, Nova embed).
+- The implementation spikes in
+  [open-questions.md](open-questions.md#g-things-to-verify-with-a-spike-not-decisions) (streaming
+  upload, D1 claim, vector cache, Browser Rendering, PDF extraction, port, transcripts). Nova's
+  `embed` prerequisite has landed, so vector search is no longer blocked on Nova.
 
 ---
 
