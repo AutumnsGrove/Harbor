@@ -24,13 +24,10 @@ merging/synonyms.
 Full reading surface in v1: extracted article view, select-to-highlight, an annotation on each
 highlight, and highlights listed on the item. The hard part is anchoring (H2), not the UI.
 
-### A4. Is the UI one screen forever?
-Grid + search + pending cards, or do you want the mymind-style "Top of Mind" / serendipity
-surfacing on open?
-
-- **Why:** the landing surface decides what the home screen is.
-- **Lean:** recent/pending grid on open for v1; serendipity later, cheap to add once the data is
-  there.
+### A4. ~~Is the UI one screen forever?~~ — **settled: Spaces + recent grid, masonry**
+Home is search, Smart Space chips, pending cards, then the recent items in a **masonry** layout
+(variable-height cards, responsive columns). Top of Mind / serendipity is a later addition, not
+v1.
 
 ### A5. Name.
 "LocalDrop" is a placeholder. Name it after the gesture, not the library?
@@ -54,21 +51,17 @@ Built to static assets and embedded with `go:embed`, same as Warbler/Polaris/bwm
 Node at runtime, no separate static origin. A small JSON API is fine; it is the same origin and the
 same identity lock.
 
-### B3. How is it exposed on the tailnet?
-`tailscale serve` on the potato, Caddy in Docker Compose, or a raw port + MagicDNS?
+### B3. ~~How is it exposed on the tailnet?~~ — **settled: `tailscale serve`**
+HTTPS + MagicDNS, app bound to `127.0.0.1:8895` in Compose. Confirm the port is free
+(`ss -ltn`) at install; 8893 Cairn and 8894 Coffer are already reserved.
 
-- **Why:** TLS, hostname (`potato:8080` vs `localsave.tailnet.ts.net`), and whether it's
-  reachable from the phone's browser without warnings.
-- **Lean:** `tailscale serve` for HTTPS + MagicDNS, app in Compose bound to localhost.
-
-### B4. Cloudflare Worker: plain module or Hono?
-D1 schema, and the shape of the poll API (`GET /jobs?after=` vs `POST /jobs/claim`).
-
-- **Why:** the poll/claim protocol determines retry semantics and whether two potato instances
-  could double-process. Plain module + a few routes is probably enough.
-- **Lean:** Hono for routing ergonomics; claim-by-update (one worker, but correctness is free);
-  `GET /jobs` returns queued rows including `r2_key` for blobs, `POST /jobs/:id/{done,failed}`
-  closes them. `/upload` streams to `incoming/` and creates the row after the object exists.
+### B4. ~~Worker framework and poll protocol~~ — **settled: Hono + claim-by-update**
+- Hono for routing.
+- `POST /jobs/claim` atomically claims the oldest queued job (status → `claimed`) and returns it
+  with `r2_key` for any blobs; `POST /jobs/:id/{done,failed}` closes it. Claim-by-update means
+  duplicate delivery can't double-process.
+- `/save` and `/upload` create rows; `/upload` streams to `incoming/` first, then inserts.
+- `/presign` signs short-lived R2 reads for the UI.
 
 ### B5. ~~Where does the SQLite file live, and how is it deployed?~~ — **settled: Compose + host bind mount**
 `~/LocalDrop` on the potato, `docker-compose.yml` at the repo root, `./data:/data`, `./update-signal`
@@ -93,13 +86,10 @@ Different model types for different jobs:
 The split is deliberate: a chat model should not be asked to pick from a taxonomy and have its
 prose parsed, and a decision model should not be asked to write a summary.
 
-### C2. What gets archived, and who renders it?
-Screenshot + PDF + single-file HTML on every save via Browser Rendering, or on demand? Keep an
-HTML-only fallback (monolith) if the Worker is down?
-
-- **Why:** archive size vs fidelity vs cost. Also determines what "open archive" means in the UI.
-- **Lean:** HTML (single-file) always; screenshot for cards; PDF only on demand. Fall back to
-  `monolith`-style local capture when the Worker isn't available.
+### C2. ~~What gets archived, and who renders it?~~ — **settled**
+Every save gets a single-file **HTML** archive and a **screenshot** (the card image); **PDF is on
+demand**. The Worker renders and writes to R2; if the Worker is down the save is still accepted and
+the archive job retries — it never blocks the save.
 
 ### C3. ~~Embeddings: Workers AI or OpenRouter?~~ — **settled: OpenRouter + Nova `embed`**
 - **Model:** `perplexity/pplx-embed-v1-0.6b` — **1024 dimensions**, 32K context, **$0.004/M
@@ -114,19 +104,13 @@ HTML-only fallback (monolith) if the Worker is down?
 - **Storage:** 1024 × 4 bytes ≈ 4 KB per item; 10k items ≈ 40 MB in RAM. Store `model`, `dims`,
   and `content_hash` per row so a model swap is detectable and only changed rows re-embed.
 
-### C4. Failed jobs: what does the user see?
-Retry N times, then park as `failed`; surface failures in the UI, or silently drop after logging?
+### C4. ~~Failed jobs: what does the user see?~~ — **settled**
+Retry **3× with backoff over ~an hour**, then park as `failed` with the error stored. A dismissible
+"needs attention" strip in the UI, with one-tap retry. No silent failures.
 
-- **Why:** silent failure erodes trust exactly like the pending-window problem.
-- **Lean:** exponential backoff (3 tries over ~1 hour), then `failed` with the error stored; a
-  "needs attention" strip in the UI, dismissible per item.
-
-### C5. Poll cadence and pending visibility.
-30s always, or only when the UI is open / on a schedule? Does opening the UI force a poll?
-
-- **Why:** the tradeoff is battery/idle wakeups vs how long a save appears to vanish.
-- **Lean:** 30s poll loop with jitter; UI load triggers an immediate poll; pending cards rendered
-  from the poll response.
+### C5. ~~Poll cadence and pending visibility~~ — **settled**
+30s poll loop with jitter; opening the UI triggers an immediate poll; pending cards render from the
+poll response. A failed poll is not an error state — the loop backs off and retries.
 
 ---
 
@@ -137,13 +121,9 @@ It targets WebDAV/Nextcloud Bookmarks/Google Drive/local files, not arbitrary JS
 front doors are in-app, Telegram, iOS Shortcut / PWA share, and the quick-save page — no WebDAV
 surface to maintain.
 
-### D2. Telegram bot: new bot or extend Mira?
-Where does the webhook live (Worker), and does it accept photos/files or just links/text?
-
-- **Why:** the bot is the best mobile gesture, and a Worker webhook is ~50 lines. But Mira may
-  already own that bot token.
-- **Lean:** a dedicated bot + Worker webhook; accept text/URL/photo/forwarded messages; reuse the
-  same `POST /save` path internally.
+### D2. ~~Telegram bot: new bot or extend Mira?~~ — **settled: dedicated bot**
+Own token, Worker webhook, isolated from Mira. Accepts links, text, photos, documents, and albums
+(grouped by `media_group_id`). Reuses the same intake path as every other door.
 
 ### D3. ~~Is the iOS Shortcut worth it if the PWA share target exists?~~ — **settled: both**
 Publish a Shortcut recipe and a PWA manifest `share_target`; both hit the same Worker endpoint.
@@ -168,12 +148,10 @@ Vaultwarden's existing backup pattern, reused. The media mirror is continuous an
 nightly. Restore drill documented and actually run once; restoring the DB without the media is not
 a restore.
 
-### E3. Export format and commitment.
-JSON + Markdown + Netscape HTML, one CLI command? Guarantee it never becomes a roach motel.
-
-- **Why:** data ownership was a primary motivation; mymind's one-way export is the cautionary
-  tale.
-- **Lean:** `localsave export --format {json,md,html}` from day one, tested in CI with a fixture.
+### E3. ~~Export format and commitment.~~ — **settled**
+One command writes **JSON + Markdown + Netscape HTML**, plus a `media/` folder and `manifest.json`
+so the export is restorable and readable without the app. Tested in CI with a fixture from day one.
+Never a roach motel.
 
 ### E4. ~~How does the browser reach archived files in R2?~~ — **settled: presigned URLs**
 Private bucket. The potato asks the Worker for a short-lived signed URL (~5 minutes) and the
@@ -183,26 +161,16 @@ browser fetches directly from R2; archive bytes never pass through the potato.
 No public read path exists. The Worker stays write-only. Revisit only if sharing becomes a real
 need, with a narrow Worker-rendered snapshot rather than exposing the UI.
 
-### E6. Cost/usage guardrails.
-Max page bytes, max LLM tokens, max archive size, rate limit on `/save`, and what happens when a
-free tier is exceeded?
-
-- **Why:** free tiers are generous, but a pathological page or a leaked token shouldn't generate a
-  bill or an OOM.
-- **Lean:** 5 MB page cap, 8k input tokens, 20 MB archive cap, 10 saves/min/IP; queue pauses
-  instead of erroring.
+### E6. ~~Cost/usage guardrails~~ — **settled**
+5 MB page cap, 8k model input tokens, 25 MB per uploaded blob, 20 MB per archive, 10 saves/min/IP.
+When a cap or free tier is hit, the queue **pauses and reports** rather than failing permanently.
 
 ---
 
-### E7. R2 upload abuse and orphan cleanup
-What stops a leaked write token from filling the bucket, and what cleans up objects that never got
-a D1 row?
-
-- **Why:** the token is append-only, but append-only storage can still be used as free file
-  hosting. R2 free tier is 10 GB; abuse is a bill, not a data breach.
-- **Lean:** 25 MB per-object cap, content-type allowlist (images/PDF/text), per-source token rate
-  limit and per-IP limit, `incoming/` prefix with a 7-day orphan sweep, and an alert at a storage
-  threshold. Per-source tokens are settled (E1), so abuse is at least attributable and revocable.
+### E7. ~~R2 upload abuse and orphan cleanup~~ — **settled**
+25 MB per-object cap, content-type allowlist (images/PDF/text), per-source token and per-IP rate
+limits, `incoming/` prefix with a 7-day orphan sweep, and a storage-threshold alert. Per-source
+tokens make abuse attributable and revocable.
 
 ---
 
@@ -236,17 +204,15 @@ Polaris opening `localdrop.db` directly.
 
 ## H. Opened by the v1 scope answers
 
-### H1. Image pipeline details
-Which vision model, what exactly is extracted (OCR + description + tags + dominant colours?), and
-what are the size/dimension caps?
-
-- **Why:** vision calls cost more than text calls and OCR quality drives searchability; caps
-  protect the SD card.
-- **Lean:** one cheap vision-capable model call per image returning
-  `{kind, tags, ocr_text, description, colors}`; store a max-1600px thumbnail; original capped at
-  25 MB; dedupe by SHA-256 on the potato after pull, before any model call. **OPEN:** whether
-  thumbnails are generated on the potato (Go `image`) or by the Worker at intake — on the potato
-  keeps the Worker tiny and avoids a second image pipeline.
+### H1. ~~Image pipeline details~~ — **settled**
+- **Model:** `deepseek/deepseek-v4.1-flash-1017`, reused from text enrichment because it accepts
+  image input. One call returns `{kind, tags, ocr_text, description, colors}`.
+- **Tradeoff accepted:** a recent OCR benchmark put DeepSeek V4.1 Flash at ~80% versus Ling 3.0
+  Flash VL at 90–93%. If screenshot/receipt OCR turns out too weak in practice, swap in
+  `inclusionai/ling-3.0-flash-vl` — same OpenRouter key, same prompt shape.
+- **Caps:** original ≤ 25 MB; thumbnail max 1600px, generated on the potato with Go's `image`
+  package (not the Worker). Dedupe by SHA-256 before any model call.
+- **Embed:** OCR text + description, same `pplx-embed-v1-0.6b` model as text.
 
 ### H2. ~~Highlight anchoring~~ — **settled: quote + prefix/suffix, versioned text**
 Store `anchor_json = {quote, prefix, suffix, ordinal, text_hash}` where `text_hash` identifies the
@@ -265,19 +231,12 @@ current extraction.
 - **AI may suggest** a Space from a pattern ("you keep saving ARM SBCs — make a Space?"), but the
   user names it and chooses to keep it. The model never silently creates or renames a Space.
 
-### H4. What the in-app composer can save
-URL, note, and image uploads — but does it also support pasted rich text, quotes, or multiple
-images in one save?
+### H4. ~~What the in-app composer can save~~ — **settled**
+URL + note + up to **4 images** per save, one `items` row. A quote is a note with
+`kind=quote`. No rich-text editor, no tag picker at save time (edit tags after).
 
-- **Why:** it is the one door you control completely; scope creep here is easy.
-- **Lean:** URL + note + up to N images per save (N=4), one `items` row. Quotes are just a note
-  with `kind=quote`.
-
-### H5. Telegram media handling
-Photos only, or documents/PDFs/albums too? What becomes the title when a photo has no caption?
-
-- **Why:** Telegram albums arrive as separate updates; handling them properly needs grouping.
-- **Lean:** photos, documents, and text; album grouping by `media_group_id`; title falls back to
-  the AI description, then the filename.
+### H5. ~~Telegram media handling~~ — **settled**
+Photos, documents, text, and albums (grouped by `media_group_id`). With no caption, the title falls
+back to the AI description, then the filename.
 
 ---

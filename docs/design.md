@@ -65,7 +65,8 @@ build embedded, shipped as a small Docker image, updated by a host-side watcher.
   harness, with one OpenRouter key. Three surfaces:
   - `decide` + `typesafe/jev-1.14` for **classification** (typed choice questions, probabilities,
     no generated text).
-  - `provider/openrouter` + `deepseek/deepseek-v4.1-flash-1017` for **tags, summary, title**.
+  - `provider/openrouter` + `deepseek/deepseek-v4.1-flash-1017` for **tags, summary, title**, and
+    the same model (it accepts image input) for **OCR / image description / image tags**.
   - `embed` + `perplexity/pplx-embed-v1-0.6b` (1024 dims) for **vectors**. Nova's embed primitive
     is issue [#49](https://github.com/AutumnsGrove/nova/issues/49); LocalDrop is its first
     consumer, and semantic search waits on it.
@@ -242,8 +243,10 @@ Front doors (settled):
 1. **In-app save composer** — paste a URL, write a note, upload images. The UI already runs on the
    potato, so this writes to the local database and enters the same enrichment queue directly; it
    does not round-trip through the Worker.
-2. **Telegram bot** — links, notes, photos, forwarded messages. The best mobile gesture, and the
-   only door that handles "save this thought" as naturally as "save this URL."
+2. **Telegram bot** — a **dedicated bot** (own token, Worker webhook, isolated from Mira). Accepts
+   links, text notes, photos, documents, and albums; albums group by `media_group_id`. The best
+   mobile gesture, and the only door that handles "save this thought" as naturally as "save this
+   URL."
 3. **iOS Shortcut / PWA `share_target`** — the share sheet in every app → `POST /save` on the
    Worker. Works even when the potato is asleep or the VPN is off.
 4. **Tailnet quick-save page** — one input box pinned to the phone's home screen. Couch mode; only
@@ -276,10 +279,11 @@ turns a 60 MB spike into a 300 MB OOM on this box.
 Per job:
 
 1. **Fetch** the URL with a `Content-Length` cap (~5 MB) and a timeout. Stream to a temp file.
-2. **Parse from disk** (`selectolax` / `trafilatura`) so peak RSS stays flat. A 4 MB HTML doc
+2. **Parse from disk** with `go-readability` + `goquery` so peak RSS stays flat. A 4 MB HTML doc
    parsed into a DOM is 40–80 MB resident — the only real memory spike in the system.
-3. **Ask the Worker to render** (screenshot + PDF + single-file HTML) → bytes go to R2; the
-   potato stores the R2 key. Rendered archives are the one blob type that skips local storage.
+3. **Ask the Worker to render.** Every save gets a single-file **HTML** archive and a
+   **screenshot** (used as the card); **PDF is on demand**. Bytes go to R2 and the potato stores
+   the R2 key. Rendered archives are the one blob type that skips local storage.
 4. **Classify** through Nova's `decide` with Jev (`typesafe/jev-1.14`): a `choice` question over
    the kind taxonomy (article / product / book / recipe / video / tweet / note / image), plus
    optional `noul` checks (`is_paywalled`, `is_video`). Typed answers with probabilities, no text
@@ -299,8 +303,9 @@ they travel depends on where they started:
 2. **Store locally**, content-addressed at `data/media/<sha256>` (dedupe for free), and generate a
    thumbnail. The hash computed during the download becomes the `media.sha256` and the local
    filename.
-3. **Look** via the vision-capable chat model: kind, tags, OCR text, a one-line description,
-   dominant colours.
+3. **Look** with `deepseek/deepseek-v4.1-flash-1017` (image input): kind, tags, OCR text, a
+   one-line description, dominant colours. Thumbnails (max 1600px) are generated on the potato
+   with Go's `image` package, so the Worker stays tiny.
 4. **Embed** OCR + description with the same `pplx-embed-v1-0.6b` model so images are searchable
    by their contents.
 5. **Mirror up.** In-app images upload to R2 in the background and fill in `media.r2_key`; remote
@@ -310,8 +315,9 @@ they travel depends on where they started:
 The same content-addressed layout means an image that arrives twice (once from Telegram, once
 pasted into the app) is stored once, whichever door got there first.
 
-Failures: retry with backoff, then park the job as `failed` with the error kept. A bad URL must
-never wedge the queue.
+Failures: retry **3× with backoff over ~an hour**, then park the job as `failed` with the error
+kept. The UI shows a dismissible **"needs attention"** strip with one-tap retry; failures are never
+silent. A bad URL must never wedge the queue.
 
 **Cost reality check:** a ~2,000-token page in plus one Jev decision (`typesafe/jev-1.14`), a
 DeepSeek-Flash-class chat call (`deepseek/deepseek-v4.1-flash-1017`), and a 1024-dim
@@ -442,8 +448,9 @@ model swap detectable and re-embeddable, and the brute-force cache reads whateve
 
 Five surfaces, no folders and no settings maze:
 
-- **Home** — search box, Spaces row, pending cards, then the recent grid. Cards show cover/media,
-  kind, title, tags.
+- **Home** — search box, Smart Space chips, pending cards, then the recent grid. **Masonry layout,
+  explicitly** — variable-height cards (covers, screenshots, images, note text), not a uniform
+  grid. Cards show media, kind, title, tags.
 - **Save composer** — URL, note, image upload. Reachable from Home and from the quick-save page on
   the phone. Same endpoint shape as the remote doors, written locally.
 - **Item** — media, AI + manual tags, summary, source, archive link, related items.
@@ -451,9 +458,9 @@ Five surfaces, no folders and no settings maze:
   are also listed on the item.
 - **Settings** — version, update check/apply (Warbler pattern), export, storage/mirror status.
 
-Smart Spaces appear as a horizontal row of chips below search; `auto` spaces are computed from
-their rule, `saved` ones open a query. Colour/brand/visual search is a later addition, not a v1
-surface.
+Smart Spaces appear as a horizontal row of chips below search; `auto` spaces evaluate live from
+their rule, `saved` ones open a query. Masonry columns are responsive: 1 on phone, 2–4 on desktop.
+Colour/brand/visual search is a later addition, not a v1 surface.
 
 ---
 
@@ -492,8 +499,9 @@ Polaris reading the database directly. Until then, the library's job is to be go
   restored automatically if the new image fails its health check.
 - **Disk guardrails:** per-file upload cap (~25 MB), a storage number in Settings, and a warning
   before the SD card gets close. The potato has room, but not infinite room.
-- **Export:** JSON + Markdown + Netscape HTML, one command. Data ownership is the point — never
-  build a roach motel like mymind's one-way export.
+- **Export:** one command writes **JSON, Markdown, and Netscape HTML**, plus a `media/` folder and
+  manifest so the export is restorable and readable without the app. Data ownership is the point —
+  never build a roach motel like mymind's one-way export.
 - **Secrets:** per-source write tokens (`telegram`, `shortcut`, `quick`) stored **hashed** in D1,
   so one can be revoked without touching the others. `OPENROUTER_API_KEY` is held by the potato;
   the Worker never needs it.
@@ -568,6 +576,13 @@ MCP tool (deferred; Polaris has no MCP support today).
   [#49](https://github.com/AutumnsGrove/nova/issues/49). LocalDrop is its first consumer.
 - Highlight anchors are quote + prefix/suffix against a versioned extraction (see H2).
 - Smart Spaces are user-defined rules plus AI suggestions the user can accept (see H3).
+- Images are read by the same `deepseek/deepseek-v4.1-flash-1017` model as text enrichment;
+  thumbnails (max 1600px) are generated locally with Go's `image` package.
+- Home is search + Spaces + pending + a **masonry** recent grid.
+- Archiving: single-file HTML + screenshot on every save; PDF on demand.
+- Telegram is a dedicated bot; it accepts links, text, photos, documents, and albums.
+- Failed jobs retry 3× over ~an hour, then surface in a "needs attention" strip.
+- Export is JSON + Markdown + Netscape HTML + a media manifest and files.
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
   read path is built for it.
 - Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.
