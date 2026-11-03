@@ -8,9 +8,10 @@ This follows the homelab repo's own "Adding New Services" rule: reserve the port
 file the Meridian issue at **planning** time, then do the config edits on deploy day. The homelab
 repo itself is only touched once Harbor is ready (see the checklist at the end).
 
-Related: [Meridian issue](https://github.com/AutumnsGrove/Meridian/issues) for the tile/allowlist/
-observed unit, [design.md](design.md) §3 for the update watcher, and Warbler's
-`docs/update.md` for the pattern this copies.
+Tracked by [Harbor #1](https://github.com/AutumnsGrove/Harbor/issues/1). The Meridian-side work is
+[AutumnsGrove/Meridian#15](https://github.com/AutumnsGrove/Meridian/issues/15). Related:
+[design.md](design.md) §3 for the update watcher, and Warbler's `docs/update.md` for the pattern
+this copies.
 
 ---
 
