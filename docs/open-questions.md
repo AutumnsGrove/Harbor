@@ -31,13 +31,9 @@ Home is search, Smart Space chips, pending cards, then the recent items in a **m
 (variable-height cards, responsive columns). Top of Mind / serendipity is a later addition, not
 v1.
 
-### A5. Name.
-"LocalDrop" is a placeholder. Name it after the gesture, not the library?
-
-- **Why:** affects repo, package names, MCP tool namespace (`search_bookmarks` is generic, fine).
-- **Lean:** decide after the thing works; don't bikeshed now. Candidates to consider later:
-  something in the Polaris constellation naming family (Pulsar, Constellation, Fields, Stars) or
-  a standalone name.
+### A5. Name — **direction settled: gesture family, name it now**
+Not an astral name. The name should describe the act (keep / catch / stow / tuck), be short, and
+work as a repo, module, and image name. The specific name is the one thing still being chosen.
 
 ---
 
@@ -336,3 +332,22 @@ Transcript source is a spike.
 Daily staggered slice of items older than 30 days (capped ~50/day): refresh archive/screenshot,
 set `link_status` to `ok|dead|error`, keep the last archive on death, and skip writes when the
 archive `content_hash` is unchanged.
+
+---
+
+## L. Reading, first run, and self-knowledge
+
+### L1. ~~Highlight scope~~ — **settled: articles only**
+Reader view of extracted article text; select-to-highlight with an annotation. PDFs and archived
+pages are view-only in v1. PDF highlighting is a later addition with its own viewer.
+
+### L2. ~~First run~~ — **settled: import or first link**
+A two-path empty state: **Import Raindrop** or **Paste a first link**. No multi-step wizard.
+
+### L3. ~~Archive viewing~~ — **settled: reader primary, sandboxed viewer**
+Reader text is the default. The archived HTML opens in a sandboxed viewer (scripts disabled, no
+forms, isolated R2 origin) and is downloadable. The app never renders archived HTML unsandboxed.
+
+### L4. ~~Observability~~ — **settled: logs + Status page**
+Structured JSON logs to stdout, plus a Settings **Status** page: last poll, queue depth, last
+backup, mirror lag, disk usage, last link check. No telemetry, no external logging.

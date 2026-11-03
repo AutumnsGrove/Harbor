@@ -523,7 +523,8 @@ Five surfaces, no folders and no settings maze:
 
 - **Home** — search box (instant, hybrid, filter chips), Smart Space chips, pending cards, then
   the recent grid. **Masonry layout, explicitly** — variable-height cards (covers, screenshots,
-  images, note text), not a uniform grid. Cards show media, kind, title, tags.
+  images, note text), not a uniform grid. Cards show media, kind, title, tags. First run shows a
+  two-path empty state: **Import Raindrop** or **Paste a first link**.
 - **Multi-select** — long-press or the select button enters a bulk bar: Delete, Tag, Add to Space,
   Refresh. Built for cleaning up an import.
 - **Save composer** — URL, note, image upload. Reachable from Home and from the quick-save page on
@@ -532,9 +533,13 @@ Five surfaces, no folders and no settings maze:
   source, archive link, related items. Every field editable; **Delete** moves it to Recently
   deleted. **Refresh** re-runs metadata/archive.
 - **Reader** — extracted article view with select-to-highlight and an annotation field. Highlights
-  are also listed on the item.
+  are also listed on the item. **Articles only in v1**; PDFs and archived pages are view-only.
+- **Archive viewer** — the HTML archive opens in a **sandboxed viewer with scripts disabled**
+  (an isolated R2 origin, no forms, no JS). Reader text is the default; the raw file is also
+  downloadable. The app never renders archived HTML unsandboxed.
 - **Settings** — version, update check/apply (Warbler pattern), import, tag manager (rename,
-  merge, delete), export, storage/mirror status.
+  merge, delete), export, and a **Status** page (last poll, queue depth, last backup, mirror lag,
+  disk, last link check).
 
 Smart Spaces appear as a horizontal row of chips below search; `auto` spaces evaluate live from
 their rule, `saved` ones open a query, `manual` ones (Read later, imported collections) open their
@@ -613,6 +618,9 @@ Polaris reading the database directly. Until then, the library's job is to be go
   `link_status` and `last_checked_at`. A 404/410 sets `dead` and keeps the last archive; a
   transient error sets `error` and retries later. Re-archive only writes when the archive
   `content_hash` changes, to limit churn.
+- **Observability:** structured JSON logs to stdout (captured by Docker) plus a Settings **Status**
+  page fed by the same counters. No telemetry, no external logging. The status page is the answer
+  to "is it actually working?" without reading `docker logs`.
 - **Deployment:** Docker Compose alongside the other potato services; health endpoint for the poll
   loop's last-success timestamp.
 
@@ -706,6 +714,10 @@ MCP tool (deferred; Polaris has no MCP support today).
   save.
 - Link rot is fought with a staggered scheduled re-archive + checker (~50/day, items >30 days),
   not a crawler; `content_hash` limits churn.
+- Highlights are **articles only** in v1; PDFs and archives are view-only.
+- First run offers Import or a first link; no multi-step wizard.
+- Archived HTML renders in a sandboxed, script-disabled viewer; the reader is the default.
+- Structured logs + a Settings Status page; no telemetry.
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
   read path is built for it.
 - Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.
