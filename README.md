@@ -32,7 +32,7 @@ deployment/memory cost — the parser has to work in Go.
                  ▼
      Cloudflare Worker  ── public, write-only
      POST /save + /upload → D1 queue + R2 intake
-     Browser Rendering, Workers AI embeddings
+     Browser Rendering, OpenRouter embeddings via Nova
                  ▲
                  │  potato polls outbound (no tunnel, no open ports)
                  ▼

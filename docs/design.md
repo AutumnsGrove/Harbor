@@ -42,7 +42,7 @@ usable before images, highlights, and spaces land; nothing in this list is cut.
 | The potato is tailnet-only | It cannot receive inbound calls from the public internet. |
 | Saves must work from anywhere, instantly | A tailnet-only save endpoint is disqualified — Tailscale-on-iOS Shortcuts fail silently when the VPN isn't up. |
 | One user, low volume (~20–100 saves/month) | No need for a search cluster, job framework, or auth system. |
-| Must be cheap | Free tiers: Workers, D1, R2, Workers AI, Browser Rendering. |
+| Must be cheap | Free tiers: Workers, D1, R2, Browser Rendering; OpenRouter cents. |
 | Must be ownable/portable | SQLite file on disk; export must be trivial. Data ownership was the whole point. |
 | Same stack as the rest of the homelab | Go + embedded SvelteKit in one binary; Docker on the potato; GHCR + digest-pinned updater. |
 
@@ -61,10 +61,16 @@ build embedded, shipped as a small Docker image, updated by a host-side watcher.
   `//go:embed all:build` (see Warbler's `web/embed.go`). No Node at runtime; one artifact to ship.
 - **SQLite:** [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) — pure Go, no cgo, so
   cross-compiles stay trivial. Same as Polaris and Ivy.
-- **AI:** all text and vision calls go through **Nova** (`github.com/AutumnsGrove/nova`), the
-  in-house Go agent harness — `provider/openrouter` for completions, `message.Parts` for images —
-  so there is one OpenRouter key and one integration to maintain. Enrichment uses the provider
-  layer directly (a one-shot structured call), not the full agent loop.
+- **AI:** all AI goes through **Nova** (`github.com/AutumnsGrove/nova`), the in-house Go agent
+  harness, with one OpenRouter key. Three surfaces:
+  - `decide` + `typesafe/jev-1.14` for **classification** (typed choice questions, probabilities,
+    no generated text).
+  - `provider/openrouter` + `deepseek/deepseek-v4.1-flash-1017` for **tags, summary, title**.
+  - `embed` + `perplexity/pplx-embed-v1-0.6b` (1024 dims) for **vectors**. Nova's embed primitive
+    is issue [#49](https://github.com/AutumnsGrove/nova/issues/49); LocalDrop is its first
+    consumer, and semantic search waits on it.
+  Enrichment is a pipeline of one-shot calls, not an agent loop. `message.Parts` carries images to
+  the vision-capable chat model.
 - **Version string:** `r<commit count>.<short sha>`, stamped with `-ldflags -X`, shown in Settings
   and in `/healthz`.
 - **Makefile** with the usual targets: `dev`, `web`, `build`, `test`, `docker`, `docker-run`,
@@ -169,7 +175,7 @@ never builds.
 │ POST /save + /upload     │          │ web UI (read-write)          │
 │ D1: jobs queue           │◄─────────│ poll loop (outbound only)    │
 │ Browser Rendering        │  GET     │ SQLite + FTS5 + vectors      │
-│ Workers AI embeddings    │  /jobs   │ image files (local copy)     │
+│ embeddings (via Nova)    │  /jobs   │ image files (local copy)     │
 │ R2: intake + mirror      │          │ HTML parsing                 │
 │                          │          │ OpenRouter enrichment        │
 │                          │          │ MCP tool → Polaris           │
@@ -274,10 +280,15 @@ Per job:
    parsed into a DOM is 40–80 MB resident — the only real memory spike in the system.
 3. **Ask the Worker to render** (screenshot + PDF + single-file HTML) → bytes go to R2; the
    potato stores the R2 key. Rendered archives are the one blob type that skips local storage.
-4. **Classify + summarize** via a cheap OpenRouter model: what it *is* (article / product / book /
-   recipe / video / tweet), tags, a summary. Structured JSON output.
-5. **Embed** — Workers AI (10k neurons/day free) or OpenRouter; store the vector.
-6. **Write** the row + FTS5 + vector, mark the D1 job done.
+4. **Classify** through Nova's `decide` with Jev (`typesafe/jev-1.14`): a `choice` question over
+   the kind taxonomy (article / product / book / recipe / video / tweet / note / image), plus
+   optional `noul` checks (`is_paywalled`, `is_video`). Typed answers with probabilities, no text
+   to parse.
+5. **Tag + summarize** with `deepseek/deepseek-v4.1-flash-1017`: 3–6 tags, a two-sentence summary,
+   a cleaned title. Free-form text, strict JSON schema, prompt version stored.
+6. **Embed** with Nova's `embed` surface and `perplexity/pplx-embed-v1-0.6b` (1024 dims). The
+   vector is unnormalized, so compare with cosine; store it as a BLOB.
+7. **Write** the row + FTS5 + vector, mark the D1 job done.
 
 **Image jobs** (Telegram photo, upload, pasted image) take a different path, and which direction
 they travel depends on where they started:
@@ -288,8 +299,10 @@ they travel depends on where they started:
 2. **Store locally**, content-addressed at `data/media/<sha256>` (dedupe for free), and generate a
    thumbnail. The hash computed during the download becomes the `media.sha256` and the local
    filename.
-3. **Look** via a vision model: kind, tags, OCR text, a one-line description, dominant colours.
-4. **Embed** OCR + description so images are searchable by their contents.
+3. **Look** via the vision-capable chat model: kind, tags, OCR text, a one-line description,
+   dominant colours.
+4. **Embed** OCR + description with the same `pplx-embed-v1-0.6b` model so images are searchable
+   by their contents.
 5. **Mirror up.** In-app images upload to R2 in the background and fill in `media.r2_key`; remote
    images are already there.
 6. **Write** the row(s), mark the job done.
@@ -300,9 +313,11 @@ pasted into the app) is stored once, whichever door got there first.
 Failures: retry with backoff, then park the job as `failed` with the error kept. A bad URL must
 never wedge the queue.
 
-**Cost reality check:** a ~2,000-token page in and ~300-token structured output out on a
-Gemini-Flash-class model is ~**$0.00048/save** — under a dollar a year at realistic volume. The
-expensive subscription tier wasn't paying for inference; it was paying for the UI and the gesture.
+**Cost reality check:** a ~2,000-token page in plus one Jev decision (`typesafe/jev-1.14`), a
+DeepSeek-Flash-class chat call (`deepseek/deepseek-v4.1-flash-1017`), and a 1024-dim
+`pplx-embed-v1-0.6b` vector still lands well under **$0.001/save** — under a dollar a year at
+realistic volume. The expensive subscription tier wasn't paying for inference; it was paying for
+the UI and the gesture.
 
 ---
 
@@ -388,7 +403,8 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 CREATE TABLE item_embeddings (
   item_id      TEXT PRIMARY KEY,
-  model        TEXT NOT NULL,
+  model        TEXT NOT NULL,        -- e.g. perplexity/pplx-embed-v1-0.6b
+  dims         INTEGER NOT NULL,     -- 1024 for pplx-embed-v1-0.6b; stored, never assumed
   content_hash TEXT NOT NULL,        -- skip re-embedding unchanged rows
   vec          BLOB NOT NULL,        -- float32 little-endian; no extension needed
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -411,8 +427,10 @@ model swap detectable and re-embeddable, and the brute-force cache reads whateve
   appended by the indexer — *not* `sqlite-vec`. Polaris already does exactly this (its
   `docs/plans/embeddings.md` sets the revisit point at ~50k vectors); at one user's library scale
   an ANN index is pure complexity, and `sqlite-vec` would force cgo into an otherwise pure-Go,
-  static binary. Vectors live in `item_embeddings.vec` as a `BLOB`; SQLite stays the source of
-  truth, the in-memory slice is a cache with a rebuild path.
+  static binary. `perplexity/pplx-embed-v1-0.6b` returns **unnormalized** 1024-dim vectors, so
+  normalize on write (or divide during cosine) — never use inner product on them. Vectors live in
+  `item_embeddings.vec` as a `BLOB`; SQLite stays the source of truth, the in-memory slice is a
+  cache with a rebuild path.
 - Combine keyword + semantic into one ranked list (reciprocal rank fusion or a weighted blend).
   **OPEN:** ranking weights.
 - Later, maybe: colour/brand/visual search (mymind's "Same Vibe" is cosine similarity over
@@ -506,7 +524,7 @@ rest adds the v1 scope without ever breaking the save path.
 | 5 | Images: Worker intake → R2, potato pull + hash, content-addressed local store, vision/OCR, thumbnails, mirror-up | Photos and screenshots save and search | a weekend |
 | 6 | Reader view + highlights + annotations | Reading happens in the app | a weekend |
 | 7 | Manual tags + Smart Spaces (rules, chips, saved queries) | Browsing by theme, not just search | a weekend |
-| 8 | Brute-force vector search (hybrid ranking) | "That article about the thing" | 1 evening |
+| 8 | Brute-force vector search (hybrid ranking) — needs Nova's `embed` primitive (#49) | "That article about the thing" | 1 evening |
 | 9 | Archive rendering via Worker → R2 | Links keep their contents | a weekend |
 | 10 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
 
@@ -542,9 +560,14 @@ MCP tool (deferred; Polaris has no MCP support today).
   locally and mirror up. R2 is both the durable intake buffer and the off-box copy.
 - Worker-rendered archives are written straight to R2 and referenced by key; they are never pulled
   down to the potato.
-- All AI goes through Nova with one OpenRouter key: `provider/openrouter` for text/vision
-  completions, OpenRouter `/embeddings` for vectors. Nothing runs locally.
-- Embeddings come from OpenRouter, not Workers AI — one key, one bill, one provider.
+- All AI goes through Nova with one OpenRouter key. Nothing runs locally.
+- Classification uses Jev (`typesafe/jev-1.14`) through Nova's `decide`; tags/summary/title use
+  `deepseek/deepseek-v4.1-flash-1017` through `provider/openrouter`.
+- Embeddings use `perplexity/pplx-embed-v1-0.6b` (1024 dims, unnormalized → cosine) through
+  Nova's `embed` primitive, which is issue
+  [#49](https://github.com/AutumnsGrove/nova/issues/49). LocalDrop is its first consumer.
+- Highlight anchors are quote + prefix/suffix against a versioned extraction (see H2).
+- Smart Spaces are user-defined rules plus AI suggestions the user can accept (see H3).
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
   read path is built for it.
 - Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.
@@ -565,9 +588,8 @@ MCP tool (deferred; Polaris has no MCP support today).
 
 **Still open** (see [open-questions.md](open-questions.md))
 
-- Exact OpenRouter embedding model + dimensions (1536 for `text-embedding-3-small` is the lean);
-  hybrid ranking weights.
-- Whether to add an embeddings surface to Nova (preferred) or keep a thin client in LocalDrop.
+- Hybrid ranking weights (keyword vs semantic).
+- Vision model choice for images (the chat model or a dedicated one).
 - Highlight anchor edge cases and re-anchoring UX.
 - Smart Space rule vocabulary.
 - R2 access (presigned vs proxy) for archives.
@@ -591,6 +613,8 @@ MCP tool (deferred; Polaris has no MCP support today).
 - [Cloudflare Browser Rendering pricing](https://developers.cloudflare.com/browser-run/pricing/) ·
   [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) ·
   [R2 pricing](https://developers.cloudflare.com/r2/pricing/) ·
-  [Workers limits](https://developers.cloudflare.com/workers/platform/limits/) ·
-  [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)
+  [Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
+- [Jev on OpenRouter](https://openrouter.ai/docs/guides/community/jev) ·
+  [DeepSeek V4.1 Flash 1017](https://openrouter.ai/deepseek/deepseek-v4.1-flash-1017) ·
+  [Perplexity embeddings](https://docs.perplexity.ai/docs/embeddings/quickstart)
 - Full cited list: [research-thread.md](research-thread.md)
