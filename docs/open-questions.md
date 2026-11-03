@@ -55,21 +55,15 @@ surfacing on open?
 
 ## B. Stack & deployment
 
-### B1. What language/runtime for the potato service?
-Go single binary (matches Polaris, low RAM, easy deploy) vs Python (fast iteration, `trafilatura`
-and `selectolax` are excellent, FTS5 in stdlib) vs something else.
+### B1. ~~What language/runtime for the potato service?~~ — **settled: Go**
+Python was ruled out: it "costs" too much in deployment, memory, and maintenance. Parsing works in
+Go — `go-readability` + `goquery`, with `trafilatura`/`selectolax` as reference behaviour to match,
+not as a dependency.
 
-- **Why:** the hardest constraint is RAM and long-term maintenance. Polaris experience argues Go;
-  the parsing ecosystem argues Python. This is the biggest fork in the project.
-- **Lean:** **Go** — one binary, one process, no venv on the potato, and you've already proven
-  you can ship a Go service there. Parsing via `go-readability` + `goquery`. (Counter-lean:
-  Python if enrichment iteration speed matters more than deployment simplicity.)
-
-### B2. UI: Svelte SPA or server-rendered Go + htmx?
-- **Why:** an SPA means a build step, a second artifact, and a JSON API. Server-rendered means one
-  binary and no client state — very attractive for a one-user tailnet app.
-- **Lean:** server-rendered Go templates + a little vanilla JS/Alpine for the search-as-you-type
-  box. Add Svelte only if the UI outgrows it. **Decide before building the UI.**
+### B2. ~~UI: Svelte SPA or server-rendered Go + htmx?~~ — **settled: SvelteKit**
+Built to static assets and embedded with `go:embed`, same as Warbler/Polaris/bwmon. One binary, no
+Node at runtime, no separate static origin. A small JSON API is fine; it is the same origin and the
+same identity lock.
 
 ### B3. How is it exposed on the tailnet?
 `tailscale serve` on the potato, Caddy in Docker Compose, or a raw port + MagicDNS?
@@ -86,14 +80,11 @@ D1 schema, and the shape of the poll API (`GET /jobs?after=` vs `POST /jobs/clai
 - **Lean:** Hono for routing ergonomics; claim-by-update (one worker, but correctness is free);
   `GET /jobs` returns queued rows, `POST /jobs/:id/{done,failed}` closes them.
 
-### B5. Where does the SQLite file live, and how is it deployed?
-Docker Compose with a named volume, host bind mount, or a dedicated directory? Backups to R2 on a
-host cron or in-app?
-
-- **Why:** backup and restore are the only genuinely bad failure mode. Must not be bolted on
-  later.
-- **Lean:** Compose service alongside the existing potato stack; `/srv/localsave/data/localsave.db`
-  bind mount; in-app nightly `VACUUM INTO` → R2, plus a documented restore drill.
+### B5. ~~Where does the SQLite file live, and how is it deployed?~~ — **settled: Compose + host bind mount**
+`~/LocalDrop` on the potato, `docker-compose.yml` at the repo root, `./data:/data`, `./update-signal`
+mailbox, loopback port 8895 behind `tailscale serve`, image pinned by digest in `.env`. Warbler's
+watcher handles updates. Backup remains open (E2): in-app nightly `VACUUM INTO` → R2, plus a
+documented, actually-run restore drill.
 
 ---
 
@@ -115,12 +106,16 @@ HTML-only fallback (monolith) if the Worker is down?
 - **Lean:** HTML (single-file) always; screenshot for cards; PDF only on demand. Fall back to
   `monolith`-style local capture when the Worker isn't available.
 
-### C3. Embeddings: Workers AI or OpenRouter?
-Which model/dimensions, and what triggers re-embedding?
+### C3. Embeddings: Workers AI or OpenRouter, and what dimensions?
+Which model, and what triggers re-embedding?
 
-- **Why:** dimension is baked into the vec table; changing models later means a full re-embed.
-- **Lean:** Workers AI (free tier), fixed dimension, store `embedding_model` per row so a mixed
-  index is detectable and re-embeddable.
+- **Why:** dimension affects the in-memory cache and re-embed cost. Store `model` + `content_hash`
+  per row so a model swap is detectable and only changed rows are re-embedded.
+- **Settled by stack:** exact brute-force cosine in Go over a process-local slice, no
+  `sqlite-vec` (cgo would break the static cross-compiled binary; Polaris set this precedent and
+  documented ~50k vectors as the revisit point).
+- **Lean:** Workers AI (free tier) for embeddings; cheap OpenRouter model for classification.
+  **OPEN:** exact embedding model + dimension.
 
 ### C4. Failed jobs: what does the user see?
 Retry N times, then park as `failed`; surface failures in the UI, or silently drop after logging?
@@ -196,13 +191,21 @@ JSON + Markdown + Netscape HTML, one CLI command? Guarantee it never becomes a r
   tale.
 - **Lean:** `localsave export --format {json,md,html}` from day one, tested in CI with a fixture.
 
-### E4. Public sharing — confirm it's out.
+### E4. How does the browser reach archived files in R2?
+Public bucket, presigned URLs, or proxied through the Worker / potato?
+
+- **Why:** a public bucket makes every archive guessable and leaks the library; presigned URLs need
+  the Worker to sign; proxying through the potato burns bandwidth it doesn't have.
+- **Lean:** private R2 bucket + short-lived presigned URLs signed by the Worker, fetched by the
+  potato on demand and cached briefly in memory. Confirm before building the archive UI.
+
+### E5. Public sharing — confirm it's out.
 - **Why:** the tailnet-only UI makes it impossible without a second read path; it's also the main
   thing that would force auth/multi-user.
 - **Lean:** skip entirely. Revisit with a Worker-rendered read-only snapshot only if you ever
   actually need it.
 
-### E5. Cost/usage guardrails.
+### E6. Cost/usage guardrails.
 Max page bytes, max LLM tokens, max archive size, rate limit on `/save`, and what happens when a
 free tier is exceeded?
 
@@ -245,8 +248,8 @@ Voice/chat-initiated saves through the assistant, vs only the dedicated front do
 1. **floccus target support** — can it POST to a custom endpoint, or only WebDAV/Nextcloud?
 2. **Worker → D1 queue claim semantics** — confirm the atomic update pattern works with D1's
    consistency model, and what happens on duplicate delivery.
-3. **sqlite-vec on the potato** — load the extension in the chosen runtime (Go cgo vs Python) and
-   measure RSS impact.
+3. **Brute-force vector cache** — measure RSS and search latency on the potato at a realistic
+   library size (10k vectors × 768 dims), and confirm the startup load time is acceptable.
 4. **Browser Rendering from a Worker on the free plan** — confirm browser hours accounting and
    whether screenshot/PDF/HTML can be captured in one session.
 5. **Polaris read path** — read-only bind mount of a WAL-mode DB from another container: safe, or

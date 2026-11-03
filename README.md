@@ -16,6 +16,10 @@ added, rebuilt, or skipped without breaking it.
 **The payoff:** Polaris gets a `search_bookmarks()` MCP tool, so the assistant can search the
 library. That integration is the one thing no product can sell.
 
+**Stack (settled):** Go + embedded SvelteKit in a single static binary, SQLite (`modernc`), shipped
+as a distroless Docker image on `ghcr.io`, updated by the same digest-pinned systemd watcher as
+Warbler. Python was ruled out on deployment/memory cost — the parser has to work in Go.
+
 ---
 
 ## The shape (60 seconds)
@@ -31,7 +35,7 @@ library. That integration is the one thing no product can sell.
                  │  potato polls outbound (no tunnel, no open ports)
                  ▼
      the potato (tailnet) ── private, read-write
-     SQLite + FTS5 + sqlite-vec · enrichment via OpenRouter
+     SQLite + FTS5 + in-process vectors · enrichment via OpenRouter
      minimal web UI · MCP tool → Polaris
 ```
 
@@ -51,9 +55,18 @@ it safe on the public internet.
 
 | File | What it is |
 |---|---|
-| [docs/design.md](docs/design.md) | The concept distilled: components, data flow, build order, decisions already made |
+| [docs/design.md](docs/design.md) | The concept distilled: stack, deployment/update path, components, data flow, build order, decisions |
 | [docs/open-questions.md](docs/open-questions.md) | What still needs a decision before code — the agenda for the next Q&A pass |
 | [docs/research-thread.md](docs/research-thread.md) | Verbatim Polaris thread that produced the direction (104 cited sources) |
+
+## Deployment shape
+
+- `~/LocalDrop` on the potato, Compose project `localdrop`, data in `~/LocalDrop/data`.
+- Port **8895** (proposed; 8893 Cairn and 8894 Coffer are already reserved), loopback only behind
+  `tailscale serve`.
+- Update path is Warbler's: Settings → signal file → host watcher → digest pin → health check →
+  rollback with a pre-update `VACUUM INTO` snapshot. Meridian can trigger it too.
+- CI publishes multi-arch images on every passing push to `main`; the potato never builds.
 
 ## What this is not (yet)
 
