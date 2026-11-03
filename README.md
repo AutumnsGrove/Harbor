@@ -40,7 +40,7 @@ deployment/memory cost — the parser has to work in Go.
                  ▼
      the potato (tailnet) ── private, read-write
      SQLite + FTS5 + in-process vectors · enrichment via OpenRouter
-     minimal web UI · MCP tool → Polaris
+     web UI (read-write)
 ```
 
 The Worker can't reach the tailnet, so the potato polls the Worker — the potato is the client,
@@ -77,7 +77,7 @@ it safe on the public internet.
 
 ## What this is not (yet)
 
-No browser extension, no mobile app, no collaboration, no sharing, no bulk-import UI. Those turn
+No browser extension, no native mobile app, no collaboration, no sharing. Those turn
 a weekend project into a second job. If the project earns it later, it can grow them.
 
 ## Prior art worth knowing

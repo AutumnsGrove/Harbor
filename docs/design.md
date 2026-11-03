@@ -14,8 +14,8 @@ out what each item is and organizes it. Search is associative, not folder-shaped
 The product is **the save gesture**, not the library UI. Raindrop is easy; mymind is easier. The
 library only has to be good enough to trust and search.
 
-**Non-goals for v1:** browser extension, native mobile app, sharing/collaboration, bulk import
-UI, multi-user, public profiles. (See §11 for why each is deferred.)
+**Non-goals for v1:** browser extension, native mobile app, sharing/collaboration, multi-user,
+public profiles. (See §11 for why each is deferred.)
 
 ### v1 scope (settled 2026-11-03)
 
@@ -187,7 +187,7 @@ never builds.
 │ embeddings (via Nova)    │  /jobs   │ image files (local copy)     │
 │ R2: intake + mirror      │          │ HTML parsing                 │
 │                          │          │ OpenRouter enrichment        │
-│                          │          │ MCP tool → Polaris           │
+│                          │          │ (Polaris tool deferred)           │
 └──────────────────────────┘          └──────────────────────────────┘
         ▲                             ▲
         │ HTTPS                       │ Tailscale
@@ -396,7 +396,7 @@ CREATE TABLE items (
   url           TEXT,                  -- canonicalized; NULL for pure notes
   title         TEXT NOT NULL DEFAULT '',
   note          TEXT NOT NULL DEFAULT '',   -- the user's own words
-  kind          TEXT NOT NULL DEFAULT 'unknown', -- article/product/book/recipe/video/note/image
+  kind          TEXT NOT NULL DEFAULT 'article', -- one of the 12 kinds; never 'unknown'
   summary       TEXT NOT NULL DEFAULT '',
   content_text  TEXT NOT NULL DEFAULT '',   -- extracted text, feeds FTS5
   og_json       TEXT NOT NULL DEFAULT '{}', -- cover, description, site, author, published
@@ -658,7 +658,7 @@ rest adds the v1 scope without ever breaking the save path.
 | 11 | Archive rendering via Worker → R2, then the scheduled re-archive + link checker | Links keep their contents and stay honest | a weekend |
 | 12 | Export command, `harbor restore` + restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
 
-Deliberately absent: extension, native apps, sharing, collaboration, import UI, and the Polaris
+Deliberately absent: extension, native apps, sharing, collaboration, and the Polaris
 MCP tool (deferred; Polaris has no MCP support today).
 
 ---

@@ -193,7 +193,7 @@ Polaris opening `harbor.db` directly.
 2. **Worker → D1 queue claim semantics** — confirm the atomic update pattern works with D1's
    consistency model, and what happens on duplicate delivery.
 3. **Brute-force vector cache** — measure RSS and search latency on the potato at a realistic
-   library size (10k vectors × 768 dims), and confirm the startup load time is acceptable.
+   library size (10k vectors × 1024 dims), and confirm the startup load time is acceptable.
 4. **Browser Rendering from a Worker on the free plan** — confirm browser hours accounting and
    whether screenshot/PDF/HTML can be captured in one session.
 5. **Nova `embed` (#49)** — confirm `pplx-embed-v1-0.6b` really returns 1024 dimensions and that
@@ -238,8 +238,8 @@ current extraction.
   user names it and chooses to keep it. The model never silently creates or renames a Space.
 
 ### H4. ~~What the in-app composer can save~~ — **settled**
-URL + note + up to **4 images** per save, one `items` row. A quote is a note with
-`kind=quote`. No rich-text editor, no tag picker at save time (edit tags after).
+URL + note + up to **4 images** per save, one `items` row. A quote is just a note
+(there is no `quote` kind; see J1). No rich-text editor, no tag picker at save time (edit tags after).
 
 ### H5. ~~Telegram media handling~~ — **settled**
 Photos, documents, text, and albums (grouped by `media_group_id`). With no caption, the title falls
