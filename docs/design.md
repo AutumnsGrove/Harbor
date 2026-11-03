@@ -589,26 +589,29 @@ MCP tool (deferred; Polaris has no MCP support today).
 - Backups: nightly `VACUUM INTO` → zstd → R2 (30 daily snapshots) + rsync to the MacBook Air;
   media mirrors continuously to R2.
 
-**Leaning (not locked)**
+**Also settled**
 
-- ~~Go for the potato service~~ — **settled: Go** (Python's parser ecosystem loses to deployment
-  and memory simplicity).
-- ~~Svelte for the UI~~ — **settled: SvelteKit** (embedded static build).
-- Port 8895 (proposed; 8893 Cairn, 8894 Coffer already reserved).
+- Go for the potato service; SvelteKit embedded (Python loses on deployment and memory).
+- Port **8895** (8893 Cairn, 8894 Coffer already reserved); confirm free at install.
 - Notes and links share one `items` table; images are `items` with `media` rows.
-- Smart Spaces are stored rules (`auto`) evaluated live, plus explicit saved queries (`saved`)
-  rather than a materialised membership table — `space_items` exists only for manual pinning.
-- Highlight anchoring uses a text-quote selector (quote + prefix/suffix + ordinal), not DOM paths,
-  so it survives re-extraction.
+- Smart Spaces evaluate live from stored rules (`auto`), plus explicit saved queries (`saved`);
+  `space_items` exists only for manual pinning.
+- Highlights anchor with a text-quote selector (quote + prefix/suffix + ordinal + text hash), not
+  DOM paths, so they can re-anchor after re-extraction.
+- Archiving is HTML + screenshot on every save, PDF on demand.
+- Failed jobs retry 3× over ~an hour, then surface in a "needs attention" strip.
+- Export is JSON + Markdown + Netscape HTML + a media manifest and files.
+- Backups: nightly `VACUUM INTO` → zstd → R2 (30 daily snapshots) + rsync to the MacBook Air;
+  media mirrors continuously to R2.
+- R2 stays private; the browser gets short-lived presigned URLs.
+- Per-source write tokens, hashed in D1, revocable individually.
 
-**Still open** (see [open-questions.md](open-questions.md))
+**Still open**
 
-- Hybrid ranking weights (keyword vs semantic).
-- Vision model choice for images (the chat model or a dedicated one).
-- Highlight anchor edge cases and re-anchoring UX.
-- Smart Space rule vocabulary.
-- R2 access (presigned vs proxy) for archives.
-- Backup/mirror schedule and retention.
+- The **name** (LocalDrop is a placeholder).
+- Hybrid ranking weights (keyword vs semantic) — tune once there is real search data.
+- The five spikes in [open-questions.md](open-questions.md#g-things-to-verify-with-a-spike-not-decisions)
+  (streaming upload, D1 claim, vector cache, Browser Rendering, Nova embed).
 
 ---
 

@@ -60,7 +60,7 @@ it safe on the public internet.
 | File | What it is |
 |---|---|
 | [docs/design.md](docs/design.md) | The concept distilled: stack, deployment/update path, components, data flow, build order, decisions |
-| [docs/open-questions.md](docs/open-questions.md) | What still needs a decision before code — the agenda for the next Q&A pass |
+| [docs/open-questions.md](docs/open-questions.md) | The Q&A record: every design question, its decision, and why the alternatives lost |
 | [docs/research-thread.md](docs/research-thread.md) | Verbatim Polaris thread that produced the direction (104 cited sources) |
 
 ## Deployment shape

@@ -1,10 +1,12 @@
-# Open questions
+# Open questions → decisions
 
-The agenda for the next refinement pass. Nothing here blocks starting step 1 (the Worker's
-`POST /save`), but most of it blocks step 2 onward.
+The refinement agenda, worked through on 2026-11-03. Almost everything is now settled; the
+answers are folded into [design.md](design.md) and recorded here with the reasoning that produced
+them.
 
-Format: **question → why it matters → current lean.** Quoted answers get folded into
-[design.md](design.md) and checked off here.
+**Still open:** A5 (the name) and the spikes in section G. Everything else is decided.
+
+Format: ~~question~~ → **decision** → why the alternatives lost.
 
 ---
 
