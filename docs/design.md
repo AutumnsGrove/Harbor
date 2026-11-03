@@ -532,7 +532,7 @@ Five surfaces, no folders and no settings maze:
   two-path empty state: **Import Raindrop** or **Paste a first link**.
 - **Multi-select** — long-press or the select button enters a bulk bar: Delete, Tag, Add to Space,
   Refresh. Built for cleaning up an import.
-- **Save composer** — URL, note, image upload. Reachable from Home and from the quick-save page on
+- **Save composer** — URL, Markdown note, up to 10 images, and a Read later switch; it warns when the link is already saved and will merge. Reachable from Home and from the quick-save page on
   the phone. Same endpoint shape as the remote doors, written locally.
 - **Item** — media, AI + manual tags, Markdown note (rendered with a preview toggle), summary,
   source, archive link, and a quiet **related items** row (3–6 similar items from the embedding
@@ -552,12 +552,29 @@ their rule, `saved` ones open a query, `manual` ones (Read later, imported colle
 membership. Masonry columns are responsive: 1 on phone, 2–4 on desktop. Colour/brand/visual search
 is a later addition, not a v1 surface.
 
-### Visual direction (settled; mockups later)
+### Visual direction (settled 2026-11-03; mockup in `design/mockup/`)
 
-**Dark only.** No light mode, no theme switcher. The feel is calm editorial — generous
-whitespace, image-first masonry, quiet metadata — with hints of the homelab family (night-sky
-depth, amber accent) but its own distinct identity, not a Polaris clone. Mockups will be done
-separately with Claude; this is direction, not a spec, and it doesn't block plumbing.
+**Dark only**, with one reference: the clickable mockup in [`design/mockup/`](../design/mockup/README.md).
+Three directions were explored (Lantern, Chart Room, Quiet Gallery) and blended: Lantern's top bar,
+Space chips and 4-column masonry; Chart Room's teal-black ground and chart magenta; Quiet Gallery's
+single grotesque face, borderless cards and details on hover. Phone follows a native two-column
+pattern with a floating glass bar.
+
+- **Colour has three jobs.** Magenta = something you can act on (Save, active chip, focus, selection).
+  Amber = something waiting on you (pending saves, needs attention, dead links, Read later). Teal =
+  healthy or mirrored. Nothing else is coloured. The mockup has a switch that turns amber off.
+- **One face**, Schibsted Grotesk, including the reader. No serif, no mono except inline code.
+- **No borders.** Separation is surface tone and space; the one hairline is the 7% rule between list rows.
+- **Per-kind item pages** for all 12 kinds (recipe ingredients and method, video chapters and transcript,
+  product price trend, paper abstract and text-layer state, place address and hours, and so on).
+- **Highlights have four colours** (amber, magenta, teal, blue), stored in `highlights.color`.
+- **Dead links and paywalls are badges, not errors**: a card gets an amber "Link dead" badge and keeps
+  its archive; `is_paywalled` shows the same way.
+- **Recently deleted lives in Settings**, with Restore and Delete now.
+- **Keyboard shortcuts** on desktop: `/` search, `n` new save, `g h` home, `j k` move, `x` select, `?` list.
+- **Settings pages:** Tags, Spaces, Import, Recently deleted, Sources and tokens, Status, Export and
+  backup, Shortcuts, Design system.
+- Tokens: [`design/mockup/css/tokens.css`](../design/mockup/css/tokens.css) is the source of truth.
 
 **PWA:** installable (manifest, icons, full-screen) and an Android `share_target`, **no service
 worker and no offline cache**. The tailnet is assumed up; offline reading is not a v1 promise.
@@ -718,7 +735,10 @@ MCP tool (deferred; Polaris has no MCP support today).
   cap.
 - Tags are normalized on write (case/whitespace + reuse of existing canonical tags); merge leaves
   an alias behind, so re-imports don't resurrect the old spelling.
-- UI is **dark-only**, calm editorial + homelab hints, with its own identity; mockups come later.
+- UI is **dark-only**; the blended direction (Lantern layout, Chart Room colour, Quiet Gallery feel) is
+  built in `design/mockup/` and is the reference for the SvelteKit app.
+- The composer takes a URL, a Markdown note and up to **10 images** per save (Telegram albums included).
+- Recently deleted lives in Settings. Highlights have four colours. Desktop has keyboard shortcuts.
 - PWA is installable with a share target; no service worker, no offline cache.
 - No extra backup encryption: private R2 bucket + server-side encryption is the accepted risk.
 - Video/podcast transcripts are v1, fetched on the potato, best-effort, never allowed to fail a

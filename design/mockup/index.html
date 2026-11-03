@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harbor Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/screens.css">
+<style>
+/* Page shell around the always-dark app. Layout: header, screen index on the left, device frame on the right. */
+:root{--sh-bg:#f1f2ee;--sh-panel:#ffffff;--sh-ink:#1b1e1d;--sh-mute:#626a67;--sh-line:#d6d9d3;--sh-acc:#c0275f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--sh-bg:#0d1214;--sh-panel:#141b1e;--sh-ink:#e6ebe8;--sh-mute:#92a09c;--sh-line:#26312f;--sh-acc:#ff7aa6;color-scheme:dark}}
+:root[data-theme="dark"]{--sh-bg:#0d1214;--sh-panel:#141b1e;--sh-ink:#e6ebe8;--sh-mute:#92a09c;--sh-line:#26312f;--sh-acc:#ff7aa6;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--sh-bg);color:var(--sh-ink);font:14px/1.5 "Schibsted Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.shell{display:grid;grid-template-rows:auto 1fr;height:100%;max-width:1680px;margin:0 auto;padding:0 16px}
+.sh-head{display:flex;gap:16px 24px;align-items:center;flex-wrap:wrap;padding:16px 0 14px}
+.sh-head h1{font:600 20px/1.1 "Schibsted Grotesk",sans-serif;letter-spacing:-.02em;margin:0}
+.sh-head p{margin:2px 0 0;color:var(--sh-mute);font-size:12.5px}
+.sh-ctrl{margin-left:auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.seg2{display:inline-flex;background:var(--sh-panel);border:1px solid var(--sh-line);border-radius:999px;padding:3px}
+.seg2 button{all:unset;cursor:pointer;padding:6px 14px;border-radius:999px;font-size:13px;color:var(--sh-mute)}
+.seg2 button[aria-pressed="true"]{background:var(--sh-ink);color:var(--sh-bg)}
+.seg2 button:focus-visible,.nav a:focus-visible,.sh-btn:focus-visible{outline:2px solid var(--sh-acc);outline-offset:2px}
+.sh-tog{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--sh-mute);cursor:pointer}
+.sh-tog input{accent-color:var(--sh-acc);width:16px;height:16px}
+.sh-btn{all:unset;cursor:pointer;font-size:13px;color:var(--sh-mute);padding:6px 10px;border-radius:8px}
+.sh-btn:hover{color:var(--sh-ink)}
+.sh-body{display:grid;grid-template-columns:190px minmax(0,1fr);gap:20px;min-height:0;padding-bottom:16px}
+.nav{overflow:auto;padding-right:6px;font-size:13px}
+.nav h2{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--sh-mute);margin:16px 0 6px;font-weight:500}
+.nav h2:first-child{margin-top:2px}
+.nav a{display:block;color:var(--sh-ink);text-decoration:none;padding:5px 10px;border-radius:8px}
+.nav a:hover{background:var(--sh-panel)}
+.nav a[aria-current="page"]{background:var(--sh-panel);color:var(--sh-acc);font-weight:600}
+.stage{min-height:0;display:flex;justify-content:center;align-items:flex-start}
+.dev{width:100%;height:100%;border-radius:16px;overflow:hidden;background:#000;border:1px solid var(--sh-line);transition:width .3s,border-radius .3s}
+.dev.phone{width:392px;max-width:100%;border-radius:44px;padding:9px;background:#05090a;border:1px solid #2a3436;height:min(100%,860px)}
+.dev.phone .app{border-radius:36px}
+@media (max-width:900px){.sh-body{grid-template-columns:1fr;grid-template-rows:auto 1fr}.nav{display:flex;gap:6px;overflow-x:auto;padding:0 0 4px}.nav h2{display:none}.nav a{white-space:nowrap;border:1px solid var(--sh-line)}.shell{height:auto;min-height:100%}.dev{height:78vh}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="sh-head">
+    <div><h1>Harbor mockup</h1><p>Clickable, with invented sample data. Everything changes in memory only.</p></div>
+    <div class="sh-ctrl">
+      <div class="seg2" role="group" aria-label="Device"><button id="dv-d" aria-pressed="true">Desktop</button><button id="dv-p" aria-pressed="false">Phone</button></div>
+      <label class="sh-tog"><input type="checkbox" id="amber" checked> Soft amber</label>
+      <button class="sh-btn" id="reset">Reset sample data</button>
+    </div>
+  </header>
+  <div class="sh-body">
+    <nav class="nav" id="nav" aria-label="Screens"></nav>
+    <div class="stage"><div class="dev" id="dev"><div class="app" id="app"></div></div></div>
+  </div>
+</div>
+<script src="https://unpkg.com/lucide@0.400.0/dist/umd/lucide.min.js"></script>
+<script src="js/data.js"></script>
+<script src="js/covers.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/views-library.js"></script>
+<script src="js/views-item.js"></script>
+<script src="js/views-spaces.js"></script>
+<script src="js/views-settings.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* shell controls */
+const firstOf=k=>ITEMS.find(i=>i.kind===k).id;
+const GROUPS=[
+ ['Library',[['Home','home'],['Empty library','first-run'],['Needs attention','attention']]],
+ ['Item, by kind',Object.keys(KINDS).map(k=>[KINDS[k].n,'item-'+firstOf(k)])],
+ ['Reading',[['Reader','reader-a1'],['Archive','archive-a1']]],
+ ['Spaces and tags',[['Spaces','spaces'],['New Space','space-new'],['Edit a rule','space-edit-lab'],['Tags','tags']]],
+ ['Settings',[['Settings','prefs'],['Sources and tokens','doors'],['Export and backup','data'],['Import','import'],['Recently deleted','deleted'],['Status','status'],['Shortcuts','shortcuts'],['Design system','system']]]
+];
+$('#nav').innerHTML=GROUPS.map(([g,l])=>`<h2>${g}</h2>${l.map(([n,h])=>`<a href="#${h}" data-h="${h}">${n}</a>`).join('')}`).join('');
+function mark(){const h=location.hash.slice(1)||'home';$$('#nav a').forEach(a=>a.toggleAttribute('aria-current',a.dataset.h===h)||(a.dataset.h!==h&&a.removeAttribute('aria-current')));$$('#nav a').forEach(a=>{if(a.dataset.h===h)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')})}
+window.addEventListener('hashchange',mark);mark();
+const setDev=p=>{$('#dev').classList.toggle('phone',p);$('#dv-d').setAttribute('aria-pressed',!p);$('#dv-p').setAttribute('aria-pressed',p)};
+$('#dv-d').onclick=()=>setDev(false);$('#dv-p').onclick=()=>setDev(true);
+$('#amber').onchange=e=>document.documentElement.dataset.amber=e.target.checked?'on':'off';
+$('#reset').onclick=()=>location.reload();
+</script>
+</body>
+</html>

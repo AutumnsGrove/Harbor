@@ -238,7 +238,7 @@ current extraction.
   user names it and chooses to keep it. The model never silently creates or renames a Space.
 
 ### H4. ~~What the in-app composer can save~~ — **settled**
-URL + note + up to **4 images** per save, one `items` row. A quote is just a note
+URL + note + up to **10 images** per save (raised from 4 so a Telegram album fits), one `items` row. A quote is just a note
 (there is no `quote` kind; see J1). No rich-text editor, no tag picker at save time (edit tags after).
 
 ### H5. ~~Telegram media handling~~ — **settled**
@@ -310,7 +310,9 @@ document. PDF archives stay on demand.
 
 ## K. Look, durability, and the wider web
 
-### K1. ~~Visual direction~~ — **settled: dark-only editorial, homelab-adjacent**
+### K1. ~~Visual direction~~ — **settled: the blend, built in `design/mockup/`**
+Lantern layout, Chart Room colour, Quiet Gallery feel. See design.md §9 and `design/mockup/README.md`.
+Original note:
 Dark mode only. Calm editorial spacing, image-first masonry, a night-sky/amber hint from the
 homelab family but its own identity. Mockups are a separate pass with Claude; this is direction,
 not a spec.
