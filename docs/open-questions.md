@@ -353,3 +353,28 @@ forms, isolated R2 origin) and is downloadable. The app never renders archived H
 ### L4. ~~Observability~~ — **settled: logs + Status page**
 Structured JSON logs to stdout, plus a Settings **Status** page: last poll, queue depth, last
 backup, mirror lag, disk usage, last link check. No telemetry, no external logging.
+
+---
+
+## M. History, relatedness, and recovery
+
+### M1. ~~Archive version history~~ — **settled: latest only**
+One archive per item (`archives.item_id` is the PK). Scheduled re-archive overwrites only when the
+page `content_hash` changes; unchanged pages are skipped. No version history, no version picker.
+
+### M2. ~~Related items~~ — **settled: yes, 3–6**
+A quiet row at the bottom of the item page, powered by the embedding index you already maintain.
+Not a graph view; just "what else is like this".
+
+### M3. ~~Desktop quick save~~ — **settled: none**
+No Raycast/Alfred helper and no bookmarklet. The four doors stand: in-app composer, Telegram,
+iOS Shortcut / PWA share, tailnet quick-save page.
+
+### M4. ~~Restore interface~~ — **settled: CLI + drill**
+`harbor restore <snapshot>` on the potato with the container stopped, plus a documented drill that
+is actually run. Settings reports the last backup but never restores in place — the app must not
+replace the database it is running on.
+
+### M5. ~~mymind import~~ — **settled: not in v1**
+Raindrop CSV + Netscape HTML only. mymind's export is `cards.csv` plus files and desktop-only;
+revisit if a real export ever lands on disk.

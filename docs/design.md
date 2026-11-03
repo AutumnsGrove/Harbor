@@ -259,8 +259,9 @@ Front doors (settled):
    works on the tailnet, which is the tradeoff for having no public token in it.
 
 Considered and dropped: floccus (it targets WebDAV/Nextcloud, not arbitrary JSON), the browser
-bookmarklet, email-to-save, and a browser extension (Manifest V3 + store review + breaking on
-Chrome updates is the single biggest reason not to build this yourself).
+bookmarklet, email-to-save, a Mac launcher/Raycast hotkey, and a browser extension (Manifest V3 +
+store review + breaking on Chrome updates is the single biggest reason not to build this
+yourself).
 
 ### Re-saving is a merge, not a duplicate
 
@@ -283,6 +284,8 @@ the same path without adding a note. `items.url` carries a partial unique index.
 - HTML: URL, title, and folder; folders become manual Spaces.
 - Import is idempotent by canonical URL and merges like a re-save, so running it twice is safe.
 - Imported items enter the normal enrichment queue — no special pipeline.
+- **No mymind importer in v1.** Their export is `cards.csv` plus files and desktop-only; Raindrop
+  and Netscape HTML cover the real library. Revisit only if an actual mymind export lands on disk.
 
 ### The pending window
 
@@ -530,8 +533,9 @@ Five surfaces, no folders and no settings maze:
 - **Save composer** — URL, note, image upload. Reachable from Home and from the quick-save page on
   the phone. Same endpoint shape as the remote doors, written locally.
 - **Item** — media, AI + manual tags, Markdown note (rendered with a preview toggle), summary,
-  source, archive link, related items. Every field editable; **Delete** moves it to Recently
-  deleted. **Refresh** re-runs metadata/archive.
+  source, archive link, and a quiet **related items** row (3–6 similar items from the embedding
+  index). Every field editable; **Delete** moves it to Recently deleted. **Refresh** re-runs
+  metadata/archive.
 - **Reader** — extracted article view with select-to-highlight and an annotation field. Highlights
   are also listed on the item. **Articles only in v1**; PDFs and archived pages are view-only.
 - **Archive viewer** — the HTML archive opens in a **sandboxed viewer with scripts disabled**
@@ -598,6 +602,11 @@ Polaris reading the database directly. Until then, the library's job is to be go
   The purge task then deletes the row (cascading media/highlights/tags) and removes local media
   plus the R2 keys — the Worker exposes a token-gated purge route so the potato never needs R2
   credentials for ordinary deletes. A missed R2 delete is caught by the orphan sweep.
+- **Restore:** CLI + documented drill, not a UI button. `harbor restore <snapshot>` on the potato
+  with the container stopped; Settings only reports the last backup. The app should never replace
+  the database it is currently running on.
+- **Archive history:** one archive per item (`archives` PK is `item_id`). Scheduled re-archive
+  overwrites only when `content_hash` changes, so there is no version history — latest copy only.
 - **Disk guardrails:** per-file upload cap (~25 MB), a storage number in Settings, and a warning
   before the SD card gets close. The potato has room, but not infinite room.
 - **Export:** one command writes **JSON, Markdown, and Netscape HTML**, plus a `media/` folder and
@@ -643,9 +652,9 @@ rest adds the v1 scope without ever breaking the save path.
 | 7 | Video/podcast transcripts on the potato, into FTS5 + embeddings | Video is searchable by what's said | 1 evening + spike |
 | 8 | Reader view + highlights + annotations | Reading happens in the app | a weekend |
 | 9 | Tags + Smart Spaces: global tag manager (rename/merge/aliases), rules, chips, saved queries, Read later, bulk actions | Browsing by theme, not just search | a weekend |
-| 10 | Brute-force vector search (hybrid ranking) — needs Nova's `embed` primitive (#49) | "That article about the thing" | 1 evening |
+| 10 | Brute-force vector search (hybrid ranking) + related items — needs Nova's `embed` primitive (#49) | "That article about the thing", and what sits next to it | 1 evening |
 | 11 | Archive rendering via Worker → R2, then the scheduled re-archive + link checker | Links keep their contents and stay honest | a weekend |
-| 12 | Export command, backup restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
+| 12 | Export command, `harbor restore` + restore drill, storage/mirror UI | Trustworthy to rely on daily | ongoing |
 
 Deliberately absent: extension, native apps, sharing, collaboration, import UI, and the Polaris
 MCP tool (deferred; Polaris has no MCP support today).
@@ -718,6 +727,12 @@ MCP tool (deferred; Polaris has no MCP support today).
 - First run offers Import or a first link; no multi-step wizard.
 - Archived HTML renders in a sandboxed, script-disabled viewer; the reader is the default.
 - Structured logs + a Settings Status page; no telemetry.
+- Archives keep the latest copy only; a changed `content_hash` overwrites, unchanged pages are
+  skipped.
+- Item pages show 3–6 related items from the embedding index.
+- No Mac launcher/quick-save helper; the four chosen doors are enough.
+- Restore is a CLI command plus a documented, actually-run drill — never a Settings button.
+- No mymind importer in v1; Raindrop CSV + Netscape HTML only.
 - The name is **Harbor**. The CNCF Harbor container-registry collision is accepted: this is a
   personal project, not a registry, and the gesture meaning is the point.
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
