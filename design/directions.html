@@ -277,6 +277,61 @@ h1{font:500 clamp(30px,4.4vw,46px)/1.05 var(--serif);letter-spacing:-.01em;margi
 .gl-tabs button.on{background:#2a2a2d;color:var(--ink)}
 .gl-tabs button.fab{width:56px;background:var(--acc);color:#1b1206}
 .gl-tabs svg{width:20px;height:20px}
+
+/* ============ Phone (native two-column pattern, themed per direction) ============ */
+.d-lantern.n{--s:var(--card);--tf:"Newsreader",Georgia,serif;--tw:500;--r:18px}
+.d-chart.n{--s:var(--panel);--tf:"Barlow Semi Condensed",sans-serif;--tw:700;--r:4px}
+.d-gallery.n{--s:var(--surf);--tf:"Schibsted Grotesk",sans-serif;--tw:600;--r:22px}
+.mock.phone.n{background:var(--bg);display:flex;flex-direction:column;padding:0}
+.n .p-top{display:flex;justify-content:space-between;padding:14px 14px 0}
+.n .rb{all:unset;flex:none;cursor:pointer;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--s);border:1px solid rgba(255,255,255,.08);color:var(--ink)}
+.n .rb svg{width:20px;height:20px}
+.n .rb.acc{color:var(--acc)}
+.n .p-pill{display:flex;background:var(--s);border:1px solid rgba(255,255,255,.08);border-radius:999px;height:44px;padding:0 6px;align-items:center}
+.n .p-pill button{all:unset;cursor:pointer;width:42px;height:38px;display:grid;place-items:center;color:var(--ink)}
+.n .p-pill button svg{width:20px;height:20px}
+.n .p-pill .done{width:auto;padding:0 14px;font-weight:600;color:var(--acc)}
+.n .p-title{font:var(--tw) 34px/1.05 var(--tf);letter-spacing:-.015em;padding:14px 16px 4px;color:var(--ink)}
+.n .p-stat{font:400 9.5px var(--mono,"Martian Mono",monospace);letter-spacing:.08em;text-transform:uppercase;color:var(--mute);padding:0 16px 8px}
+.n .p-scroll{flex:1;overflow-y:auto;padding:10px 10px 110px;scrollbar-width:none}
+.n .feed{columns:2!important;--gap:10px;column-gap:10px}
+.n .pc{background:var(--s);border-radius:var(--r);overflow:hidden;position:relative;cursor:pointer;border:1px solid transparent}
+.n .pc.sel{border-color:var(--acc)}
+.n .pc-m{position:relative;background:#000}
+.n .pc-b{padding:12px 12px 12px}
+.n .pc h3{font:var(--tw) 15.5px/1.2 var(--tf);color:var(--ink);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;text-wrap:balance}
+.n .pc .ns{font-size:13px;line-height:1.3;color:var(--ink);opacity:.82;margin-top:5px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.n .pc .ns code{font:11.5px ui-monospace,monospace;background:rgba(255,255,255,.08);padding:0 4px;border-radius:4px}
+.n .pills{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.n .pill{display:inline-flex;gap:5px;align-items:center;background:rgba(255,255,255,.09);border-radius:999px;padding:5px 10px;font-size:12.5px;color:var(--ink)}
+.n .pill svg{width:13px;height:13px;color:var(--acc)}
+.n .mt{color:var(--mute);font-size:11.5px;margin-top:9px;line-height:1.25}
+.n .pc .badge{position:absolute;right:7px;bottom:7px;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);border-radius:6px;padding:2px 7px;font-size:11px;font-variant-numeric:tabular-nums}
+.n .pc .badge.warn{left:7px;right:auto;color:var(--acc)}
+.n .pc.dead .pc-m{filter:saturate(.3)}
+.n .pc.pending{border:1px dashed var(--dim)}
+.n .pc.pending .pc-m{height:70px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.07),transparent) 0 0/200px 100%;animation:sh 1.8s linear infinite}
+.n .ck{position:absolute;right:8px;top:8px;width:24px;height:24px;border-radius:50%;border:2px solid rgba(255,255,255,.7);background:rgba(0,0,0,.35);display:none;place-items:center;z-index:2}
+.n .selmode .ck{display:grid}
+.n .pc.sel .ck{background:var(--acc);border-color:var(--acc);color:#111}
+.n .ck svg{width:14px;height:14px;opacity:0}
+.n .pc.sel .ck svg{opacity:1}
+.n .p-bar{position:absolute;left:12px;right:12px;bottom:14px;display:flex;gap:8px;align-items:center}
+.n .p-bar .rb{width:52px;height:52px;background:rgba(48,48,52,.55);backdrop-filter:blur(22px) saturate(1.4);border-color:rgba(255,255,255,.14)}
+.n .p-search{flex:1;min-width:0;height:52px;border-radius:999px;display:flex;align-items:center;gap:10px;padding:0 18px;background:rgba(48,48,52,.55);backdrop-filter:blur(22px) saturate(1.4);border:1px solid rgba(255,255,255,.14);color:var(--mute)}
+.n .p-search svg{width:20px;height:20px}
+.n .p-search input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--ink);font-size:16px}
+.n .p-search input::placeholder{color:var(--mute)}
+.n .p-bulk{justify-content:space-around;height:56px;border-radius:999px;background:rgba(48,48,52,.7);backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.14);padding:0 8px}
+.n .p-bulk button{all:unset;cursor:pointer;display:grid;justify-items:center;gap:2px;font-size:10px;color:var(--ink);padding:0 8px}
+.n .p-bulk button svg{width:18px;height:18px}
+.n .p-bulk .ct{font-weight:600;font-size:13px;color:var(--acc)}
+.n .sheet{position:absolute;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
+.n .sheet>div{width:100%;background:#1c1c1f;border-radius:26px 26px 0 0;padding:18px 16px 28px}
+.n .sheet h4{margin:0 0 8px;font:var(--tw) 20px var(--tf)}
+.n .sheet button{all:unset;cursor:pointer;display:flex;justify-content:space-between;width:100%;box-sizing:border-box;padding:13px 6px;border-bottom:1px solid rgba(255,255,255,.07);font-size:16px}
+.n .sheet button small{color:var(--mute)}
+.n .sheet button[aria-pressed="true"]{color:var(--acc)}
 .mock :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .mock [hidden]{display:none!important}
 .d-gallery.phone .gl-sp{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-bottom:26px}
@@ -298,7 +353,7 @@ h1{font:500 clamp(30px,4.4vw,46px)/1.05 var(--serif);letter-spacing:-.01em;margi
   <div id="info"></div>
   <div class="stage">
     <div><p class="lbl">Desktop home, scrolls inside the frame</p><div class="frame"><div id="desk" class="mock"></div></div></div>
-    <div class="phonecol"><p class="lbl">Phone home (PWA)</p><div class="frame"><div id="phone" class="mock phone"></div></div></div>
+    <div class="phonecol"><p class="lbl">Phone home (PWA). Tap the check to select, the chevron for Spaces</p><div class="frame"><div id="phone" class="mock phone"></div></div></div>
   </div>
 
   <p class="note" id="lean"></p>
@@ -412,7 +467,56 @@ function feedItems(st){
   const q=st.q.trim().toLowerCase(),sp=SPACES.find(s=>s.id===st.space);
   return ITEMS.filter(i=>(st.kind==='all'||i.kind===st.kind)&&(!sp||sp.f(i))&&(q.length<2||[i.title,i.site,i.tags.join(' '),i.sum||'',i.text||'',i.meta||'',KINDS[i.kind].n].join(' ').toLowerCase().includes(q)));
 }
+
+const PTAGS=it=>it.tags.slice(0,it.kind==='note'||it.kind==='tweet'?2:2);
+function cardPhone(it,sel,selmode){
+  const K=KINDS[it.kind];
+  const ck=`<span class="ck">${ico('check')}</span>`;
+  if(it.pending)return `<article class="pc pending"><div class="pc-m"></div><div class="pc-b"><h3>${it.title}</h3><p class="mt">Saving from Telegram · ${it.age}</p></div></article>`;
+  const txt=it.text||it.sum||it.meta||'';
+  const badge=it.dur?`<div class="badge">${it.dur}</div>`:it.dead?`<div class="badge warn">Link dead</div>`:'';
+  const media=it.cv?`<div class="pc-m">${cover(it)}${badge}</div>`:'';
+  const title=it.kind==='note'?'SD card wear':it.kind==='tweet'?it.title:it.title;
+  const body=(it.kind==='note'||it.kind==='tweet')?`<p class="ns" style="font-size:15px;opacity:1;-webkit-line-clamp:6">${it.text}</p>`:`<h3>${title}</h3>${txt?`<p class="ns">${txt}</p>`:''}`;
+  return `<article class="pc${it.dead?' dead':''}${sel.has(it.id)?' sel':''}" data-id="${it.id}">${ck}${media}<div class="pc-b">${body}<div class="pills"><span class="pill">${ico(K.i)}${K.n}</span>${PTAGS(it).map(t=>`<span class="pill">${t}</span>`).join('')}</div><p class="mt">${it.site} · ${it.age}</p></div></article>`;
+}
+function mountPhone(root,dir){
+  const st={q:'',kind:'all',space:null,sel:new Set(),selmode:false};
+  root.className='mock phone n d-'+(dir==='chart-room'?'chart':dir);
+  root.innerHTML=`<div class="p-top"><button class="rb" data-p="sheet" aria-label="Spaces">${ico('chevron-left')}</button><div class="p-pill"><button data-p="select" aria-label="Select">${ico('circle-check')}</button><button aria-label="More">${ico('ellipsis')}</button></div></div>
+  <h2 class="p-title" style="margin:0"></h2>${dir==='chart-room'?'<p class="p-stat">Queue 1 · Mirror ok · Backup 03:00 · Disk 41%</p>':''}
+  <div class="p-scroll"><div class="feed"></div></div>
+  <div class="p-bar"></div><div class="sheet" hidden></div>`;
+  const feed=root.querySelector('.feed'),bar=root.querySelector('.p-bar'),title=root.querySelector('.p-title'),sheet=root.querySelector('.sheet');
+  function render(){
+    const list=feedItems(st),idle=!st.q.trim()&&!st.space;
+    const sp=SPACES.find(s=>s.id===st.space);
+    title.textContent=sp?sp.n:'All items';
+    feed.parentElement.classList.toggle('selmode',st.selmode);
+    feed.innerHTML=(idle?cardPhone({...PENDING,pending:1},st.sel):'')+list.map(i=>cardPhone(i,st.sel)).join('')+(list.length?'':`<p class="empty">Nothing matches “${st.q.trim()}” in this sample.</p>`);
+    root.querySelector('[data-p="select"]').outerHTML=st.selmode?`<button class="done" data-p="select">Done</button>`:`<button data-p="select" aria-label="Select">${ico('circle-check')}</button>`;
+    bar.innerHTML=st.selmode?`<div class="p-search p-bulk" style="flex:1"><span class="ct">${st.sel.size} selected</span><button>${ico('trash-2')}Delete</button><button>${ico('tag')}Tag</button><button>${ico('layers')}Space</button><button>${ico('refresh-cw')}Refresh</button></div>`
+     :`<button class="rb" data-p="later" aria-label="Read later">${ico('clock')}</button><label class="p-search">${ico('search')}<input class="q" type="search" placeholder="Search" value="${st.q.replace(/"/g,'&quot;')}" aria-label="Search"></label><button class="rb acc" data-p="save" aria-label="Save">${ico('plus')}</button>`;
+    window.lucide&&lucide.createIcons({root});
+    const q=bar.querySelector('.q');if(q){q.oninput=()=>{st.q=q.value;const pos=q.selectionStart;renderKeep(pos)}}
+  }
+  function renderKeep(pos){render();const q=bar.querySelector('.q');if(q){q.focus();q.setSelectionRange(pos,pos)}}
+  root.addEventListener('click',e=>{
+    const p=e.target.closest('[data-p]'),c=e.target.closest('.pc[data-id]'),sp=e.target.closest('[data-space]');
+    if(sp){st.space=sp.dataset.space||null;sheet.hidden=true;render();return}
+    if(sheet.contains(e.target)&&e.target===sheet.firstElementChild?.parentElement){sheet.hidden=true;return}
+    if(p){const a=p.dataset.p;
+      if(a==='select'){st.selmode=!st.selmode;if(!st.selmode)st.sel.clear();render()}
+      if(a==='later'){st.space=st.space==='later'?null:'later';render()}
+      if(a==='sheet'){sheet.innerHTML=`<div><h4>Spaces</h4><button data-space="" aria-pressed="${!st.space}">All items<small>1,284</small></button>${SPACES.map(s=>`<button data-space="${s.id}" aria-pressed="${st.space===s.id}">${s.n}<small>${s.t} · ${s.lib}</small></button>`).join('')}</div>`;sheet.hidden=false}
+      return}
+    if(c&&st.selmode){const id=c.dataset.id;st.sel.has(id)?st.sel.delete(id):st.sel.add(id);render()}
+  });
+  sheet.addEventListener('click',e=>{if(e.target===sheet)sheet.hidden=true});
+  render();
+}
 function mount(root,dir,mobile){
+  if(mobile){mountPhone(root,dir);return}
   const st={q:'',kind:'all',space:null,dismissed:false,extra:[]};
   root.className='mock '+(mobile?'phone ':'')+'d-'+(dir==='chart-room'?'chart':dir);
   const D=dir;
@@ -480,7 +584,7 @@ function mount(root,dir,mobile){
 const INFO={
  lantern:{
   pitch:'Home reads like a good magazine index: a search pill, space chips, then covers with serif titles. Amber is used for one job, the thing you can act on.',
-  facts:[['Best at','Browsing and rereading. Titles, summaries and covers all get room.'],['Costs you','Medium density. About 4 columns on desktop, fewer items per screen than Chart Room.'],['Layout','Top bar, space chips, kind filters, 4-column masonry. Bottom tab bar on the phone.']],
+  facts:[['Best at','Browsing and rereading. Titles, summaries and covers all get room.'],['Costs you','Medium density. About 4 columns on desktop, fewer items per screen than Chart Room.'],['Layout','Top bar, space chips, kind filters, 4-column masonry. Phone uses the shared two-column pattern.']],
   sw:['#0b101b','#121a2a','#ebe8e1','#8f99ad','#eaa84a'],
   type:[['Newsreader','titles, notes, quotes','font-family:Newsreader,serif'],['Instrument Sans','interface, metadata','font-family:Instrument Sans,sans-serif']]},
  'chart-room':{
@@ -490,7 +594,7 @@ const INFO={
   type:[['Barlow Semi Condensed','titles','font-family:Barlow Semi Condensed,sans-serif;font-weight:600'],['Martian Mono','codes, counts, labels','font-family:Martian Mono,monospace;font-size:17px']]},
  gallery:{
   pitch:'One box does both jobs. Type to search; paste a link and the same box offers to save it. Cards are images with a title, and the details appear when you hover.',
-  facts:[['Best at','The save gesture. Nothing sits between you and a new save, and the grid stays calm.'],['Costs you','Less visible structure. Tags, counts and status are one click away, and a pasted URL means save, never search.'],['Layout','Slim icon rail, one large bar, space pills, roomy 3-column masonry. Floating dock on the phone.']],
+  facts:[['Best at','The save gesture. Nothing sits between you and a new save, and the grid stays calm.'],['Costs you','Less visible structure. Tags, counts and status are one click away, and a pasted URL means save, never search.'],['Layout','Slim icon rail, one large bar, space pills, roomy 3-column masonry. Phone uses the shared two-column pattern.']],
   sw:['#0b0b0c','#151516','#eceae5','#898782','#f1b358'],
   type:[['Schibsted Grotesk','everything, one family','font-family:Schibsted Grotesk,sans-serif']]}
 };
