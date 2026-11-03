@@ -1,0 +1,22 @@
+# OS / editor
+.DS_Store
+*.swp
+
+# Secrets
+.env
+.env.*
+.dev.vars
+wrangler.toml.local
+
+# Local data
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Build output
+bin/
+dist/
+node_modules/
