@@ -150,6 +150,8 @@ Meridian tap ───────► systemctl start harbor-update.service  (no
   `GET /api/update/status`, `GET /api/busy`.
 - Meridian target: `kind: compose`, `dir: /home/autumn/Harbor`, `service: harbor`,
   `update: { kind: unit, unit: harbor-update.service }`.
+- Full tile, vital, allowlist, observed-unit, and homelab-repo checklist:
+  [docs/meridian.md](meridian.md). Do not wire any of it before `/healthz` exists on the box.
 - The watcher never updates `docker-compose.yml`, the units, or the script themselves — those come
   from the checkout on the potato (`cd ~/Harbor && git pull && deploy/install.sh`).
 - Rollback matters more here than for Warbler: SQLite migrations only go forward, so the snapshot
