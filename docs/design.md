@@ -660,6 +660,11 @@ Polaris reading the database directly. Until then, the library's job is to be go
 Each phase exits with something usable. Steps 0–4 are already a working link + note manager; the
 rest adds the v1 scope without ever breaking the save path.
 
+**The actual task lists, exit criteria, risks, and per-phase tests live in
+[docs/plans/](plans/README.md)** — one document per phase, plus [testing.md](plans/testing.md) (TDD
+and fuzzing) and [spikes.md](plans/spikes.md) (the eight verifications that gate a phase). This table
+is the summary; it does not drift, because the plans reference it and design.md wins any conflict.
+
 | # | Step | Phase exit | Est. |
 |---|---|---|---|
 | 0 | Plumbing: repo skeleton, embedded SvelteKit, image, compose, GHCR publish, update watcher, `/healthz`, identity lock | Deploys and updates itself | a weekend |
@@ -761,6 +766,17 @@ MCP tool (deferred; Polaris has no MCP support today).
 - The Polaris MCP tool is **deferred out of v1**. Polaris does not support MCP servers today; no
   read path is built for it.
 - Remote writes authenticate with per-source bearer tokens, hashed in D1, revocable one at a time.
+  The potato holds its own `potato` token, so it rotates independently of the public doors.
+- Claimed jobs carry a **lease** (`claimed_at` + `lease_until`, 10 min) so a potato that dies mid-job
+  cannot strand a save; the Worker's cron returns expired claims to `queued` and a job that exhausts
+  its attempts becomes `failed` and is surfaced, never retried forever.
+- Telegram albums are assembled by `(chat_id, media_group_id)` and held back from claiming for ~10 s,
+  because a media group arrives as separate updates with no completion signal. This is the one
+  deliberate delay in the pipeline.
+- FTS5 rows are written explicitly in the same transaction as the item (no triggers), keyed by a
+  surrogate `seq INTEGER PRIMARY KEY AUTOINCREMENT` so rowids are never reused or re-shuffled.
+- Duplicate-note merging is a no-op when the incoming note is textually identical to one already
+  present; imported highlights default to colour `amber` and `anchor_json.source = 'imported'`.
 - Backups: nightly `VACUUM INTO` → zstd → R2 (30 daily snapshots) + rsync to the MacBook Air;
   media mirrors continuously to R2.
 
@@ -775,13 +791,31 @@ MCP tool (deferred; Polaris has no MCP support today).
   DOM paths, so they can re-anchor after re-extraction.
 - R2 stays private; the browser gets short-lived presigned URLs.
 
-**Still open**
+### Still open
 
 - Hybrid ranking weights (keyword vs semantic) — tune once there is real search data.
 - The implementation spikes in
   [open-questions.md](open-questions.md#g-things-to-verify-with-a-spike-not-decisions) (streaming
   upload, D1 claim, vector cache, Browser Rendering, PDF extraction, port, transcripts). Nova's
   `embed` prerequisite has landed, so vector search is no longer blocked on Nova.
+
+### How it is built (settled 2026-11-03)
+
+- **Test-driven development.** Every behaviour starts as a failing test; a commit that adds behaviour
+  without the test that demanded it is rejected on review. Pure rules and store behaviour are covered
+  first, because they are the rules a user notices.
+- **Fuzzing on every untrusted-input boundary.** Go's native fuzzer (`testing.F`, corpus committed in
+  `testdata/fuzz/`) for URL canonicalisation, HTML/PDF extraction, FTS query building, Telegram
+  updates, Space rules, highlight anchors, media keys, and Markdown sanitisation;
+  `pgregory.net/rapid` for relational invariants (idempotence, merge commutativity, rule/SQL
+  equivalence, import idempotence) and model-based queue tests; `fast-check` on the Worker/Frontend
+  side. Full table: [plans/testing.md](plans/testing.md).
+- **AI output is asserted for shape, not content.** Schema validity, a kind from the 12, 3–6 tags,
+  1024 dims. Quality is tracked with a scored fixture set and reported, never used as a deploy gate.
+- **A phase is not done until it is deployed** through the phase-0 update path and its exit demo has
+  been run on the potato, from the door a human would actually use.
+- **The plans are the plan; design.md is the truth.** If the build disproves a decision here, the
+  decision log changes first, then the plan, then the mockup.
 
 ---
 

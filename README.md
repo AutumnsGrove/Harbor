@@ -1,9 +1,11 @@
 # Harbor
 
-> **Status: concept, with a design mockup.** No product code yet. Name is settled: **Harbor** — a place to bring things in and
-> keep them safe. The collision with CNCF Harbor (the container registry) is known and accepted;
-> this is a personal library, not a registry. The goal of this repo right now is to nail the shape
-> of the thing before any of it exists.
+> **Status: concept and design complete, build planned.** No product code yet. Name is settled:
+> **Harbor** — a place to bring things in and keep them safe. The collision with CNCF Harbor (the
+> container registry) is known and accepted; this is a personal library, not a registry. The shape is
+> nailed down in [docs/design.md](docs/design.md), the interface in
+> [design/mockup/](design/mockup/README.md), and the build is sequenced (with tests first) in
+> [docs/plans/](docs/plans/README.md).
 
 A personal save-anything library for one person, built to replace a Raindrop Pro + mymind
 subscription ($157/year) with something owned outright.
@@ -61,11 +63,17 @@ it safe on the public internet.
 
 | File | What it is |
 |---|---|
-| [docs/design.md](docs/design.md) | The concept distilled: stack, deployment/update path, components, data flow, build order, decisions |
+| [docs/design.md](docs/design.md) | The concept distilled: stack, deployment/update path, components, data flow, data model, decisions |
+| [docs/plans/](docs/plans/README.md) | **The build plan**: 13 phase plans with task lists and exit criteria, a TDD + fuzzing strategy, and the 8 spike gates |
 | [docs/open-questions.md](docs/open-questions.md) | The Q&A record: every design question, its decision, and why the alternatives lost |
 | [design/mockup/](design/mockup/README.md) | The clickable design mockup: every screen on desktop and phone, plus the design system |
 | [docs/meridian.md](docs/meridian.md) | Meridian tile/vital/control snippets and the homelab-repo checklist for deploy day |
 | [docs/research-thread.md](docs/research-thread.md) | Verbatim Polaris thread that produced the direction (104 cited sources) |
+
+**How it gets built:** test-driven, with fuzzing on every untrusted-input boundary (HTML, PDFs, URLs,
+model JSON, Telegram payloads). The rule is that a behaviour starts as a failing test and a phase is
+not done until it has been deployed and its exit demo run on the potato. See
+[docs/plans/testing.md](docs/plans/testing.md).
 
 ## Deployment shape
 
