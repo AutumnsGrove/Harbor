@@ -27,13 +27,18 @@ archive of PDFs as HTML, replay of interactive pages.
 ## Deliverables
 
 ```
-worker/src/render.ts        Browser Rendering: content() → HTML, screenshot(), pdf() (on demand)
+worker/src/render.ts        `POST /render {url, kinds}` (potato scope): Browser Rendering content() → HTML,
+                            screenshot(), pdf() (on demand). Synchronous — the potato waits (S4 measures
+                            the time; switch to accepted-then-poll only if it exceeds ~60 s)
 worker/src/presign.ts       extend: archive keys, 5 min TTL
-worker/migrations/0002_archive.sql   renders table (job_id, kind, r2_key, bytes, content_hash)
+worker/migrations/<next>_renders.sql   transient `renders` records only; the potato's `archives` table is
+                             the authoritative per-item record (numbered in merge order)
 server/internal/archive/
   request.go    ask the Worker to render; retry; never block the item
   store.go      archives row, content_hash, screenshot key, pdf key
-  check.go      the staggered scheduler: >30 days old, ≤50/day, jitter
+  check.go      the staggered link checker, registered in the in-process scheduler: >30 days old,
+                ≤50/day, jitter; fetches and hashes the extracted text on the potato and asks the
+                Worker to re-render only when that hash changed
   status.go     ok|dead|error transitions, keep-last-archive rules
 server/internal/httpapi/archive.go   presigned redirect, "download original file"
 web/src/routes/archive/[id]/+page.svelte    iframe sandbox="" + screenshot + PDF button
@@ -72,6 +77,8 @@ web/src/lib/components/LinkBadge.svelte     dead / paywalled / error
    URL rather than proxying (a test on the 302 and its `Location`).
 8. A page that is 100% JS (empty `content()` before hydration) still yields a screenshot and a
    "reader text unavailable" state — the item is not broken.
+9. **Checker budget:** 50 due items whose content is unchanged make 50 potato-side fetches and **zero**
+   render requests; one changed page makes exactly one. A dead page (404) makes none.
 
 ## Tasks
 
@@ -80,15 +87,17 @@ web/src/lib/components/LinkBadge.svelte     dead / paywalled / error
 - [ ] Single-file inlining: a small, dependency-light implementation on the Worker (or `monolith` via
       WASM if it fits the bundle budget — record the choice and size).
 - [ ] `archives` table + migration; `content_hash` computed by the Worker over the rendered HTML.
-- [ ] Archive job in the queue after extraction (phase 3 order): fetch → extract → classify → archive →
-      embed. Archive failure must not skip embedding.
+- [ ] The render request is made right after fetch/extract and runs asynchronously; it never gates
+      classify, tag, or embed (design §6 step 3). Archive failure is a retryable job, never a failed
+      item.
 - [ ] Card image preference order: `og:image` → screenshot → placeholder; never a broken image.
 - [ ] Viewer route: screenshot first, "view archive" loads the sandboxed iframe on demand (it is heavy),
       "download HTML" and "download PDF".
 - [ ] Link badge: dead (amber), paywalled (amber, from `is_paywalled`), error (amber, quieter). Dead
       badge appears on the card and the item page, with "archived on <date>" beside it.
-- [ ] Scheduler: daily job on the potato (not the Worker), staggered, capped, with a Status page line
-      ("last link check", "next batch").
+- [ ] Link checker registered in the in-process scheduler (state in `task_runs`), staggered, capped,
+      decoupled from rendering as described above, with a Status page line ("last link check", "next
+      batch").
 - [ ] Re-archive on manual Refresh reuses the same path and the same content-hash rule.
 - [ ] R2 lifecycle: old archive keys on overwrite, orphan sweep extended to `archives/` prefix.
 - [ ] Update design.md §11 with the exact caps, the retention rule for superseded archives, and the
@@ -117,14 +126,18 @@ Demo:
 
 ## Risks
 
-- **Browser Rendering cost/limits.** S4's arithmetic is the budget; if the free tier is tighter than
-  assumed, the archive becomes weekly rather than per-save for low-value kinds, or screenshot-only.
-  Record the decision in design.md.
+- **Browser Rendering cost/limits.** The free plan is 10 browser-minutes a day and 3 concurrent
+  browsers. That is why the link checker fetches and hashes on the potato and renders only on change.
+  S4's arithmetic is the budget; if it is tighter than assumed, the archive becomes weekly rather
+  than per-save for low-value kinds, or screenshot-only. Record the decision in design.md.
 - **Single-file HTML is a trap for size.** Inline images can explode the 20 MB cap; cap per-asset
   inlining (e.g. ≤200 KB each) and skip the rest, recording how many were skipped.
 - **Sandbox escape** is the security boundary of this phase. No `allow-same-origin` with
-  `allow-scripts`, ever; serve archives from R2's own origin so even a mistake isn't same-origin with the
-  library. Test the headers, not just the iframe attributes.
+  `allow-scripts`, ever; archives load from R2's own origin so even a mistake isn't same-origin with the
+  library. A presigned R2 object comes back with only the headers stored on the object, so we cannot
+  attach a CSP there: the controls are `sandbox=""` on the iframe, scripts stripped at render time, and
+  the different origin. Test those three; do not claim a CSP the origin cannot send. The *app's* CSP
+  must allow exactly the R2 host for `frame-src` and `img-src`.
 - **Dead-link checking burns the site's goodwill.** Real UA, low volume, respect `Retry-After`, no
   retries on 4xx. 50/day is the cap for a reason.
 - **Content hashes that change every render** (timestamps, nonces in the HTML) make every re-archive

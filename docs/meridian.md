@@ -55,7 +55,9 @@ Counts only, no titles or URLs:
 }
 ```
 
-`/api/status` is loopback-only (Meridian probes `localhost`); it is not part of the public surface.
+`/api/status` is exempt from the identity lock only when the Tailscale identity header is absent —
+i.e. a host-local caller such as Meridian probing `localhost`; counts only, no content (design §3
+explains why "loopback-only" cannot be tested inside Docker). It is not part of the public surface.
 `/healthz` stays a cheap static answer and must never wait on SQLite, the poll loop, or a model
 call — the tile would flap during normal work.
 

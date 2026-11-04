@@ -31,12 +31,12 @@ deployment/memory cost — the parser has to work in Go.
 ## The shape (60 seconds)
 
 ```
- phone / browser / Telegram / bookmarklet
+ iOS Shortcut / Telegram
                  │  HTTPS, always works
                  ▼
      Cloudflare Worker  ── public, write-only
      POST /save + /upload → D1 queue + R2 intake
-     Browser Rendering, OpenRouter embeddings via Nova
+     Browser Rendering · done jobs kept for replay
                  ▲
                  │  potato polls outbound (no tunnel, no open ports)
                  ▼
@@ -46,8 +46,9 @@ deployment/memory cost — the parser has to work in Go.
 ```
 
 The Worker can't reach the tailnet, so the potato polls the Worker — the potato is the client,
-never the server. The Worker can only *append*; it can never read the library. That's what makes
-it safe on the public internet.
+never the server. Public door tokens can only *append*; they can never claim, read or delete
+anything. That's what makes the Worker safe on the public internet. (Saves from the app itself, the
+quick-save page and the Android share target go straight to the potato over the tailnet.)
 
 - **The potato holds the irreplaceable thing** (the SQLite library + local media) → nightly
   snapshot to R2 (30 days) plus an rsync copy to this MacBook Air.
@@ -64,7 +65,7 @@ it safe on the public internet.
 | File | What it is |
 |---|---|
 | [docs/design.md](docs/design.md) | The concept distilled: stack, deployment/update path, components, data flow, data model, decisions |
-| [docs/plans/](docs/plans/README.md) | **The build plan**: 13 phase plans with task lists and exit criteria, a TDD + fuzzing strategy, and the 8 spike gates |
+| [docs/plans/](docs/plans/README.md) | **The build plan**: 13 phase plans with task lists and exit criteria, a TDD + fuzzing strategy, and the 12 spike gates |
 | [docs/open-questions.md](docs/open-questions.md) | The Q&A record: every design question, its decision, and why the alternatives lost |
 | [design/mockup/](design/mockup/README.md) | The clickable design mockup: every screen on desktop and phone, plus the design system |
 | [docs/meridian.md](docs/meridian.md) | Meridian tile/vital/control snippets and the homelab-repo checklist for deploy day |

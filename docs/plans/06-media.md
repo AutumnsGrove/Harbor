@@ -2,8 +2,11 @@
 
 **Status:** planned · **Design refs:** [§6](../design.md#6-enrichment-pipeline) (image and document
 jobs), [§11](../design.md#11-operations) (content addressing, mirror), [H1/J4](../open-questions.md)
-**Depends on:** phase 2 (04 for remote intake in practice) · **Gate:**
-[S6](spikes.md#s6--pdf-text-extraction-in-pure-go) · **Est:** a weekend
+**Depends on:** phase 2 (phase 4 for remote intake in practice) · **Gate:**
+[S6](spikes.md#s6--pdf-text-extraction-in-pure-go),
+[S12](spikes.md#s12--image-decode-memory-and-exif-orientation) · **Est:** a weekend. This phase also
+owns the Telegram photo/document/album demo that phase 4 deferred, and turns on claiming `upload`
+jobs.
 
 ## Goal
 
@@ -30,8 +33,10 @@ unsupported and fail with a clear message), archive rendering of PDFs (phase 11)
 server/internal/media/
   store.go        content-addressed write (temp → fsync → rename), dedupe by sha256
   hash.go         streaming sha256 (never buffers the file)
-  thumb.go        DecodeConfig bounds → thumbnail ≤1600px, EXIF orientation, JPEG/PNG/WebP
-  mirror.go       background upload of rows with empty r2_key, retrying, never blocking
+  thumb.go        DecodeConfig bounds → thumbnail ≤1600px written as JPEG, EXIF orientation (approach
+                  and pixel cap from S12), decode JPEG/PNG/GIF (+WebP via x/image/webp)
+  mirror.go       background upload of rows with empty r2_key via the Worker's PUT /mirror/<key>
+                  (potato scope; key media/<sha[0:2]>/<sha>), retrying, never blocking
   probe.go        dimensions, content type sniffing (http.DetectContentType + extension fallback)
 server/internal/extract/
   pdf.go          pure-Go text layer, page cap, timeout, scan heuristic
@@ -66,8 +71,9 @@ web/src/lib/components/MediaGrid.svelte, Lightbox.svelte, PdfBadge.svelte
 3. Streaming hash: a 25 MB file is hashed with RSS growth <5 MB (assert via a generated reader that
    tracks read size, not a real RSS probe in CI).
 4. Thumbnail: a 6000×4000 JPEG produces a ≤1600 px long edge image, orientation applied, and peak
-   memory bounded (decode into a scaled image, not full decode then scale — measure on the potato and
-   record).
+   memory bounded. The standard library has no scale-on-decode for JPEG, so the bound is the pixel
+   cap from S12 checked with `DecodeConfig` *before* decoding (an over-cap image is stored
+   undescribed with a badge, never rejected) — measure on the potato and record.
 5. A corrupt image fails the job with a typed error and the original is still stored (a broken file is
    still the user's file).
 6. Vision: recorded fixtures for a screenshot, a photo, a receipt (OCR text), and a diagram; kind,
@@ -84,6 +90,14 @@ web/src/lib/components/MediaGrid.svelte, Lightbox.svelte, PdfBadge.svelte
     sets the key and never re-uploads.
 11. `GET /media/<sha>` serves with the right content type, supports `Range`, and refuses a key that is
     not 64 hex chars.
+12. **Album** (moved from phase 4): three photo updates from the fake Worker (one job, three blobs,
+    ordered by `n`) become **one item with three `media` rows**; with no caption the title falls back
+    to the AI description, then the filename.
+13. **R2 reference counting:** purging item A deletes its R2 keys only if no other `media` row shares
+    the sha *or* the key; the shared case (same bytes via Telegram and via the composer) is
+    explicit.
+14. **Claim kinds:** until this phase the potato claims `kinds=link,note`; with it, `link,note,upload`.
+    A queued upload job is never touched by an older potato build.
 
 ## Tasks
 
@@ -91,14 +105,16 @@ web/src/lib/components/MediaGrid.svelte, Lightbox.svelte, PdfBadge.svelte
       scope, but the order is documented and asserted by a fake FS where possible).
 - [ ] Local upload endpoint for the composer: streamed, 25 MB cap, content-type allowlist, sha256
       computed in the same pass; returns the media id.
-- [ ] Telegram remote path: blob pulled from R2 (presigned or via the Worker), hashed while
-      downloading, verified against nothing (the Worker did not hash) — the hash *becomes* the truth.
+- [ ] Telegram remote path: blob pulled from R2 with a presigned GET from the Worker's `/presign`,
+      hashed while downloading, verified against nothing (the Worker did not hash) — the hash
+      *becomes* the truth. Start claiming `kinds=link,note,upload`.
 - [ ] Thumbnails as a generated artifact with a `derived_at` so a re-generation task can sweep.
 - [ ] Vision call: one JSON-schema call, `message.Parts` carrying the image, prompt version.
 - [ ] Embedding input = OCR text + description (+ filename as a weak signal); cap the input.
 - [ ] PDF: extract, page count, chars/page, scan detection with configurable threshold, OCR cap
       (default 10 pages), and a `pdf_text_state` (`text|ocr|empty`) on the media row.
-- [ ] Mirror loop: batch of 10, exponential retry, `mirror_pending` count for the Status page.
+- [ ] Worker `PUT /mirror/<key>` (potato scope; scope-matrix test; 25 MB cap) and the mirror loop:
+      batch of 10, exponential retry, `mirror_pending` count for the Status page.
 - [ ] Storage accounting: bytes by kind, count of files, disk free; the guardrail warning at a
       configurable threshold (design §11).
 - [ ] Composer now actually attaches images; item page shows the gallery; lightbox with keyboard
@@ -116,7 +132,8 @@ Automated: fuzz keys + PDF + media tests green; convergence test green; vision f
 Demo:
 
 1. Send a photo to the bot → item appears, thumbnail correct, description plausible, OCR text present
-   when the photo contains text.
+   when the photo contains text. Send a 3-photo album → **one** item with three media rows. Send a
+   document → an item titled by its filename.
 2. Paste the *same* photo into the composer → one file on disk (`sha256sum` matches both), no duplicate
    storage, no second vision call (hash dedupe) — assert by checking the usage log.
 3. Upload a 20 MB text PDF → extracted text searchable; a page-7 phrase finds the item.
@@ -137,7 +154,8 @@ Demo:
 - **PDF bombs.** Page count, per-page time, total time, and memory all need caps; the S6 numbers set
   them.
 - **Mobile photo orientation.** EXIF handling is the difference between a library that looks right and
-  one that looks broken; test with a real iPhone photo, not a synthetic one.
+  one that looks broken; test with a real iPhone photo, not a synthetic one. The standard library does
+  not read EXIF; S12 picks the approach.
 - **R2 presign vs direct proxy for blobs.** The design says the browser fetches from R2 via presign;
   for local originals it fetches from the potato. Both paths must be tested, and the item page must
   not flicker between them.
@@ -148,7 +166,9 @@ Demo:
 
 - One `media` row per item attachment vs one per blob (recommend per attachment, with the file shared
   by sha).
-- The pixel cap for decode (recommend 50 MP) and the thumbnail method (scale-on-decode).
+- The pixel cap for decode (from S12 — about 24 MP is the likely answer, not 50) and the thumbnail
+  method (stdlib JPEG has no scale-on-decode: check `DecodeConfig`, decode once under the cap, then
+  downscale).
 - `pdf_text_state` values and the scan threshold default.
 - Whether an unsupported image format (HEIC) is rejected at intake or stored and left undescribed
   (recommend: stored, described by nothing, a clear badge — never lose the file).

@@ -2,8 +2,10 @@
 
 **Status:** planned · **Design refs:** [§5](../design.md#5-save-path) (Import),
 [I1](../open-questions.md), [§9](../design.md#9-ui-sveltekit-embedded) (first run)
-**Depends on:** phase 2 (tables), phase 9 not required — manual Spaces are created here ·
-**Gate:** none · **Est:** a weekend
+**Depends on:** phases 2, 3 (the tag write path) and **12a** (snapshot, backup and the restore
+drill must exist before the irreplaceable data does) · **Gate:**
+[S9](spikes.md#s9--a-real-raindrop-export) · **Est:** a weekend. Manual Spaces are created here, so
+phase 9 is not required.
 
 ## Goal
 
@@ -31,7 +33,7 @@ server/internal/import/
   html.go          Netscape bookmark HTML (nested <DL>, folders, ADD_DATE, ICON)
   import.go        the driver: parse → canonicalise → merge → space assignment → enqueue
   progress.go      counters + resume checkpoint (imported URL set is the idempotence key)
-  testdata/raindrop/*.csv     real-shaped fixtures (sanitised): normal, folded, unicode, broken rows
+  testdata/raindrop/*.csv     real-shaped fixtures (sanitised from the S9 export): normal, folded, unicode, broken rows
   testdata/netscape/*.html    nested folders, duplicates, no dates
 server/cmd/harbor/import.go    CLI flags: --dry-run, --no-enrich, --limit, --report
 server/internal/httpapi/import.go   start/status/cancel, streams progress
@@ -48,13 +50,16 @@ web/src/routes/first-run/+page.svelte         now live: Import or first link
 | `excerpt` | appended to note as a quoted block, or `og_json.excerpt` — **decide: `og_json`**, keep the user's note clean |
 | `url` | canonicalised into `items.url` |
 | `folder` | manual Space (name preserved) |
-| `tags` | `item_tags` with `source='manual'` (they are the user's, not the model's) |
-| `created` | `items.created_at` (preserved; this is what makes the import feel like the old library) |
+| `tags` | `item_tags` with `source='manual'` (they are the user's, not the model's), written through the phase 3 tag write path so aliases and canonical names apply |
+| `created` | `items.created_at` **and** `items.saved_at` (preserved; this is what makes the import feel like the old library and keeps it out of "recent") |
 | `cover` | `og_json.cover` (the image itself is fetched in phase 6 if it is a URL) |
 | `highlights` | `highlights` rows: `quote`, `note`, colour default |
+| `id` | `items.import_ref` (idempotence aid and provenance) |
+| `favorite` | reported in the dry-run summary, not imported |
 
 Unknown columns are ignored and listed in the report, so a schema change in Raindrop's export is
-visible rather than silent. A row with no URL and no title is skipped and counted.
+visible rather than silent. This table is the design's recollection of the export; **spike S9
+replaces it with the real column list before any importer test is written.** A row with no URL and no title is skipped and counted.
 
 ## Tests first
 
@@ -78,6 +83,11 @@ visible rather than silent. A row with no URL and no title is skipped and counte
    stable JSON shape for the UI.
 8. **Volume**: a 5,000-row fixture imports in under 2 minutes on the potato with `--no-enrich` and
    does not exceed the RSS budget (record the number).
+9. **Tags go through the shared write path**: an imported `js` lands on `javascript` once that alias
+   exists (assert by merging first, then importing), and an unknown tag is created normalised.
+10. **Priority and ordering**: imported items are queued at `priority=-1`, carry `saved_at =
+    created_at`, and a link saved interactively afterwards is enriched before any of them. Progress
+    and the resume checkpoint live in `import_runs`.
 
 ## Tasks
 
@@ -85,8 +95,8 @@ visible rather than silent. A row with no URL and no title is skipped and counte
 - [ ] `--dry-run` prints the full summary (counts, new vs merge, spaces to create, unknown columns) and
       writes nothing — this is what gets run against the *real* export before anything is committed.
 - [ ] Import writes items with `state='ready'` when `--no-enrich` (they are usable immediately) and
-      otherwise enqueues them, but **does not block** on enrichment: the run finishes, enrichment
-      drains afterwards.
+      otherwise queues them at `priority=-1`, but **does not block** on enrichment: the run finishes,
+      enrichment drains afterwards behind anything interactive.
 - [ ] Collections → `spaces.kind='manual'`, `space_items` membership; an existing Space with the same
       name is reused (case-insensitive) rather than duplicated.
 - [ ] Settings → Import: file drop, dry-run, run with a progress bar, cancel, and a downloadable
@@ -118,17 +128,16 @@ Demo, with the real subscription data:
 
 - **Import is the one operation that can double a library.** Everything about it is idempotence-first;
   run the dry run on real data, and take a `VACUUM INTO` snapshot before the first real run
-  (`harbor backup --now`).
+  (`harbor backup --now`). Do not do the first real run until milestone M4 (phase 12a): the restore
+  drill must have been run, because this is the moment the box starts holding irreplaceable data.
 - **Raindrop's export changes.** The unknown-column report is the early warning. Do not silently
   coerce.
 - **Volume vs the enrichment queue.** 5,000 items through DeepSeek is a real bill (~$5 at the
   estimated rate) and a long drain. Make `--no-enrich` the documented default for bulk import and let
   enrichment be a separate, monitored run.
-- **`created_at` backdating breaks the pending/recent ordering assumptions.** Confirm the home grid
-  sorts by `created_at` and that imported items don't flood "recent" — the design says recent, so
-  decide whether imports are recent-by-import or recent-by-creation. **Decide: home sorts by
-  `created_at`, and the import report links to the imported set**, so the library looks like the old
-  one rather than like a fresh dump.
+- **Backdated dates vs "recent".** **Settled:** the home grid sorts on `saved_at`, and import sets
+  `saved_at = created_at`, so the library looks like the old one rather than a fresh dump and a
+  later re-save genuinely resurfaces an item. The import report links to the imported set.
 - **Folio of edge cases in Netscape HTML** (some browsers emit invalid nesting). Be lenient, never
   hang; a truncated file is a typed error with the row count.
 

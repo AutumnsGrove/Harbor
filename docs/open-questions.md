@@ -57,9 +57,11 @@ HTTPS + MagicDNS, app bound to `127.0.0.1:8895` in Compose. Confirm the port is 
 
 ### B4. ~~Worker framework and poll protocol~~ — **settled: Hono + claim-by-update**
 - Hono for routing.
-- `POST /jobs/claim` atomically claims the oldest queued job (status → `claimed`) and returns it
-  with `r2_key` for any blobs; `POST /jobs/:id/{done,failed}` closes it. Claim-by-update means
-  duplicate delivery can't double-process.
+- `POST /jobs/claim?limit=N` atomically claims up to N of the oldest claimable jobs (status →
+  `claimed`) and returns them with `r2_key` for any blobs; `POST /jobs/:id/{done,failed}` closes
+  one. Claim-by-update means duplicate delivery can't double-process. `GET /jobs/pending` is a
+  read-only list for the pending cards, and `GET /jobs/replay?since=` re-serves recent done jobs
+  after a rollback or restore (see N1, N2). Every route and its token scope: design §4.
 - `/save` and `/upload` create rows; `/upload` streams to `incoming/` first, then inserts.
 - `/presign` signs short-lived R2 reads for the UI.
 
@@ -109,8 +111,9 @@ Retry **3× with backoff over ~an hour**, then park as `failed` with the error s
 "needs attention" strip in the UI, with one-tap retry. No silent failures.
 
 ### C5. ~~Poll cadence and pending visibility~~ — **settled**
-30s poll loop with jitter; opening the UI triggers an immediate poll; pending cards render from the
-poll response. A failed poll is not an error state — the loop backs off and retries.
+30s poll loop with jitter that drains the queue each time; opening the UI triggers an immediate
+refresh; pending cards render from the read-only `GET /jobs/pending`. A failed poll is not an error
+state — the loop backs off and retries.
 
 ---
 
@@ -123,11 +126,16 @@ surface to maintain.
 
 ### D2. ~~Telegram bot: new bot or extend Mira?~~ — **settled: dedicated bot**
 Own token, Worker webhook, isolated from Mira. Accepts links, text, photos, documents, and albums
-(grouped by `media_group_id`). Reuses the same intake path as every other door.
+(grouped by `(chat_id, media_group_id)`). Reuses the same intake path as every other door. Serves
+**only the owner** (`TELEGRAM_OWNER_ID`) — a bot username is public (N5). Bot API downloads cap at
+20 MB.
 
 ### D3. ~~Is the iOS Shortcut worth it if the PWA share target exists?~~ — **settled: both**
-Publish a Shortcut recipe and a PWA manifest `share_target`; both hit the same Worker endpoint.
-Remaining detail (H4): what the Shortcut sends for a page with no metadata beyond the URL.
+The Shortcut is the public share-sheet door (`POST /save` on the Worker, `shortcut` token). The PWA
+`share_target` is **tailnet-only** (N6): a manifest form POST cannot carry a bearer token and the
+PWA is served from the tailnet origin, so it posts to the potato like the quick-save page. iOS has
+no `share_target`, which is why the Shortcut exists. Remaining detail (H4): what the Shortcut sends
+for a page with no metadata beyond the URL.
 
 ### D4. ~~Email-to-save in v1?~~ — **dropped**
 Not one of the chosen doors. It can be added later as another Worker route writing to the same
@@ -138,8 +146,11 @@ Not one of the chosen doors. It can be added later as another Worker route writi
 ## E. Security & operations
 
 ### E1. ~~Auth model for the write endpoint?~~ — **settled: per-source tokens**
-One bearer token per source (`telegram`, `shortcut`, `quick`), stored **hashed** in D1, revocable
-individually. The token also identifies the source, so the item records which door it came from.
+One bearer token per door (`telegram`, `shortcut`) plus the separate `potato` credential, stored
+**hashed** in D1 with a `scope`, revocable individually. Door tokens can only append; claim, read
+and delete routes answer only to the `potato` token (N1). There is no `quick` token — the quick-save
+page is tailnet-only and tokenless. The token also identifies the source, so the item records which
+door it came from.
 
 ### E2. ~~Backup destination and retention.~~ — **settled**
 Nightly `VACUUM INTO` → zstd → **R2 with 30 daily snapshots**, plus an `rsync` copy to the
@@ -154,12 +165,16 @@ so the export is restorable and readable without the app. Tested in CI with a fi
 Never a roach motel.
 
 ### E4. ~~How does the browser reach archived files in R2?~~ — **settled: presigned URLs**
-Private bucket. The potato asks the Worker for a short-lived signed URL (~5 minutes) and the
-browser fetches directly from R2; archive bytes never pass through the potato.
+Private bucket. The potato asks the Worker for a short-lived S3-style presigned GET (~5 minutes,
+signed with a read-only R2 credential held as a Worker secret) and the browser fetches directly from
+R2; archive bytes never pass through the potato **or the Worker**. A Worker-served HMAC URL was
+rejected: it would be a public read path.
 
 ### E5. ~~Public sharing — confirm it's out.~~ — **settled: skip entirely**
-No public read path exists. The Worker stays write-only. Revisit only if sharing becomes a real
-need, with a narrow Worker-rendered snapshot rather than exposing the UI.
+No public read path exists in v1. The intake Worker stays append-only. When sharing becomes a real
+need it is a **separate** share Worker and R2 bucket that the potato pushes explicitly chosen items
+to — the pixelsort-go pattern (`pixelsort-go/PLAN.md` §6b) — never a read route on this Worker and
+never the UI. Deliberately out of the core buildout.
 
 ### E6. ~~Cost/usage guardrails~~ — **settled**
 5 MB page cap, 8k model input tokens, 25 MB per uploaded blob, 20 MB per archive, 10 saves/min/IP.
@@ -189,7 +204,9 @@ Polaris opening `harbor.db` directly.
 
 1. **Worker streaming upload** — confirm `env.BUCKET.put(key, request.body)` handles a 25 MB
    body on the free plan without buffering or hitting CPU/time limits, and that R2-then-D1 ordering
-   leaves a recoverable state when the second step fails.
+   leaves a recoverable state when the second step fails. Also: does R2 accept a body of unknown
+   length (chunked) or is `Content-Length` mandatory, the Telegram `getFile` 20 MB ceiling, and a
+   JSON-Schema validator that runs in Workers (Ajv's code generation does not).
 2. **Worker → D1 queue claim semantics** — confirm the atomic update pattern works with D1's
    consistency model, and what happens on duplicate delivery.
 3. **Brute-force vector cache** — measure RSS and search latency on the potato at a realistic
@@ -204,6 +221,17 @@ Polaris opening `harbor.db` directly.
 8. **Video transcript source** — prove caption fetching from the potato's residential IP for a few
    real videos, including a no-caption case and a non-English track. Decide whether a bundled
    yt-dlp is needed or the caption endpoint alone is enough.
+9. **Real Raindrop export** — export the actual library once, commit a sanitised sample, and confirm
+   the CSV columns (`id`, `favorite`, folder separators, the highlights field format) before the
+   importer's tests are written. Gates phase 5.
+10. **Tailscale serve + Docker identity** — confirm which headers `tailscale serve` adds, that a
+    client cannot forge them, and what the peer address looks like inside the container for a
+    published loopback port. Gates the phase 0 identity-lock design.
+11. **Nova as a dependency** — can CI and the Docker build fetch the Nova module (private repo →
+    `GOPRIVATE` + token), and which tag/commit has `embed`? Gates phase 0 CI.
+12. **Image decode memory and EXIF** — measure peak RSS decoding a real 12 MP and a 48 MP phone
+    JPEG with the stdlib, pick the EXIF-orientation approach, and set the pixel cap from the number.
+    Gates phase 6.
 
 ---
 
@@ -230,7 +258,13 @@ current extraction.
   re-extraction.
 
 ### H3. ~~Smart Space rule vocabulary~~ — **settled: rules + AI suggestions**
-- **Rules:** `{tags_all, tags_any, kinds, sources, after, before, text, similar_to_item}`.
+- **Rules:** `{tags_all, tags_any, kinds, sources, within_days, after, before, text,
+  similar_to_item}`. `within_days` is the relative window auto Spaces need ("Long reads from the
+  past 90 days") — a stored absolute `after` goes stale the next day; `after`/`before` are absolute
+  bounds for saved queries. Fields AND, lists OR. `text` matches title, summary, content, note and
+  tags. `similar_to_item` is cosine over the embeddings with a fixed config threshold; the mockup's
+  tag-overlap stand-in is a mockup shortcut, and the mockup's `within`/`similar_to` field names
+  become `within_days`/`similar_to_item` when the UI is ported (N7).
 - `auto` spaces evaluate live from their rule; `saved` spaces are explicit queries; `space_items`
   is only for manual pinning.
 - **AI may suggest** a Space from a pattern ("you keep saving ARM SBCs — make a Space?"), but the
@@ -263,7 +297,8 @@ it's ever wanted.
 
 ### I3. ~~Re-saving a duplicate URL?~~ — **settled: merge + refresh**
 One canonical item per URL. Append the new note, union tags, keep Read later membership, refresh
-metadata/archive/screenshot, bump `updated_at`. Canonicalisation drops fragments and tracking
+metadata/archive/screenshot, bump `saved_at`. A URL whose item is in Recently deleted is restored
+and merged, not duplicated (N8). Canonicalisation drops fragments and tracking
 parameters. A manual Refresh does the same without adding a note.
 
 ### I4. ~~Deleting an item?~~ — **settled: Recently deleted, 30 days**
@@ -322,8 +357,8 @@ read the library. Coffer encrypts because it holds financial data; this is a per
 that.
 
 ### K3. ~~PWA scope~~ — **settled: installable + share target**
-Manifest, icons, full-screen, Android `share_target`. **No service worker, no offline cache.**
-The tailnet is assumed up.
+Manifest, icons, full-screen, Android `share_target` (tailnet-only — see D3/N6). **No service
+worker, no offline cache.** The tailnet is assumed up.
 
 ### K4. ~~Video transcripts~~ — **settled: in v1, best-effort**
 Fetch captions on the potato (not the Worker — residential egress behaves better), store in
@@ -379,3 +414,80 @@ replace the database it is running on.
 ### M5. ~~mymind import~~ — **settled: not in v1**
 Raindrop CSV + Netscape HTML only. mymind's export is `cards.csv` plus files and desktop-only;
 revisit if a real export ever lands on disk.
+
+---
+
+## N. The 2026-11-04 plan audit
+
+A stronger-model review of `docs/plans/` found seams between phases that the quick first pass left
+unowned. These are the decisions it forced, with why the alternatives lost. Mirrored in design.md §13.
+
+### N1. ~~Are door tokens really append-only?~~ — **settled: scopes**
+As first written, "the same source token" gated both `/save` and `/jobs/claim` + `/presign`, so a
+leaked `shortcut` token could read other saves. Tokens now carry a `scope`: **door** (`telegram`,
+`shortcut`) reaches only `/save` and `/upload`; **potato** reaches claim, pending, replay, presign,
+mirror, purge, render, backups and admin. Rejected: separate Workers per scope (more to deploy for one
+user); trusting obscurity of routes.
+
+### N2. ~~When is a Worker job "done", and what protects remote saves from a rollback?~~ — **settled**
+Done = the item row is durably inserted on the potato. Enrichment retries then live on the item.
+Rejected: done-after-enrichment, which lets the 10-minute lease expire during the hour-long retry
+window and double-processes. The Worker keeps done jobs and blobs, and `harbor replay --since`
+re-ingests them, because a rollback or restore otherwise silently drops remote saves that D1 believes
+are finished. Ingest is idempotent, so replay is always safe.
+
+### N3. ~~Pending cards and batch claiming~~ — **settled**
+Read-only `GET /jobs/pending` for the UI; `POST /jobs/claim?limit=N` and a drain loop for the potato.
+Rejected: showing pending cards from the claim response (claiming one job per 30 s poll makes ten
+Telegram saves take five minutes and leaves queued jobs invisible).
+
+### N4. ~~Import backlog starving fresh saves~~ — **settled: `priority`**
+Enrichment is its own stage, ordered by `priority` then `next_attempt_at`. Import and bulk refresh run
+at -1. Rejected: a second worker goroutine (concurrency is the OOM risk on this box).
+
+### N5. ~~Who may use the Telegram bot?~~ — **settled: the owner only**
+The Worker checks the sender against `TELEGRAM_OWNER_ID` before any D1 write; strangers are dropped
+with a 200. A bot username is public, so without this anyone can spend the LLM budget and fill R2.
+
+### N6. ~~Is the PWA share target a public door?~~ — **settled: no, tailnet-only**
+A manifest `share_target` is a plain form POST and cannot attach a bearer header, and the PWA is
+served from the tailnet origin. It posts to the potato (`source='share'`), like the quick-save page
+(`source='quick'`). The iOS Shortcut is the one public share-sheet door. Real public sharing is a
+separate, much later project (E5, design §10).
+
+### N7. ~~Space rule vocabulary vs the mockup~~ — **settled: `within_days` added**
+See H3. The mockup is the visual reference and the rule *semantics* oracle for AND/OR behaviour, but
+its field names and its tag-overlap `similar_to` are mockup shortcuts; the equivalence test's
+reference evaluator follows H3, not the mockup's JavaScript.
+
+### N8. ~~Items, clocks, and deleted URLs~~ — **settled**
+`created_at` (original date), `saved_at` (last save; home sorts on it; imports set it to
+`created_at`), `updated_at` (last edit). The unique URL index includes soft-deleted rows, so a re-save
+of a deleted URL restores and merges. `url_original` keeps the raw URL so canonicalisation can be
+fixed later. Rejected: sorting home by `created_at` (kills "re-saving resurfaces") or by `updated_at`
+(an edit would reorder the library).
+
+### N9. ~~Data-model gaps~~ — **settled in design §7**
+Foreign keys with cascades on every child table; `seq` surrogate for FTS5; `tags_text` so tags are
+searchable; `content_md` for the reader; `details_json` (JSON-LD first) for per-kind pages;
+`archives` holds three keys; media gets `pdf_text_state` and `derived_at`; bookkeeping tables
+(`processed_jobs`, `import_runs`, `task_runs`, `space_suggestions`). Price-history trends are
+deferred rather than silently promised.
+
+### N10. ~~Egress and the identity lock~~ — **settled**
+A hostname egress allowlist is impossible for an app that fetches arbitrary pages, so the controls are
+a dial-time SSRF guard (including the Tailscale ranges) plus a host firewall rule. The identity lock
+is header-based with `/healthz` and `/api/status` as the only header-less exemptions, because
+`tailscale serve` and Docker both make "loopback" meaningless as a test. (Spike S10 confirms.)
+
+### N11. ~~Schedulers, CLI, and rsync in a distroless image~~ — **settled**
+One in-process scheduler with persisted `task_runs`; CLI subcommands via `docker compose run|exec`;
+rsync to the MacBook is a host-side script, pulled by the Mac. The link checker fetches and hashes on
+the potato and asks the Worker to re-render only on change, because Browser Rendering's free plan is
+10 browser-minutes a day.
+
+### N12. ~~Order of work~~ — **settled: back up before the first real import**
+Build sequence 0 → 1 → 2 → 3 → 12a → 5 → 4 → 9. Phase 12a (snapshot, backup, restore drill, export)
+precedes the import that puts the irreplaceable data on the box. The "I can cancel Raindrop" milestone
+is after phase 9. Phase numbers are stable ids, not the order. Plans README has the detail and the
+cut list.

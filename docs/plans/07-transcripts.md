@@ -1,7 +1,7 @@
 # Phase 7 — Transcripts: video and podcasts become readable
 
 **Status:** planned · **Design refs:** [§6](../design.md#6-enrichment-pipeline) (video/podcast jobs),
-[K4](../open-questions.md) · **Depends on:** phases 3, 6 · **Gate:**
+[K4](../open-questions.md) · **Depends on:** phase 3 only (nothing here uses media) · **Gate:**
 [S8](spikes.md#s8--video-transcript-source-from-the-potatos-ip) · **Est:** 1 evening + the spike
 
 ## Goal
@@ -64,8 +64,9 @@ web/src/routes/item/[id]/+page.svelte   transcript panel (collapsible, searchabl
       design.md §6 and the config that selects it.
 - [ ] `transcripts` behind an interface, with a fake that serves the fixtures, so the pipeline tests are
       offline.
-- [ ] Add `items.transcript_lang`, `items.transcript_fetched_at`, and a migration `0003`; keep
-      `transcript_text` as designed.
+- [ ] The transcript columns (`transcript_text`, `transcript_state`, `transcript_lang`,
+      `transcript_fetched_at`) already exist from `0001` (design §7), so no migration is needed;
+      `transcript_state` takes `ok|unavailable|error|too_large`.
 - [ ] Language preference config (`HARBOR_TRANSCRIPT_LANG=en`, comma list).
 - [ ] Rate/etiquette: one request per job, identifying UA, no retries beyond the normal budget, and a
       per-host delay so a burst of 10 videos doesn't hammer YouTube.

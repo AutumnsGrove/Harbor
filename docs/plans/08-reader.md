@@ -26,7 +26,8 @@ Out: PDF highlighting, highlights inside archived pages, sharing a highlight, ex
 
 ```
 server/internal/store/highlights.go     CRUD, by item, purge on item delete
-server/internal/extract/render.go       extracted blocks → sanitised reader HTML + a text version
+server/internal/extract/render.go       items.content_md → sanitised reader HTML (goldmark + bluemonday;
+                                         both named dependencies) + the normalised text version anchors use
 server/internal/anchor/
   anchor.go        build(quote, prefix, suffix, ordinal, text_hash) · resolve(anchor, blocks)
   anchor_fuzz_test.go
@@ -49,6 +50,12 @@ web/src/routes/item/[id]/               highlight list + "read" entry point
   "lang": "en"
 }
 ```
+
+**Definitions that the tests depend on.** Anchoring operates on one *normalised plain text* of the
+article (whitespace collapsed, Unicode NFC, smart quotes folded) derived from `content_md`; the quote,
+prefix and suffix are cut from that text, and the client sends the DOM selection's text through the
+same normaliser. `ordinal` is the index of the occurrence **in the whole normalised text**, not
+within a block. The block index the client reports is only a hint for speed.
 
 Resolution order, from design.md H2, made explicit:
 
@@ -104,8 +111,11 @@ pass, and mark any that fail as detached — with a one-line explanation, not an
       changed", delete.
 - [ ] Item page: highlights list with quote + note + colour, sorted by position, each linking to the
       reader.
-- [ ] Re-extraction hook: when `text_hash` changes, re-anchor in the enrichment job and record a count
-      (`reanchored`, `detached`) in the log and on the item (`highlights_detached` cached count).
+- [ ] Re-extraction hook: when `text_hash` changes, re-anchor in the enrichment job, set
+      `highlights.detached` on each, and log the counts (`reanchored`, `detached`); the item page
+      counts detached rows with a query, not a cached column.
+- [ ] Markdown notes: render `items.note` with a preview toggle through the same sanitiser (phase 2
+      shipped a plain textarea); `FuzzMarkdownNote` covers both the note path and the reader.
 - [ ] Accessibility: selecting text with the keyboard (shift+arrows) works; the toolbar is reachable;
       the focus ring is magenta and visible; highlight colours have text/shape indicators, not colour
       alone.

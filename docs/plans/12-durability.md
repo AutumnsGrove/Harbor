@@ -1,8 +1,9 @@
 # Phase 12 — Durability: export, backup, restore, status
 
 **Status:** planned · **Design refs:** [§11](../design.md#11-operations),
-[E2/E3/M4/L4](../open-questions.md) · **Depends on:** phase 2 (runs alongside 3–11) · **Gate:** none ·
-**Est:** ongoing, but the first pass is a weekend
+[E2/E3/M4/L4](../open-questions.md) · **Depends on:** phase 2 · **Gate:** none · **Est:** ongoing, but the first pass is a weekend. This
+phase is built in **two passes** (below): 12a lands before the first real import, 12b alongside the
+later phases.
 
 ## Goal
 
@@ -24,27 +25,47 @@ visibility.
 Out: point-in-time recovery, a restore button, backup encryption (settled: none extra), cross-version
 export compatibility guarantees beyond one minor version back.
 
-## Deliverables
+## Two passes
+
+**12a — before the first real import (milestone M4).** The irreplaceable data arrives with phase 5,
+so this is what must exist first: `harbor snapshot` (already there from phase 0) with retention,
+the Worker's `/backups` routes and the nightly upload, `harbor restore`, `harbor replay` usage in the
+restore procedure, the **restore drill actually run on a clean directory**, `harbor export` (JSON,
+Markdown, Netscape HTML, media, manifest) with the golden-fixture CI job, and the first version of
+`docs/runbook.md`.
+
+**12b — alongside phases 6–11.** The Status page and `/api/status`, the maintenance tasks registered
+in the scheduler, disk guardrails, log redaction, Meridian wiring (only once `/healthz` and
+`/api/status` are real on the box), and the runbook's remaining sections.
+
 
 ```
 server/cmd/harbor/
   export.go     flags: --out, --format=json|md|html|all, --include-media
   backup.go     --now, --list, --verify
-  restore.go    <snapshot>, refuses to run while the DB is in use, prints a plan
+  restore.go    <snapshot>, prints a plan, takes a pre-restore snapshot of the current DB, refuses to
+                run unless it can take the exclusive lock on data/.lock (which `serve` holds for its
+                whole life — this is how "the DB is in use" is detected portably), and finishes by
+                printing the exact `harbor replay --since <snapshot time>` to run next
 server/internal/backup/
-  snapshot.go   VACUUM INTO with a temp name + fsync + rename; integrity check after
+  snapshot.go   thin wrapper over phase 0's store.Snapshot (VACUUM INTO temp → fsync → rename →
+                integrity check); this package adds retention, listing and upload
   retention.go  keep 30 daily, delete older, never delete a snapshot that fails verification
-  upload.go     zstd → R2 via the Worker (the potato holds no R2 credentials)
+  upload.go     zstd (pure-Go klauspost/compress) → R2 via the Worker's `/backups` routes (the potato
+                holds no R2 credentials), multipart because a snapshot can exceed one request body
 server/internal/export/
   json.go markdown.go netscape.go manifest.go
   testdata/     a golden library fixture → golden export, diffed in CI
 server/internal/maintenance/
-  nightly.go    purge, mirror drain, re-embed sweep, transcript refresh, disk check
+  nightly.go    tasks registered in the in-process scheduler (state in task_runs): purge, mirror
+                drain, re-embed sweep, transcript refresh, disk check, backup
 server/internal/httpapi/status.go   /api/status (counts only, loopback)
 web/src/routes/settings/data/+page.svelte     export, backup list, storage
 web/src/routes/settings/status/+page.svelte   the operator's page
 docs/runbook.md      deploy, update, rollback, backup, restore drill, disaster recovery
-deploy/harbor-backup.timer, harbor-maintenance.timer
+deploy/harbor-rsync.sh      host-side copy to the MacBook Air (pulled by the Mac when it is awake, or
+                            pushed from the potato if reachable); the backup itself runs in the scheduler.
+                            systemd is used only for this and the update watcher
 ```
 
 ## Export contract
@@ -88,10 +109,13 @@ Rules that make it a real export rather than a data dump:
 5. **Retention**: 31 snapshots → 30 remain, oldest deleted; a snapshot that fails verification is never
    deleted (fail loud) and the run aborts the prune.
 6. **Restore**: restore a snapshot into a temp dir, open it, compare counts + a spot-checked item +
-   one media file → success. Restore refuses while the DB file is open by another process; restore
-   prints what it will overwrite and requires `--yes`.
+   one media file → success. Restore refuses while another process holds `data/.lock` (start a
+   `serve` against the dir and assert it refuses); it prints what it will overwrite and requires
+   `--yes`. **Restore + replay:** restore a snapshot taken before ten fake-Worker jobs completed,
+   run `replay --since`, and the ten items reappear with no duplicates.
 7. **Status endpoint**: shape exactly as [meridian.md](../meridian.md) specifies, counts only, no
-   titles/URLs/tags; loopback-only; never touches a model or the Worker; responds <100 ms on 10k items.
+   titles/URLs/tags; exempt from the identity lock only when the Tailscale header is absent (design
+   §3 — "loopback-only" cannot be tested inside Docker); never touches a model or the Worker; responds <100 ms on 10k items.
 8. **Nightly maintenance** is idempotent: running it twice in a row changes nothing the second time
    (purge counts 0, mirror drains 0, re-embed 0), and a component failure doesn't stop the others.
 9. **Disk guardrail**: at the configured threshold the UI warns; it never blocks a save.
@@ -116,7 +140,8 @@ Rules that make it a real export rather than a data dump:
 - [ ] zstd compression, 30-daily retention, and a listing that shows date/size/version/integrity.
 - [ ] Upload via the Worker's token-gated route (the potato holds no R2 credentials) with retry and a
       `last_backup` timestamp that the Status page and `/api/status` read.
-- [ ] rsync to the MacBook Air behind an `if` on reachability; record the last successful rsync.
+- [ ] `deploy/harbor-rsync.sh` for the MacBook Air (host-side; the distroless image has no rsync),
+      reachability-guarded, recording the last successful copy where the Status page can read it.
 - [ ] `harbor restore` with a dry-run plan, `--yes`, a pre-restore snapshot of the *current* DB (so a
       bad restore is itself recoverable), and a refusal to run against an open DB.
 - [ ] `docs/runbook.md` with the drills, written so a tired person at 2 a.m. can follow it.
@@ -147,8 +172,8 @@ Demo, the drill that decides whether the project works:
    `bookmarks.html` in a browser, verify images render, verify a highlight is present with its note.
 2. Re-import the export into an empty Harbor → equivalent library; note the diff (should be zero).
 3. `harbor backup --now` → snapshot created, verified, uploaded; `--list` shows 30-day retention.
-4. **Restore drill on a clean box:** stop the container, `harbor restore <snapshot> --yes` into a fresh
-   `data/`, start, and confirm: item count, tags, spaces, highlights, one image and one PDF open,
+4. **Restore drill on a clean box:** stop the container, `docker compose run --rm harbor restore
+   <snapshot> --yes` into a fresh `data/`, run `harbor replay --since <snapshot time>`, start, and confirm: item count, tags, spaces, highlights, one image and one PDF open,
    search works, and the mirror state is correct. Time it; put the number in the runbook.
 5. Corrupt one media file in the export and confirm the manifest catches it.
 6. Disconnect the network for a night → the backup fails loudly, the Status page shows a stale
@@ -166,6 +191,8 @@ Demo, the drill that decides whether the project works:
 - **Worker-dependent backup creates a single point of failure.** If the Worker is down for a night, the
   snapshot still exists locally — the order is: snapshot, verify locally, *then* upload; a failed upload
   is retried from the local copy, never by taking a new snapshot only.
+- **SD-card wear.** A nightly full-database `VACUUM INTO` writes the whole DB; keep only the last 3
+  snapshots on the potato (30 live in R2), and let the Status page show snapshot size.
 - **Retention deleting the only good copy** is the classic disaster. Never prune a snapshot that fails
   verification; keep one snapshot per month beyond the 30 dailies if it is cheap (decide).
 - **`/api/status` becoming a slow page.** Counts must come from cheap queries or cached counters; on a

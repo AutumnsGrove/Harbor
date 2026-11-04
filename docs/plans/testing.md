@@ -77,8 +77,10 @@ spec (design.md §)  →  failing test  →  minimal code  →  green  →  refa
 
 ### Worker
 
-- **`vitest` + `miniflare`** with real D1 and R2 bindings in-process — the worker gets the same
-  "no mocking the thing under test" rule as the potato.
+- **`vitest` with `@cloudflare/vitest-pool-workers`** (miniflare under the hood) and real D1 and R2
+  bindings in-process — the worker gets the same "no mocking the thing under test" rule as the
+  potato. JSON-Schema validation must run inside Workers, which forbid `eval`/`new Function`: use
+  `@cfworker/json-schema` or precompiled validators, not Ajv's default (spike S1).
 - **`fast-check`** for intake validation properties (below).
 - **Contract tests**: load every file in `contracts/fixtures/`, validate against
   `contracts/*.schema.json` on both sides. Adding a field to a job means adding a fixture in the same
@@ -87,8 +89,9 @@ spec (design.md §)  →  failing test  →  minimal code  →  green  →  refa
 ### AI
 
 - No test calls OpenRouter except the explicit, manually-run `make enrich-live` check.
-- `enrich` sits behind an interface: `Decider`, `Chatter`, `Embedder`. Fakes return fixtures from
-  `server/internal/enrich/testdata/`.
+- `enrich` sits behind an interface: `Decider`, `Chatter`, `Embedder`. Fakes live in
+  `enrichtest` packages (never in a non-test file of the shipped package, so they are not linked
+  into the binary) and return fixtures from `server/internal/enrich/testdata/`.
 - Assertions are about **shape**: kind ∈ the 12 and never `unknown`; 3–6 tags; summary non-empty and
   ≤ 2 sentences' worth of bytes; vector length matches the recorded `dims`; JSON strictly parses.
 - A **malformed-model-output suite** replays the ways models actually fail — truncated JSON, prose
@@ -114,6 +117,11 @@ spec (design.md §)  →  failing test  →  minimal code  →  green  →  refa
 - TS side: **`fast-check`**, same reasoning.
 - Budget: each target **30 s** in the PR job (only targets whose package changed, plus a rotating
   third), **10 min** nightly for all. Fuzz time is cheap compared to a corrupted library.
+- Mechanics: `go test -fuzz` runs exactly one target in one package per invocation, and `-fuzztime`
+  means nothing without `-fuzz`. `make fuzz` is therefore a small script that enumerates targets
+  (`go test -list '^Fuzz' ./...`) and runs them one at a time with a per-target time. A plain
+  `go test ./...` already replays every committed seed corpus as ordinary tests, so regressions are
+  live on every PR without any fuzzing at all.
 
 ### Targets
 
@@ -126,7 +134,7 @@ property holds.** Seeds live in `testdata/fuzz/<FuzzName>/` next to the test.
 | `FuzzJobEnvelope` | 2 | `contracts/`-shaped JSON | unknown fields ignored or rejected consistently; missing required fields rejected; never panics; blob list bounded |
 | `FuzzHTMLExtract` | 3 | HTML bytes | no panic; output is valid UTF-8; text length bounded by input × factor; a 5 MB cap is enforced *before* parse |
 | `FuzzFTSQuery` | 3 | user search strings | never produces an SQL error or an injection; snippets are well-formed; empty/whitespace returns empty |
-| `FuzzTelegramUpdate` | 4 | webhook JSON | dedupe by update id; album grouping by `media_group_id` terminates; wrong-token path never reaches the queue |
+| `FuzzTelegramUpdate` | 4 | webhook JSON | dedupe by update id; album grouping by `(chat_id, media_group_id)` terminates; wrong-secret and non-owner senders never reach the queue |
 | `FuzzImportRow` | 5 | CSV/HTML row bytes | malformed rows are skipped with a warning, never abort the import; canonical URL idempotence holds per row |
 | `FuzzPDFText` | 6 | PDF bytes | bounded page count and time; a malformed PDF is a typed error, not a hang or an OOM; extracted text is UTF-8 |
 | `FuzzMediaKey` | 6 | sha256-ish strings | path traversal (`..`, `/`, NUL, unicode tricks) cannot escape `data/media` |
@@ -134,6 +142,10 @@ property holds.** Seeds live in `testdata/fuzz/<FuzzName>/` next to the test.
 | `FuzzAnchor` | 8 | anchor JSON + extraction text | re-anchor returns exact, unique-prefix, or detached — never a wrong span; ordinal bounds respected |
 | `FuzzMarkdownNote` | 8 | Markdown bytes | sanitised output contains no `<script`, `on*=` or `javascript:`; round-trip is stable |
 | `FuzzTranscriptPayload` | 7 | caption/vtt/json bytes | malformed payload sets `unavailable` and never fails the item |
+
+**Tiering.** Targets that are not parsers of hostile bytes — `FuzzJobEnvelope` and
+`FuzzTranscriptPayload` — are seed-corpus tests plus the nightly run; they get no PR fuzz budget. The
+PR budget goes to the parsers and the security boundaries.
 
 `FuzzMediaKey`, `FuzzFTSQuery`, and `FuzzMarkdownNote` are the security-adjacent ones: they guard
 file-write paths, SQL construction, and XSS respectively. They run on every PR, not only nightly.
@@ -148,6 +160,9 @@ file-write paths, SQL construction, and XSS respectively. They run on every PR, 
 | Tag normalisation | 9 | rename→merge leaves an alias; a later write of the old spelling resolves to the canonical tag; no cycles |
 | Import | 5 | one pass and two passes produce identical libraries |
 | Queue | 2 | with N claims, retries, and crashes injected, every job is eventually processed exactly once *in effect*; a crashed claim is reclaimed after the lease |
+| Replay | 2 | replaying any set of already-ingested done jobs, once or twice, in any order, leaves the library unchanged (ingest is idempotent by canonical URL and sha256) |
+| Scope | 1 | for every route in design §4 and every token scope, a door token on a `potato` route is refused with zero side effects (the route table is the oracle) |
+| Priority | 2 | with interactive and import-priority items mixed, an interactive item is never enriched after a later-queued import item |
 | RRF ranking | 10 | result sets are deterministic for fixed input; a document present only in the keyword list still ranks; no duplicates |
 
 ### Corpus hygiene
@@ -165,8 +180,8 @@ file-write paths, SQL construction, and XSS respectively. They run on every PR, 
 
 | Job | Trigger | Runs | Blocking |
 |---|---|---|---|
-| `check` | every push/PR | `gofmt -l`, `go vet`, `go test -race ./...`, `go test -run=Fuzz -fuzztime=100x ./...` (seed corpus) | yes |
-| `fuzz` | every PR | 30 s per changed target + 3 security targets | yes |
+| `check` | every push/PR | `gofmt -l`, `go vet`, `go test -race ./...` (also replays every committed fuzz seed; `CGO_ENABLED=1` here because the race detector needs cgo — the shipped binary stays `CGO_ENABLED=0`) | yes |
+| `fuzz` | every PR | `make fuzz`: 30 s per changed target + 3 security targets, one `-fuzz` invocation each | yes |
 | `fuzz-nightly` | cron | 10 min per target, all targets | opens an issue on failure |
 | `web` | every PR | `pnpm check`, `pnpm test` (vitest + fast-check), `pnpm build` | yes |
 | `e2e` | every PR | Playwright, 3 flows × 2 viewports | yes |

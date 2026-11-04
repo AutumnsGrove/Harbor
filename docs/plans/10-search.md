@@ -83,6 +83,11 @@ web/src/routes/+page.svelte         chips + instant results + masonry + pending
 10. Latency budget test with a fake clock is not meaningful — instead assert the handler does no work
     beyond one FTS query + one cache scan + fusion (no per-result DB queries; assert with a query
     counter on the store).
+11. **Tags are searchable:** an item tagged `rust` is found by the query `rust` even when the word
+    appears nowhere in its text; after a tag rename or merge the search result set reflects the new
+    name (the FTS row was refreshed with `tags_text`).
+12. **Cascade hygiene:** a purged or hard-deleted item leaves no vector in the cache and no row in
+    `item_embeddings`; cache size equals the table count after a mixed workload.
 
 ## Tasks
 
@@ -96,6 +101,8 @@ web/src/routes/+page.svelte         chips + instant results + masonry + pending
       separate search page, `/` focuses the box, `Esc` clears.
 - [ ] Filter chips: kind, tag, source, date — combined, with a visible "clear filters".
 - [ ] Related items row on the item page: 3–6, quiet, click-through, no graph view.
+- [ ] Replace phase 9's scan-based `Similarity` (used by the `similar_to_item` Space rule) with one
+      backed by this cache; the rule code does not change.
 - [ ] Ranking tuning session: 20 real queries, log the top 10 for each, adjust weights once, record the
       final weights and the reasoning in design.md §8.
 - [ ] A `make bench-search` target that builds a synthetic 10k DB, so the number is reproducible on the

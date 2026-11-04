@@ -1,4 +1,4 @@
-# Spikes — the eight things to verify before building on them
+# Spikes — the twelve things to verify before building on them
 
 A spike is a **timeboxed experiment with a written verdict**, not a prototype. Each one is ≤2 hours,
 lives in a throwaway branch or a scratch directory (never `main`), and produces a paragraph plus a
@@ -7,8 +7,9 @@ number in this file. No spike leaves running code in the repo.
 Rule: **if a spike fails, the plan changes — not the timeline.** A failed spike is a good outcome at
 this stage; it is much cheaper than discovering it in phase 6.
 
-These are the eight from [open-questions.md §G](../open-questions.md#g-things-to-verify-with-a-spike-not-decisions),
-now with the phase each one gates and the pass condition that has to be met.
+These are the twelve from [open-questions.md §G](../open-questions.md#g-things-to-verify-with-a-spike-not-decisions)
+(S1–S8 from the research thread, S9–S12 added by the 2026-11-04 plan audit), now with the phase each
+one gates and the pass condition that has to be met.
 
 | ID | Spike | Gates | Timebox |
 |---|---|---|---|
@@ -20,8 +21,13 @@ now with the phase each one gates and the pass condition that has to be met.
 | S6 | PDF text extraction in Go | phase 6 exit | 2 h |
 | S7 | Port 8895 free | phase 0 start | 5 min |
 | S8 | Video transcript source | phase 7 exit | 90 min |
+| S9 | Real Raindrop export sample | phase 5 start | 30 min |
+| S10 | Tailscale serve headers + Docker peer address | phase 0 start | 45 min |
+| S11 | Nova as a dependency in CI/Docker | phase 0 exit | 45 min |
+| S12 | Image decode memory + EXIF | phase 6 exit | 90 min |
 
-S7 is trivial and can be done now. S1/S2 are prerequisites for writing the Worker; do them first.
+S7, S9, S10 and S11 are cheap and can be done now (S9 is ten minutes in Raindrop's export screen
+plus sanitising). S1/S2 are prerequisites for writing the Worker; do them first.
 S3/S4/S6/S8 are cheap to defer until their phase, but each can invalidate a design assumption, so
 they must be answered *before* the phase's code is finished, not after.
 
@@ -63,6 +69,19 @@ before phase 1 is called done.
 **Also record:** the honest answer to "can the Worker know the size before writing?" (it cannot for
 a chunked body), because it decides whether the 25 MB cap is a guarantee or a best effort.
 
+**Also test (added 2026-11-04):**
+- **Unknown length.** Does `BUCKET.put` accept `request.body` from a chunked request, or does R2
+  require a known length (`Content-Length` / `FixedLengthStream`)? If it requires one, `/upload`
+  answers 411 without a `Content-Length` and the 25 MB cap becomes a guarantee, not a best effort —
+  record which, because design §5 currently states "`Content-Length` is required" on this
+  expectation.
+- **Telegram files.** Bot API `getFile` downloads cap at 20 MB. Stream a ~19 MB and a ~21 MB file
+  from Telegram through the Worker to R2 and record the behaviour; the rejection reply must name the
+  real limit.
+- **Validator in Workers.** Run the chosen JSON-Schema validator inside `wrangler dev`. Ajv's code
+  generation uses `new Function`, which Workers forbid; confirm `@cfworker/json-schema` (or
+  precompiled validators) works against `contracts/*.schema.json`.
+
 ---
 
 ## S2 — D1 claim-by-update
@@ -85,6 +104,10 @@ and check for double-claims. Then test the crash case: claim a job and never rep
 **Pass:** zero double-claims across 200 attempts; `RETURNING` gives the whole row; a claimed job is
 re-claimable after a lease (plan: 10 min) and `attempt` increments monotonically; `done` on an
 already-done job is a no-op, not an error.
+
+Also run the **batch form** the potato uses (`WHERE id IN (SELECT id … LIMIT 5)`), and the hold
+rule for Telegram albums (`group_key IS NULL OR updated_at < now - 10`), 200 times each from two
+clients: zero double-claims, and a held album is never claimed early.
 
 **Fail:** fall back to a single-statement `INSERT … ON CONFLICT` ledger or accept at-least-once with
 the potato's merge semantics as the dedupe (it already has one, by canonical URL and sha256). Record
@@ -132,7 +155,9 @@ only and skip HTML for SPA pages, recording why. Either way: archive failure mus
 non-blocking, retryable job (design.md §6).
 
 **Also record:** the per-save free-tier budget arithmetic, in numbers, for the Settings/Status page
-and for the cost guardrail.
+and for the cost guardrail. The free plan is 10 browser-minutes a day and 3 concurrent browsers; the
+link checker renders only when its potato-side content hash changed, so budget for new saves plus a
+small number of changed pages, not 50 renders a day.
 
 ---
 
@@ -191,6 +216,75 @@ potato clearly outperforms the Worker IP; no dependency on a login.
 (+40 MB, adds an update surface), (b) transcript "unavailable" in v1 and the phase 7 scope shrinks to
 podcasts-with-published-transcripts, (c) drop phase 7 to a later version. Record the choice in
 design.md §6/§13 — a flaky transcript path must never be able to fail a save either way.
+
+---
+
+## S9 — A real Raindrop export
+
+**Question:** what does Raindrop's CSV and HTML export actually contain, so the importer is written
+against reality and not against the design doc's recollection?
+
+**Method:** export the live library as CSV and as HTML. Sanitise to a ~50-row sample (replace real
+URLs with `example.com/<n>`, keep structure, quoting, collection paths, multi-line notes, highlights,
+non-ASCII). Commit the sample as `server/internal/import/testdata/raindrop/real-shape.csv` (and the
+HTML twin) in the phase 5 branch.
+
+**Pass:** the column list is written down exactly (is there an `id`? a `favorite`? how are nested
+collections written? how are several highlights packed into one cell, with what delimiter, and do
+they carry a note or colour?); the design's CSV mapping table is corrected to match; unknown columns
+are listed.
+**Fail / surprise:** any field that cannot be mapped is a decision in design.md §5, not an importer
+guess.
+
+---
+
+## S10 — Tailscale serve headers and the Docker peer address
+
+**Question:** what does the identity lock actually see?
+
+**Method:** on the potato, run a throwaway container listening on a published loopback port behind
+`tailscale serve`. Log the headers and the peer address for (a) a tailnet browser request, (b) a
+`curl` from the potato host, (c) a request with a forged `Tailscale-User-Login`.
+
+**Pass:** (a) carries `Tailscale-User-Login` and the Host you expect; (b) carries no identity header;
+(c) the forged header is overwritten or stripped by `tailscale serve` for tailnet traffic — if it is
+*not*, the "absent header means host-local" rule for `/healthz` and `/api/status` needs a second
+factor. Also record the peer address inside the container for (a) and (b) (expected: the Docker
+bridge gateway for both, which is why loopback is not usable as a test).
+**Fail:** if the header can be forged by a tailnet client, the lock must additionally verify the
+caller with `tailscale whois` against the peer address, and the plan changes.
+
+---
+
+## S11 — Nova as a dependency
+
+**Question:** can CI and the Docker build fetch Nova, and which version has `embed`?
+
+**Method:** in a scratch module, `go get github.com/AutumnsGrove/nova@<candidate>`; then do it again
+from a clean GitHub Actions job and a clean `docker build` with no host credentials.
+
+**Pass:** a tag or commit is chosen and pinned; if the repo is private, `GOPRIVATE` plus a read-only
+deploy key or token as a build secret works in both CI and the Dockerfile, and the secret does not
+land in an image layer.
+**Fail:** vendor Nova, or publish it, before phase 0's CI can be green.
+
+---
+
+## S12 — Image decode memory and EXIF orientation
+
+**Question:** what does decoding a phone photo cost on this box, and how is orientation handled?
+
+**Method:** a throwaway Go program on the potato: decode a real 12 MP and a real 48 MP iPhone JPEG
+with the standard library, print `runtime.MemStats` peak and wall time; scale to 1600 px. Try one
+EXIF-orientation approach (a small parser or a vetted library) on photos taken in all four
+orientations. Check which formats the standard library can decode (JPEG, PNG, GIF; WebP decode needs
+`golang.org/x/image/webp` and there is no encoder).
+
+**Pass:** the 48 MP case fits a budget you are willing to give one decode (a pixel cap of ~24 MP is a
+likely outcome; pick it from the number); orientation is correct in all four cases; the thumbnail is
+written as JPEG.
+**Fail:** lower the cap, or shell out to nothing (there is no image tool in a distroless image) — the
+fallback is to store oversized images undescribed with a badge, never to lose the file.
 
 ---
 

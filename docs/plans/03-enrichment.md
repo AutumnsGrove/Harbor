@@ -19,7 +19,9 @@ real and is measured.
 
 ## Scope
 
-In: `fetch` (caps, timeouts, redirects), `extract` (readability → Markdown + plain text),
+In: `fetch` (caps, timeouts, redirects, dial-time SSRF guard), `extract` (readability → Markdown +
+plain text + JSON-LD details), the **tag write path** (normalise, resolve alias, reuse canonical —
+moved here from phase 9 so import and enrichment share one implementation),
 `enrich` (Nova `decide` for kind, chat for tags/summary/title, `embed` for vectors), prompt files with
 versions, FTS5 indexing of extracted text and summaries, retry policy, attention strip, per-kind item
 layouts (12 of them), scored fixture set.
@@ -32,13 +34,19 @@ hybrid ranking (phase 10 — FTS ranking only here), Spaces (phase 9).
 ```
 server/internal/fetch/
   client.go        capped (5 MB), timed (20 s), limited redirects (5), no cookies, UA string
-  guard.go         SSRF guard: refuse loopback/RFC1918/link-local/.local hosts and non-80/443 ports
+  guard.go         SSRF guard enforced in a net.Dialer.Control hook on the *resolved* address: refuse
+                   loopback, RFC1918, link-local, 100.64.0.0/10 and fd7a:115c:a1e0::/48 (the tailnet),
+                   0.0.0.0, IPv4-mapped IPv6, *.local, *.ts.net, and non-80/443 ports
 server/internal/extract/
   html.go          go-readability + goquery → title, byline, published, text, markdown
   markdown.go      HTML → Markdown for the reader (phase 8 uses the same path)
   og.go            og:/twitter: metadata, cover image URL, site name
+  jsonld.go        schema.org Recipe/Product/Book/Movie/Place/VideoObject/ScholarlyArticle →
+                   details_json (the data behind the per-kind pages)
 server/internal/enrich/
-  enrich.go        the pipeline: fetch → extract → classify → tag → embed → write
+  enrich.go        the pipeline: fetch → extract → (request render, async, phase 11) → classify → tag →
+                   embed → write. Notes (no URL) skip fetch/extract/classify but still get tags,
+                   summary and an embedding
   classify.go      Nova decide, 12-way choice + noul (is_paywalled, is_video)
   tag.go           chat, strict JSON schema, prompt version
   embed.go         Nova embed, 1024 dims, normalise on write
@@ -47,31 +55,41 @@ server/internal/enrich/
   testdata/        recorded responses: happy, truncated, prose-wrapped, invalid kind, 0 tags, 31 tags
 server/internal/store/
   search.go        FTS5 query builder (escaped), snippet(), ranking
-  items.go         new columns: summary, content_text, og_json, prompt_version, kind_source
+  items.go         writes the enrichment columns that 0001 already created: summary, content_text,
+                   content_md, details_json, og_json, tags_text, kind_source, prompt_version,
+                   extract_version, enriched_at, and the retry columns (attempts, next_attempt_at, last_error)
+  tags.go          normalise (trim, collapse whitespace, lowercase) → resolve alias (depth-capped) →
+                   reuse canonical → insert; refreshes items.tags_text and the FTS row in one transaction
 web/src/lib/components/
   KindBadge.svelte, AttentionStrip.svelte, SummaryBlock.svelte, TagRow.svelte
 web/src/routes/item/[id]/+page.svelte   per-kind layout switch (12 branches)
 ```
 
-## New columns (migration 0002)
+## Columns (all created in `0001`)
 
-`items.summary`, `items.content_text`, `items.og_json`, `items.prompt_version`, `items.kind_source`
-(`ai|manual|default`), `items.enriched_at`, `items.extract_version` (ties to the highlight anchor's
-`text_hash` in phase 8). Plus `items.extract_error`. Add them here rather than editing `0001` — this
-phase is where they acquire meaning.
+No `ALTER TABLE` is needed here. `0001` (design §7) already carries `summary`, `content_text`,
+`content_md`, `details_json`, `og_json`, `tags_text`, `kind_source`, `prompt_version`,
+`extract_version`, `extract_error`, `enriched_at`, `attempts`, `next_attempt_at`, `last_error`,
+`priority`. This phase is where they acquire meaning; `extract_version` ties to the highlight
+anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`, `content_text` and
+`og_json` as migration 0002 additions; they already exist, so that migration would have failed.)
 
 ## Tests first
 
 **Fetch**
 
-1. `fetch` refuses `localhost`, `127.0.0.1`, `::1`, `10.0.0.0/8`, `172.16/12`, `192.168/16`,
-   `169.254/16`, `*.local`, and bare `file:` (table test). This is a security boundary, not a
-   nicety — the app fetches user-supplied URLs from inside the tailnet.
+1. `fetch` refuses `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, `10.0.0.0/8`, `172.16/12`,
+   `192.168/16`, `169.254/16`, **`100.64.0.0/10` and `fd7a:115c:a1e0::/48` (the tailnet itself)**,
+   IPv4-mapped IPv6 forms of all of those, `*.local`, `*.ts.net`, non-80/443 ports, and bare `file:`
+   (table test). This is a security boundary, not a nicety — the app fetches user-supplied URLs
+   from inside the tailnet. The check runs in the dialer on the address actually connected to: a
+   fake resolver that answers public on the first lookup and private on the second (DNS rebinding)
+   must still be refused.
 2. Byte cap: a response with `Content-Length: 50 MB` is refused before reading; a chunked response is
    cut at 5 MB and the error is typed (`ErrTooLarge`), not a panic.
 3. Timeout: a server that sleeps 30 s yields `context.DeadlineExceeded` at ~20 s.
 4. Redirect loop and cross-host redirect are both bounded; a redirect to a private IP is refused
-   (the guard runs *after* redirect resolution).
+   (the guard runs at dial time, so every hop is checked, not just the first URL).
 5. `FuzzHTMLExtract`: no panic, valid UTF-8, bounded output, and the 5 MB pre-parse cap enforced.
 
 **Classify / tag / embed**
@@ -101,6 +119,21 @@ phase is where they acquire meaning.
     stored, and the item still exists, visible, with `state='failed'`.
 15. A permanently bad URL (404) fails fast without consuming the whole retry budget (typed
     `ErrPermanent`), while a 503 retries.
+16. **Retries live on the item.** `attempts`, `next_attempt_at` and `last_error` advance per failure;
+    the Worker job is already `done` and is never touched again; after the third failure `state`
+    is `failed`.
+17. **Priority.** With an import-priority backlog of 500 queued items, a freshly saved link
+    (priority 0) is enriched next. `rapid`: no interactive item is ever processed after a
+    later-queued import item.
+18. **Notes.** A URL-less note makes no fetch call and no classification call (assert on the fakes),
+    keeps `kind='note'`, and still gets tags, a summary and an embedding.
+19. **JSON-LD.** Recorded pages with Recipe, Product, Place and VideoObject markup populate
+    `details_json` with the expected fields; a page without markup leaves `{}`; malformed JSON-LD is
+    ignored, never fatal.
+20. **Tag write path** (moved from phase 9): `"  Web   Dev "` → `web dev`; an existing canonical tag
+    or alias is reused; a new tag is created only when none matches; unicode and emoji survive;
+    alias chains are depth-capped and cannot cycle; `items.tags_text` and the FTS row update in the
+    same transaction. Import (phase 5) and the enrichment prompt both call this one function.
 
 ## Tasks
 
@@ -116,10 +149,13 @@ phase is where they acquire meaning.
 - [ ] Write path: item row updated in one transaction with FTS and embedding; `enriched_at` set.
 - [ ] `kind_source`: AI default, `manual` once a user edits it, and a manual kind is never overwritten
       by re-enrichment.
-- [ ] Per-kind item layouts for all 12 kinds, ported from `design/mockup` — each is a small switch over
-      which fields to show (recipe: ingredients/method; video: chapters/transcript placeholder;
-      product: price row placeholder; paper: abstract + text-layer state; place: address/hours; …).
-      Empty states are part of the work, not an afterthought.
+- [ ] Per-kind item layouts, ported from `design/mockup` — each is a small switch over which
+      `details_json` fields to show (recipe: ingredients/method; video: chapters/transcript
+      placeholder; product: current price; paper: abstract + text-layer state; place: address/hours;
+      …). The fields come from JSON-LD/microdata via `extract/jsonld.go`, not from the model. Build a
+      generic layout plus article, video, recipe and product first; the other kinds follow as their
+      data exists (see the cut list in plans/README). Price history/trends are deferred. Empty states
+      are part of the work, not an afterthought.
 - [ ] Attention strip: failed items from `store` (not from logs), one-tap retry, dismissible for the
       session, amber per the colour rules.
 - [ ] Scored fixture set: ~40 real saves with human kind + tag sets; `make enrich-score` prints
@@ -155,8 +191,9 @@ Demo:
   a prompt change silently rewrite a manual kind.
 - **Cost surprise from long pages.** Cap input tokens, log every call's usage, and record the real
   $/save; if it exceeds the estimate, the cap is wrong, not the model.
-- **SSRF.** The potato fetches arbitrary URLs from inside the tailnet. The guard is tested, and the
-  container's egress allowlist (phase 0) is the second layer. Do not skip either.
+- **SSRF.** The potato fetches arbitrary URLs from inside the tailnet. The dial-time guard is layer
+  one; the host `DOCKER-USER` firewall rule from phase 0 is layer two (a hostname egress allowlist is
+  impossible for an app that fetches arbitrary pages). Do not skip either.
 - **Memory spike on parse.** Parse from disk, not from a `[]byte` of the whole body if avoidable; the
   acceptance test is peak RSS on the largest fixture, recorded.
 
