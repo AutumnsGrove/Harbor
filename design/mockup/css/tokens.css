@@ -1,0 +1,30 @@
+/* Harbor design tokens. Dark only. Source of truth for the mockup and, later, web/src/app.css.
+   Roles: magenta = anything you can act on. amber = waiting / needs you / saved for later. teal = ok. */
+:root{
+  /* ground and surfaces */
+  --bg:#091214;        /* page ground, teal-black */
+  --surf:#0f1a1d;      /* cards, inputs, panels */
+  --surf2:#142428;     /* raised: hover, menus */
+  --surf3:#1a3036;     /* pressed, selected row */
+  --line:rgba(232,236,230,.07);   /* the only hairline; used for list rows and rules */
+  /* ink */
+  --ink:#e8ece6;      /* warm off-white */
+  --mute:#8aa09b;
+  --dim:#566d6d;
+  /* roles */
+  --acc:#ff5f93;  --acc-ink:#1f0912;  --acc-soft:rgba(255,95,147,.14);
+  --amb:#f2b866;  --amb-ink:#1b1306;  --amb-soft:rgba(242,184,102,.10);
+  --ok:#58d4a8;   --ok-soft:rgba(88,212,168,.12);
+  /* highlight palette (four, stored in highlights.color) */
+  --hl-amber:#f2b866; --hl-magenta:#ff5f93; --hl-teal:#58d4a8; --hl-blue:#6ea8ff;
+  /* shape */
+  --r-s:8px; --r-m:14px; --r-l:18px; --r-xl:24px; --pill:999px;
+  /* type: one grotesque face, no serif, no mono except code */
+  --font:"Schibsted Grotesk",system-ui,-apple-system,sans-serif;
+  --code:ui-monospace,"SF Mono",Menlo,monospace;
+  /* scale */
+  --t-xs:11.5px; --t-s:12.5px; --t-m:14px; --t-l:16px; --t-xl:20px; --t-2xl:28px; --t-3xl:38px;
+  /* motion */
+  --ease:cubic-bezier(.2,.7,.2,1); --dur:.22s;
+}
+[data-amber="off"]{--amb:#ff5f93;--amb-ink:#1f0912;--amb-soft:rgba(255,95,147,.12)}

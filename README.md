@@ -1,6 +1,6 @@
 # Harbor
 
-> **Status: concept.** No code yet. Name is settled: **Harbor** — a place to bring things in and
+> **Status: concept, with a design mockup.** No product code yet. Name is settled: **Harbor** — a place to bring things in and
 > keep them safe. The collision with CNCF Harbor (the container registry) is known and accepted;
 > this is a personal library, not a registry. The goal of this repo right now is to nail the shape
 > of the thing before any of it exists.
@@ -40,7 +40,7 @@ deployment/memory cost — the parser has to work in Go.
                  ▼
      the potato (tailnet) ── private, read-write
      SQLite + FTS5 + in-process vectors · enrichment via OpenRouter
-     minimal web UI · MCP tool → Polaris
+     web UI (read-write)
 ```
 
 The Worker can't reach the tailnet, so the potato polls the Worker — the potato is the client,
@@ -63,6 +63,7 @@ it safe on the public internet.
 |---|---|
 | [docs/design.md](docs/design.md) | The concept distilled: stack, deployment/update path, components, data flow, build order, decisions |
 | [docs/open-questions.md](docs/open-questions.md) | The Q&A record: every design question, its decision, and why the alternatives lost |
+| [design/mockup/](design/mockup/README.md) | The clickable design mockup: every screen on desktop and phone, plus the design system |
 | [docs/meridian.md](docs/meridian.md) | Meridian tile/vital/control snippets and the homelab-repo checklist for deploy day |
 | [docs/research-thread.md](docs/research-thread.md) | Verbatim Polaris thread that produced the direction (104 cited sources) |
 
@@ -77,7 +78,7 @@ it safe on the public internet.
 
 ## What this is not (yet)
 
-No browser extension, no mobile app, no collaboration, no sharing, no bulk-import UI. Those turn
+No browser extension, no native mobile app, no collaboration, no sharing. Those turn
 a weekend project into a second job. If the project earns it later, it can grow them.
 
 ## Prior art worth knowing
