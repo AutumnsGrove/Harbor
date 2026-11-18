@@ -178,7 +178,7 @@ Written before the code, in this order:
 - [x] `deploy/docker-user-firewall.sh` and its install step: the container can reach the public
       internet but not private, loopback, link-local or tailnet ranges (verify by `docker exec` into
       a throwaway container of the same network: `curl 100.x.x.x` fails, `curl example.com` works).
-- [ ] CI: a `publish` job in `ci.yml` (the Warbler shape), `needs` every test job, only on a push
+- [x] CI: a `publish` job in `ci.yml` (the Warbler shape), `needs` every test job, only on a push
       to `main`; `workflow_dispatch` may publish a `broken-test` tag without touching `latest`.
       Build `linux/amd64` + `linux/arm64`, tags `latest` + short SHA, GHA layer cache, version build
       arg. Tests run with `CGO_ENABLED=1` (the race detector needs cgo) while the image build stays
@@ -252,3 +252,34 @@ Demo, on the potato, all of it:
   shape). Chosen: `ci.yml`, because a failing test must never publish an image.
 - Base image pins (`node:22-bookworm`, `golang:1.27-alpine`, `distroless/static-debian12:nonroot`)
   and whether a `vX.Y.Z` tag is added later. Not needed for v1; `latest` + short SHA is enough.
+
+## Review carry-over (2026-11-18)
+
+The first pi-review pass on the phase-0 stack found four things worth keeping,
+fixed in place, and four that are deliberately deferred. Fixes: the healthcheck
+host is required in docker mode (a 421 there would fail a healthy image), the
+watcher reconciles a half-finished run and no longer advertises an empty digest
+as available, the watcher releases its lock on a signal and exits, and
+`make packaging` builds the frontend so the off-host rule cannot be skipped
+locally. Deferred:
+
+- **`Snapshot`'s atomic property is untested.** A cancelled context returns
+  before the temp file exists, so deleting `dest` early would still pass the
+  suite. A `verify` seam injected in the test would cover it; it lands with the
+  backup work in phase 12a, which is where the real rollback drill runs.
+- **Two migrators are not expected.** A server process and `harbor snapshot`
+  both open the data directory; if a migration is pending, the loser aborts with
+  a SQL error. Harmless with an empty migration set, real from phase 2. Decide
+  then: a `PRAGMA busy_timeout` retry around the migration transaction, or a
+  lock file.
+- **The egress firewall covers forwarded traffic only.** `DOCKER-USER` is
+  traversed for forwarded packets; container→host-local delivery uses `INPUT`.
+  What Harbor can reach on the host itself is therefore covered by the dial-time
+  SSRF guard (phase 3), not by this rule set. Re-check the DNS resolver path on
+  the potato (`/etc/resolv.conf`) before enabling the unit: a LAN resolver would
+  be rejected by these rules and break every fetch while `/healthz` stays green.
+- **The Settings update flow needs a second look** in the browser once the
+  watcher runs on a real host (PR #8's note): the check→available polling window
+  and the "not built yet" copy are the parts to revisit. `web/package.json` also
+  wants a `packageManager` pin so a newer pnpm's `minimumReleaseAge` policy
+  cannot reject the lockfile on a fresh machine.

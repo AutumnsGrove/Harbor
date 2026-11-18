@@ -1,12 +1,20 @@
 # Harbor
 
-> **Status: concept and design complete, build planned.** No product code yet. Name is settled:
-> **Harbor** — a place to bring things in and keep them safe. The collision with CNCF Harbor (the
-> container registry) is known and accepted; this is a personal library, not a registry. The shape is
-> nailed down in [docs/design.md](docs/design.md), the interface in
-> [design/mockup/](design/mockup/README.md), and the build is sequenced (with tests first) in
-> [docs/plans/](docs/plans/README.md). Spikes S5, S7, S10 and S11 have been run; S7 changed the port
-> to 8897.
+> **Status: phase 0 built, waiting on the potato.** The binary, the embedded shell, the store, the
+> container and the update watcher exist and pass `make check`; what is left is the deploy, the
+> rollback drill and a green `main`. Name is settled: **Harbor** — a place to bring things in and keep
+> them safe. The collision with CNCF Harbor (the container registry) is known and accepted; this is a
+> personal library, not a registry. The shape is nailed down in [docs/design.md](docs/design.md), the
+> interface in [design/mockup/](design/mockup/README.md), the build sequence (tests first) in
+> [docs/plans/](docs/plans/README.md), and the operator page for updates in
+> [docs/update.md](docs/update.md). Spikes S5, S7, S10 and S11 have been run; S7 changed the port to
+> 8897.
+>
+> ```bash
+> make check          # fmt, vet, race, svelte-check, vitest, watcher suite, packaging rules
+> make dev            # the shell on http://127.0.0.1:8080, no Tailscale header needed
+> make docker-check   # build the image, then prove uid 1000, no Node, healthy /healthz
+> ```
 
 A personal save-anything library for one person, built to replace a Raindrop Pro + mymind
 subscription ($157/year) with something owned outright.

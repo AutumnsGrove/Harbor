@@ -121,6 +121,33 @@ else
 	fail "unsafe-inline appears in the server or the frontend"
 fi
 
+# ── a pull request can never publish ────────────────────────────────────────
+# The publish job is the one job that can put an untested image where the potato
+# will pull it, so the gate is asserted here rather than trusted.
+ci=".github/workflows/ci.yml"
+publish_block="$(awk '/^  publish:/{flag=1} flag' "$ci" 2>/dev/null || printf '')"
+
+expect
+if [ -n "$publish_block" ] && printf '%s' "$publish_block" | grep -q 'refs/heads/main'; then
+	pass "the publish job is gated on main"
+else
+	fail "the publish job is not gated on a push to main"
+fi
+
+expect
+needs_line="$(printf '%s' "$publish_block" | grep -m1 '^    needs:')"
+missing=""
+for job in check fuzz web watcher packaging image; do
+	if ! printf '%s' "$needs_line" | grep -qE "(^|[^a-z-])${job}([^a-z-]|$)"; then
+		missing="$missing $job"
+	fi
+done
+if [ -z "$missing" ]; then
+	pass "the publish job needs every test job"
+else
+	fail "the publish job does not need:$missing"
+fi
+
 # ── the built frontend has no off-host addresses ────────────────────────────
 # Warbler's rule, kept: nothing in the shell may fetch from another origin. The
 # check is on HTML/CSS references, not on URLs inside error strings.

@@ -194,7 +194,7 @@ happened, and `make check` is green on `main`.
 | # | Phase | State |
 |---|---|---|
 | — | Spikes | ◐ S5, S7, S10, S11 answered (S7 → 8897); the rest pending |
-| 0 | Foundations | ☐ not started |
+| 0 | Foundations | ◐ code complete on a branch stack; waiting on the potato deploy, the rollback drill and a green `main` |
 | 1 | Worker intake | ☐ |
 | 2 | Core library | ☐ |
 | 3 | Enrichment | ☐ |

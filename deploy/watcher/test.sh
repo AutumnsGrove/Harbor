@@ -227,7 +227,7 @@ case_bare_start_updates_and_pins() {
 	fi
 
 	assert_contains "$(status_json)" '"status":"ok"'
-	assert_eq "$(stat -f '%Lp' "$WORK/.env" 2>/dev/null || stat -c '%a' "$WORK/.env")" "600" "env stays mode 600"
+	assert_eq "$(file_mode "$WORK/.env")" "600" "env stays mode 600"
 	teardown
 }
 
@@ -273,6 +273,20 @@ case_second_update_is_a_no_op() {
 	# A run killed after pinning but before recreating leaves .env and the
 	# container disagreeing; `up -d` is how the next run notices.
 	assert_eq "$(grep -c 'up -d harbor' "$STATE/calls")" "1" "the container is reconciled"
+	teardown
+}
+
+case_reconcile_does_not_report_ok_when_unhealthy() {
+	current="reconcile: a killed half-run is recreated and health-checked, not assumed"
+	setup
+	run_watcher
+	# The pin now matches the registry, but the container is not answering.
+	rm -f "$STATE/healthy"
+	HEALTH_TIMEOUT=1 run_watcher
+
+	assert_eq "$WATCHER_EXIT" "1" "exit code"
+	assert_contains "$(status_json)" "not healthy"
+	assert_contains "$(calls)" "up -d harbor"
 	teardown
 }
 
@@ -465,6 +479,7 @@ for case in \
 	case_check_only_changes_nothing \
 	case_check_reports_up_to_date \
 	case_second_update_is_a_no_op \
+	case_reconcile_does_not_report_ok_when_unhealthy \
 	case_failed_check_does_not_advertise_an_update \
 	case_pull_failure_re_pins_the_old_digest \
 	case_snapshot_failure_aborts_before_pinning \
