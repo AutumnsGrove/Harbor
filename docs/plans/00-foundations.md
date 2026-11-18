@@ -178,7 +178,7 @@ Written before the code, in this order:
 - [x] `deploy/docker-user-firewall.sh` and its install step: the container can reach the public
       internet but not private, loopback, link-local or tailnet ranges (verify by `docker exec` into
       a throwaway container of the same network: `curl 100.x.x.x` fails, `curl example.com` works).
-- [ ] CI: a `publish` job in `ci.yml` (the Warbler shape), `needs` every test job, only on a push
+- [x] CI: a `publish` job in `ci.yml` (the Warbler shape), `needs` every test job, only on a push
       to `main`; `workflow_dispatch` may publish a `broken-test` tag without touching `latest`.
       Build `linux/amd64` + `linux/arm64`, tags `latest` + short SHA, GHA layer cache, version build
       arg. Tests run with `CGO_ENABLED=1` (the race detector needs cgo) while the image build stays
