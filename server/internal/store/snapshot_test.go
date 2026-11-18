@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,46 @@ func TestSnapshotFailureLeavesTheOldSnapshotIntact(t *testing.T) {
 	}
 	if got := countNotes(t, dest); got != 2 {
 		t.Errorf("snapshot holds %d notes after a failed snapshot, want the 2 from the good one", got)
+	}
+}
+
+func TestSnapshotFailureAfterTheCopyKeepsTheOldSnapshot(t *testing.T) {
+	// The cancelled-context case returns before any work, so it cannot prove the
+	// temp→rename property. This one fails after VACUUM INTO has written a
+	// complete copy and checks that the previous dest is still there, whole.
+	s := openTestStore(t)
+	dest := filepath.Join(t.TempDir(), "pre-update.db")
+
+	seed(t, s, 2)
+	if err := s.Snapshot(context.Background(), dest); err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+
+	original := verifySnapshot
+	t.Cleanup(func() { verifySnapshot = original })
+	verifySnapshot = func(string) error { return errors.New("integrity check failed") }
+
+	seed(t, s, 1)
+	if err := s.Snapshot(context.Background(), dest); err == nil {
+		t.Fatal("Snapshot() with a failing verification error = nil, want a rejection")
+	}
+	verifySnapshot = original
+
+	if err := Verify(dest); err != nil {
+		t.Errorf("the previous snapshot no longer verifies: %v", err)
+	}
+	if got := countNotes(t, dest); got != 2 {
+		t.Errorf("dest holds %d notes, want the 2 from the last good snapshot", got)
+	}
+
+	entries, err := os.ReadDir(filepath.Dir(dest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".snapshot-") {
+			t.Errorf("temp snapshot %s was left behind", entry.Name())
+		}
 	}
 }
 

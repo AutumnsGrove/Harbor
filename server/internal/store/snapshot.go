@@ -51,7 +51,7 @@ func (s *Store) Snapshot(ctx context.Context, dest string) error {
 		return fmt.Errorf("snapshot %s: %w", s.path, err)
 	}
 
-	if err := Verify(temp); err != nil {
+	if err := verifySnapshot(temp); err != nil {
 		return fmt.Errorf("snapshot %s: %w", s.path, err)
 	}
 	if err := syncFile(temp); err != nil {
@@ -65,6 +65,12 @@ func (s *Store) Snapshot(ctx context.Context, dest string) error {
 	}
 	return nil
 }
+
+// verifySnapshot is a seam, not indirection for its own sake: the property worth
+// testing is "a failure after the copy leaves the previous snapshot untouched",
+// and there is no honest way to make PRAGMA integrity_check fail on demand. The
+// test swaps this for an error; production always uses Verify.
+var verifySnapshot = Verify
 
 // Verify opens a database file read-only and runs PRAGMA integrity_check. The
 // updater calls it through Snapshot, and phase 12's restore drill reuses it.
