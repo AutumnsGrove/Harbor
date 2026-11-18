@@ -127,13 +127,13 @@ Written before the code, in this order:
       would only leave a line that the next tidy deletes. S11 needs no build secret either way.
 - [ ] Makefile targets; `make check` runs everything CI runs. `build` depends on `web`; `clean`
       removes `bin/`, `web/build/*` and restores `web/build/.gitkeep`.
-- [ ] SvelteKit scaffold (static adapter, no SSR), import `tokens.css` verbatim as `src/app.css`,
-      set the Schibsted Grotesk face and the dark-only base.
-- [ ] `web/build/.gitkeep` plus `.gitignore` rules (`web/build/*`, `!web/build/.gitkeep`); no build
+- [x] SvelteKit scaffold (static adapter, no SSR), import `tokens.css` verbatim as `src/app.css`,
+      set the Schibsted Grotesk face (bundled woff2, no external fetch) and the dark-only base.
+- [x] `web/build/.gitkeep` plus `.gitignore` rules (`web/build/*`, `!web/build/.gitkeep`); no build
       output is ever tracked.
-- [ ] `web/embed.go` with `//go:embed all:build`; static handler serves `index.html` for unknown
+- [x] `web/embed.go` with `//go:embed all:build`; static handler serves `index.html` for unknown
       paths (SPA) but **not** for `/api/*`.
-- [ ] `contracts/README.md` stating the rule: a field change lands with a fixture.
+- [x] `contracts/README.md` stating the rule: a field change lands with a fixture.
 
 **Server**
 
@@ -223,8 +223,10 @@ Demo, on the potato, all of it:
   writes to `/` (set `TMPDIR=/tmp`). A silent failure here looks like "database is locked".
 - **Update watcher staleness.** Test the tick timer's catch-up; a missed signal must not leave the
   app waiting forever.
-- **CSP with an embedded SPA.** Keep it strict; Svelte needs no inline script if the build is
-  configured for it. Do not "temporarily" allow `unsafe-inline`.
+- **CSP with an embedded SPA.** Built and settled: SvelteKit emits one inline bootstrap script per
+  page (`__sveltekit_…` plus a dynamic import). `web/scripts/csp.mjs` hashes it into
+  `web/build/csp.json` and the Go server adds exactly those `sha256-` sources to `script-src`,
+  validating each one before it reaches a header. Do not "temporarily" allow `unsafe-inline`.
 - **The identity header is easy to trust wrongly.** It is only trustworthy because `tailscale serve`
   sets (and overwrites) it and the published port is bound to 127.0.0.1. Inside Docker the peer
   address is the bridge gateway, so you cannot test "is it loopback" — only "is the header present

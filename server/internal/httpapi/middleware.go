@@ -134,7 +134,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		headers := w.Header()
 		headers.Set("Content-Security-Policy", strings.Join([]string{
 			"default-src 'self'",
-			"script-src 'self'",
+			"script-src " + s.scriptSources(),
 			"style-src 'self'",
 			"img-src 'self' data:",
 			"font-src 'self'",
@@ -244,4 +244,15 @@ func headerlessAllowed(r *http.Request) bool {
 	default:
 		return false
 	}
+}
+
+// scriptSources is 'self' plus the exact hashes of the frontend's inline
+// bootstrap scripts. It is a method because the list comes from the build, not
+// from a constant: the policy and the artifact are generated together.
+func (s *Server) scriptSources() string {
+	sources := "'self'"
+	for _, hash := range s.scriptHashes {
+		sources += " '" + hash + "'"
+	}
+	return sources
 }
