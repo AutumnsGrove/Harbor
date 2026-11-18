@@ -9,7 +9,7 @@
 		type VersionResponse
 	} from '#lib/api';
 
-	type UpdateState = 'idle' | 'checking' | 'available' | 'requesting' | 'requested';
+	type UpdateState = 'idle' | 'checking' | 'available' | 'requesting' | 'requested' | 'uptodate';
 
 	let version = $state<VersionResponse | null>(null);
 	let available = $state<AvailableResponse | null>(null);
@@ -42,19 +42,27 @@
 	async function checkForUpdates() {
 		updateState = 'checking';
 		problem = null;
+		// "No update" and "the watcher never ran" both look like
+		// `{"available":false}`, so completion has to come from status.json. A
+		// finished run writes a new `at`; comparing it with the value seen before
+		// asking is clock-independent — the phone and the potato never have to
+		// agree on the time.
+		const baseline = lastUpdate?.at ?? '';
 		try {
 			await api.update.check();
-			// The watcher is a host-side unit: it sees the signal file, resolves
-			// `latest`, and writes available.json. Poll for a little while, then
-			// say so instead of spinning forever.
 			const deadline = Date.now() + 15_000;
 			while (Date.now() < deadline) {
 				await new Promise((resolve) => setTimeout(resolve, 1_000));
 				const answer = await api.update.available();
 				available = answer;
-				lastUpdate = await api.update.status().catch(() => null);
+				const status = await api.update.status().catch(() => null);
+				if (status) lastUpdate = status;
 				if (answer.available) {
 					updateState = 'available';
+					return;
+				}
+				if (status && status.status !== 'busy' && status.at && status.at !== baseline) {
+					updateState = 'uptodate';
 					return;
 				}
 			}
@@ -67,12 +75,32 @@
 		}
 	}
 
+	// The page says it reloads when the new version answers, so it does. The
+	// container is recreated underneath this page, so failed requests are the
+	// expected state for a while, not an error to report.
+	async function waitForNewVersion(before: string) {
+		const deadline = Date.now() + 150_000;
+		while (Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 2_000));
+			try {
+				const current = await api.version();
+				if (current.version !== before) {
+					location.reload();
+					return;
+				}
+			} catch {
+				// Being recreated: try again.
+			}
+		}
+	}
+
 	async function applyUpdate() {
 		updateState = 'requesting';
 		problem = null;
 		try {
 			await api.update.start();
 			updateState = 'requested';
+			void waitForNewVersion(version?.version ?? '');
 		} catch (error) {
 			updateState = 'available';
 			problem = message(error);
@@ -115,6 +143,8 @@
 				<span class="pill">Requesting…</span>
 			{:else if updateState === 'requested'}
 				<span class="pill ok">requested</span>
+			{:else if updateState === 'uptodate'}
+				<span class="pill ok">up to date</span>
 			{/if}
 		</div>
 
