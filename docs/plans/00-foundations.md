@@ -40,7 +40,8 @@ Dockerfile                    node:22 frontend stage → golang:1.27 cross-build
 .dockerignore                 source-only context: no .git, data/, update-signal/, node_modules,
                               web/build, .svelte-kit, bin, test output
 docker-compose.yml            project harbor, 127.0.0.1:8897, ./data, ./update-signal
-.env.example                  HARBOR_IMAGE (digest), HARBOR_UID/GID/PORT/DEPLOYMENT, HARBOR_ALLOWED_LOGIN,
+.env.example                  HARBOR_IMAGE (digest), HARBOR_UID/GID/HOST_PORT/DEPLOYMENT,
+                              HARBOR_DATA_DIR, HARBOR_UPDATE_DIR, HARBOR_ALLOWED_LOGIN,
                               HARBOR_ALLOWED_HOSTS, HARBOR_WORKER_URL, HARBOR_WORKER_TOKEN, OPENROUTER_API_KEY
                               (placeholders only; the real .env is mode 600 and never committed)
 docker/security-notes.md      egress model (dial-time SSRF guard + host firewall), identity-lock rationale,
@@ -140,7 +141,7 @@ Written before the code, in this order:
 - [x] Config from env with explicit defaults; fail fast and loudly on a bad value.
 - [x] Router + middleware order: recover → request id → structured JSON log → security headers
       (strict CSP, no CORS) → `Host` check → identity lock → handler.
-- [ ] `/healthz` (static, two fields), `/api/version`, `/api/busy`, a stub `/api/status` (counts of
+- [x] `/healthz` (static, two fields), `/api/version`, `/api/busy`, a stub `/api/status` (counts of
       zero until later phases fill it), and the `harbor healthcheck` subcommand wired into the
       compose `healthcheck:`.
 - [x] Update endpoints writing only `check` / `requested`; read `available.json` and
@@ -149,14 +150,14 @@ Written before the code, in this order:
 
 **Container and deploy**
 
-- [ ] Dockerfile, following Warbler/Ivy/Polaris: a `node:22-bookworm` web stage pinned to
+- [x] Dockerfile, following Warbler/Ivy/Polaris: a `node:22-bookworm` web stage pinned to
       `--platform=$BUILDPLATFORM` (`corepack` + `pnpm@10.32.1`, `pnpm install --frozen-lockfile`,
       `pnpm build`); a `golang:1.27-alpine` stage pinned the same way, copying the web build into
       `web/build`, `CGO_ENABLED=0 GOOS/GOARCH` and `-ldflags "-s -w -X …Version=…"`; a
       `gcr.io/distroless/static-debian12:nonroot` runtime with the CA certificates, `USER 1000`,
       `EXPOSE 8080`, `HEALTHCHECK CMD ["/app/harbor","healthcheck"]`, and
       `org.opencontainers.image.source`.
-- [ ] `.dockerignore` (source-only context) and a CI step that asserts `web/build` is not tracked
+- [x] `.dockerignore` (source-only context) and a CI step that asserts `web/build` is not tracked
       except `.gitkeep`.
 - [ ] `docs/update.md`, modeled on Warbler's: three entry points (Settings, Meridian bare start, by
       hand), the signal files, the digest-only rule, the 120 s health window, snapshot restore, and
@@ -164,7 +165,7 @@ Written before the code, in this order:
 - [ ] `deploy/meridian/` snippets for the tile, `/etc/meridian/targets.json` and
       `/etc/meridian/observe.json`; `docs/meridian.md` remains the explanation, the snippets are
       what get copied on deploy day.
-- [ ] Compose with `read_only`, `cap_drop: ALL`, `no-new-privileges`, tmpfs `/tmp`, `./data:/data`,
+- [x] Compose with `read_only`, `cap_drop: ALL`, `no-new-privileges`, tmpfs `/tmp`, `./data:/data`,
       `./update-signal:/update-signal`, `127.0.0.1:8897:8080`, `env_file: [.env]`, and the
       `healthcheck:` from design §3.
 - [ ] Units + `install.sh`; the watcher accepts only `<repo>@sha256:<64 hex>` and refuses anything
@@ -185,7 +186,7 @@ Written before the code, in this order:
       keep that check in CI.
 - [ ] After the first publish, make the GHCR package public (or log the potato in) and verify an
       anonymous `docker pull` by digest. The source label links the package to the repo.
-- [ ] `security-notes.md`: the egress model (a hostname allowlist is impossible because the app
+- [x] `security-notes.md`: the egress model (a hostname allowlist is impossible because the app
       fetches arbitrary pages — dial-time SSRF guard in phase 3 plus the host firewall rule here),
       the header-based identity lock and the S10 evidence for it, and the token rotation drill.
 

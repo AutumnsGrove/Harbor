@@ -2,9 +2,11 @@
 .DS_Store
 *.swp
 
-# Secrets
+# Secrets. The example is tracked on purpose: it is the list of names, never a
+# value.
 .env
 .env.*
+!.env.example
 .dev.vars
 wrangler.toml.local
 

@@ -1,0 +1,51 @@
+# Harbor on the potato. The container is the whole product; the host supplies a
+# data directory, a signal directory and an image digest, and nothing else.
+#
+# The potato never builds (design.md §3): CI publishes the image and the update
+# watcher pins the digest in .env. `docker compose up --build` is for a developer
+# on their own machine.
+name: harbor
+
+services:
+  harbor:
+    image: ${HARBOR_IMAGE:-ghcr.io/autumnsgrove/harbor:latest}
+    restart: unless-stopped
+    env_file: [.env]
+
+    environment:
+      # .env carries the host port (HARBOR_HOST_PORT); the process always listens
+      # on 8080 inside the container, so compose pins it rather than trusting a
+      # copied variable.
+      HARBOR_PORT: '8080'
+
+    user: '${HARBOR_UID:-1000}:${HARBOR_GID:-1000}'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    tmpfs: ['/tmp']
+
+    healthcheck:
+      test: ['CMD', '/app/harbor', 'healthcheck']
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+    ports:
+      - '127.0.0.1:${HARBOR_HOST_PORT:-8897}:8080'
+
+    volumes:
+      - ./data:/data
+      - ./update-signal:/update-signal
+
+    # A fixed subnet so deploy/docker-user-firewall.sh can allow the public
+    # internet and deny the homelab, the tailnet and loopback by rule (see
+    # docker/security-notes.md). Do not change it without changing the script.
+    networks:
+      - egress
+
+networks:
+  egress:
+    name: harbor_egress
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
