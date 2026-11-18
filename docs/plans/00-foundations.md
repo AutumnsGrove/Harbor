@@ -137,15 +137,15 @@ Written before the code, in this order:
 
 **Server**
 
-- [ ] Config from env with explicit defaults; fail fast and loudly on a bad value.
-- [ ] Router + middleware order: recover → request id → structured JSON log → security headers
+- [x] Config from env with explicit defaults; fail fast and loudly on a bad value.
+- [x] Router + middleware order: recover → request id → structured JSON log → security headers
       (strict CSP, no CORS) → `Host` check → identity lock → handler.
 - [ ] `/healthz` (static, two fields), `/api/version`, `/api/busy`, a stub `/api/status` (counts of
       zero until later phases fill it), and the `harbor healthcheck` subcommand wired into the
       compose `healthcheck:`.
-- [ ] Update endpoints writing only `check` / `requested`; read `available.json` and
+- [x] Update endpoints writing only `check` / `requested`; read `available.json` and
       `status.json` for the UI. The app never names an image.
-- [ ] Structured JSON logs to stdout with a request id and duration.
+- [x] Structured JSON logs to stdout with a request id and duration.
 
 **Container and deploy**
 

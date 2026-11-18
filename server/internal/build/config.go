@@ -153,6 +153,17 @@ func Load(getenv func(string) string) (Config, error) {
 	}, nil
 }
 
+// HealthURL is the loopback address `harbor healthcheck` probes. It reads
+// HARBOR_PORT and nothing else: a copy of the server's environment is not the
+// point, and a broken path must not make a healthy process look dead.
+func HealthURL(getenv func(string) string) (string, error) {
+	port, err := parseInt(getenv(EnvPort), defaultPort, 1, 65535)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", EnvPort, err)
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/healthz", port), nil
+}
+
 // parseDeployment accepts the two modes design.md §3 defines. An unset value is
 // dev; a misspelled one is an error, never a silent fallback.
 func parseDeployment(raw string) (Deployment, error) {

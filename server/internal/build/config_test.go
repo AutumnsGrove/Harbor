@@ -243,6 +243,37 @@ func TestLoadRejects(t *testing.T) {
 	}
 }
 
+func TestHealthURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		port    string
+		want    string
+		wantErr bool
+	}{
+		{name: "default port", want: "http://127.0.0.1:8080/healthz"},
+		{name: "the port the container publishes", port: "8897", want: "http://127.0.0.1:8897/healthz"},
+		{name: "a bad port is not guessed", port: "eighty", wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := HealthURL(env(map[string]string{EnvPort: test.port}))
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("HealthURL(%q) error = nil, want a rejection", test.port)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("HealthURL(%q) error = %v", test.port, err)
+			}
+			if got != test.want {
+				t.Errorf("HealthURL(%q) = %q, want %q", test.port, got, test.want)
+			}
+		})
+	}
+}
+
 func TestParseBool(t *testing.T) {
 	trueCases := []string{"1", "true", "TRUE", " yes ", "on"}
 	falseCases := []string{"", "0", "false", "no", "off"}
