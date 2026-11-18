@@ -59,8 +59,10 @@ web-check:
 watcher-check:
 	./deploy/watcher/test.sh
 
-# Rules that CI must enforce and a human can break by accident.
-packaging:
+# Rules that CI must enforce and a human can break by accident. The frontend is a
+# prerequisite because three of the rules inspect the shipped shell; `make check`
+# must not be weaker than the CI job that runs the same script.
+packaging: web
 	./scripts/packaging-check.sh
 
 # Local build of the same Dockerfile CI publishes. The potato never runs this.
