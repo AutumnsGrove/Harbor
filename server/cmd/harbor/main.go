@@ -27,6 +27,7 @@ Usage: harbor <command>
 Commands:
   serve         run the HTTP server (the container's process)
   healthcheck   exit 0 when http://127.0.0.1:$HARBOR_PORT/healthz answers 200
+  snapshot      write data/backups/pre-update.db (use --pre-update)
   version       print the build stamp
   help          print this text
 `
@@ -51,6 +52,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return serve(ctx, getenv, stdout)
 	case "healthcheck":
 		return healthcheck(getenv)
+	case "snapshot":
+		return snapshotCommand(ctx, getenv, args[1:], stdout)
 	case "version":
 		fmt.Fprintln(stdout, build.Version())
 		return nil
