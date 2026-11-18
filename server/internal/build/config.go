@@ -263,5 +263,22 @@ func parseHosts(raw string, deployment Deployment) ([]string, error) {
 	if len(hosts) == 0 {
 		return nil, fmt.Errorf("lists no hostnames")
 	}
+
+	// The container healthcheck probes http://127.0.0.1:<port>/healthz, and the
+	// Host check runs on /healthz too. A docker config without 127.0.0.1 boots
+	// fine and then answers 421 to every probe, so Docker marks a healthy image
+	// unhealthy and the watcher rolls it back. Reject it at boot instead.
+	if deployment == DeploymentDocker && !contains(hosts, "127.0.0.1") {
+		return nil, fmt.Errorf("must include 127.0.0.1 in %s mode: the container healthcheck probes it, and a 421 there would fail a healthy image", DeploymentDocker)
+	}
 	return hosts, nil
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

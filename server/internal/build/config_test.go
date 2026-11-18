@@ -83,7 +83,7 @@ func TestLoadValid(t *testing.T) {
 				EnvDeployment:   " Docker ",
 				EnvPort:         " 9090 ",
 				EnvAllowedLogin: "  Autumn@Grove.Place  ",
-				EnvAllowedHosts: " Harbor.Tailnet.TS.NET , localhost ,, harbor.tailnet.ts.net ",
+				EnvAllowedHosts: " Harbor.Tailnet.TS.NET , localhost ,, 127.0.0.1 , harbor.tailnet.ts.net ",
 			}),
 			want: Config{
 				Deployment:   DeploymentDocker,
@@ -91,7 +91,7 @@ func TestLoadValid(t *testing.T) {
 				DataDir:      "/data",
 				UpdateDir:    "/update-signal",
 				AllowedLogin: "Autumn@Grove.Place",
-				AllowedHosts: []string{"harbor.tailnet.ts.net", "localhost"},
+				AllowedHosts: []string{"harbor.tailnet.ts.net", "localhost", "127.0.0.1"},
 				UID:          defaultUID,
 				GID:          defaultGID,
 			},
@@ -197,6 +197,11 @@ func TestLoadRejects(t *testing.T) {
 			name: "a negative uid",
 			env:  merged(dockerEnv(), map[string]string{EnvUID: "-1"}),
 			want: []string{EnvUID, "out of range"},
+		},
+		{
+			name: "docker without the loopback the healthcheck uses",
+			env:  merged(dockerEnv(), map[string]string{EnvAllowedHosts: "harbor.tailnet.ts.net,localhost"}),
+			want: []string{EnvAllowedHosts, "127.0.0.1"},
 		},
 		{
 			name: "a host allowlist entry with a scheme",
