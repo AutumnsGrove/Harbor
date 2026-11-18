@@ -18,6 +18,12 @@ set -euo pipefail
 
 SUBNET="${HARBOR_EGRESS_SUBNET:-172.31.240.0/24}"
 
+# The compose network is IPv4-only (no `enable_ipv6`), so a container on it has no
+# IPv6 address and there is no v6 source to scope a rule to. Applying the v4
+# subnet to ip6tables is an error, not a fallback. Set this only if the network
+# ever gains IPv6.
+SUBNET6="${HARBOR_EGRESS_SUBNET6:-}"
+
 # Everything inside the homelab, the tailnet, loopback and link-local. 100.64/10
 # is the Tailscale CGNAT range; fd7a:115c:a1e0::/48 is the tailnet ULA.
 V4_DENY=(
@@ -84,22 +90,25 @@ apply() {
 		add_rule "$IPTABLES" DOCKER-USER 1 -s "$SUBNET" -d "$target" -j REJECT
 	done
 
-	if have_ip6; then
+	if [ -n "$SUBNET6" ] && have_ip6; then
 		for target in "${V6_DENY[@]}"; do
-			add_rule "$IP6TABLES" DOCKER-USER 1 -s "$SUBNET" -d "$target" -j REJECT
+			add_rule "$IP6TABLES" DOCKER-USER 1 -s "$SUBNET6" -d "$target" -j REJECT
 		done
 	fi
 
 	echo "harbor-firewall: $SUBNET may reach the internet, not the homelab or the tailnet"
+	if [ -z "$SUBNET6" ]; then
+		echo "harbor-firewall: the compose network is IPv4-only; no v6 rules applied"
+	fi
 }
 
 remove() {
 	for target in "${V4_DENY[@]}"; do
 		del_rule "$IPTABLES" DOCKER-USER -s "$SUBNET" -d "$target" -j REJECT
 	done
-	if have_ip6; then
+	if [ -n "$SUBNET6" ] && have_ip6; then
 		for target in "${V6_DENY[@]}"; do
-			del_rule "$IP6TABLES" DOCKER-USER -s "$SUBNET" -d "$target" -j REJECT
+			del_rule "$IP6TABLES" DOCKER-USER -s "$SUBNET6" -d "$target" -j REJECT
 		done
 	fi
 	echo "harbor-firewall: rules removed"
@@ -113,9 +122,9 @@ check() {
 			missing=1
 		fi
 	done
-	if have_ip6; then
+	if [ -n "$SUBNET6" ] && have_ip6; then
 		for target in "${V6_DENY[@]}"; do
-			if ! rule_exists "$IP6TABLES" DOCKER-USER -s "$SUBNET" -d "$target" -j REJECT; then
+			if ! rule_exists "$IP6TABLES" DOCKER-USER -s "$SUBNET6" -d "$target" -j REJECT; then
 				echo "missing: $SUBNET -> $target (v6)" >&2
 				missing=1
 			fi
