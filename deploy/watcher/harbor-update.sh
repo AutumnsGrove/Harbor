@@ -192,7 +192,8 @@ acquire_lock() {
 	local holder
 	if mkdir "$LOCK_DIR" 2>/dev/null; then
 		printf '%s\n' "$$" >"$LOCK_DIR/pid"
-		trap release_lock EXIT INT TERM
+		trap release_lock EXIT
+		trap 'release_lock; exit 130' INT TERM
 		return 0
 	fi
 
@@ -205,7 +206,8 @@ acquire_lock() {
 	rm -rf "$LOCK_DIR"
 	if mkdir "$LOCK_DIR" 2>/dev/null; then
 		printf '%s\n' "$$" >"$LOCK_DIR/pid"
-		trap release_lock EXIT INT TERM
+		trap release_lock EXIT
+		trap 'release_lock; exit 130' INT TERM
 		return 0
 	fi
 	return 1
@@ -222,7 +224,11 @@ job_check() {
 	repo="$(repo_of "$current")"
 	rm -f "$CHECK_FILE"
 	if ! digest="$(resolve_digest "$repo")"; then
-		available "" "$repo"
+		# "Could not tell" is not "there is something new": an empty digest marked
+		# available would make the UI offer an update of nothing.
+		printf '{"available":false,"error":"could not resolve %s:latest","at":"%s"}\n' \
+			"$repo" "$(date -u +%FT%TZ)" >"$AVAILABLE_FILE.tmp"
+		mv "$AVAILABLE_FILE.tmp" "$AVAILABLE_FILE"
 		status "failed" "could not resolve $repo:latest"
 		exit 1
 	fi
@@ -257,6 +263,13 @@ job_update() {
 	new_ref="$repo@$digest"
 
 	if [ "$new_ref" = "$old_ref" ]; then
+		# A previous run may have been killed between pinning and recreating: .env
+		# and the running container disagree, and every later run would otherwise
+		# be a no-op. `up -d` is idempotent and recreates only if the image differs.
+		if ! compose up -d harbor; then
+			status "failed" "pinned at $digest but the container could not be reconciled"
+			exit 1
+		fi
 		status "ok" "already pinned at $digest"
 		exit 0
 	fi

@@ -175,6 +175,16 @@ run_watcher() {
 	return 0
 }
 
+# `stat -c` is GNU, `stat -f` is BSD/macOS; each errors rather than lying on the
+# other, so trying GNU first is portable in both directions.
+file_mode() {
+	if stat -c '%a' "$1" >/dev/null 2>&1; then
+		stat -c '%a' "$1"
+	else
+		stat -f '%Lp' "$1"
+	fi
+}
+
 image_line() { grep '^HARBOR_IMAGE=' "$WORK/.env"; }
 status_json() { cat "$WORK/update-signal/status.json" 2>/dev/null || printf ''; }
 calls() { cat "$STATE/calls" 2>/dev/null || printf ''; }
@@ -252,7 +262,7 @@ case_check_reports_up_to_date() {
 }
 
 case_second_update_is_a_no_op() {
-	current="bare start twice: the second is a no-op, not a needless pull"
+	current="bare start twice: no second pull, but the container is reconciled"
 	setup
 	run_watcher
 	run_watcher
@@ -260,6 +270,22 @@ case_second_update_is_a_no_op() {
 	assert_eq "$WATCHER_EXIT" "0" "exit code"
 	assert_contains "$(status_json)" "already pinned"
 	assert_eq "$(grep -c 'pull harbor' "$STATE/calls")" "0" "no pull on the second run"
+	# A run killed after pinning but before recreating leaves .env and the
+	# container disagreeing; `up -d` is how the next run notices.
+	assert_eq "$(grep -c 'up -d harbor' "$STATE/calls")" "1" "the container is reconciled"
+	teardown
+}
+
+case_failed_check_does_not_advertise_an_update() {
+	current="a check that cannot resolve says available:false, not an empty digest"
+	setup
+	touch "$STATE/resolve_fails" "$WORK/update-signal/check"
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "1" "exit code"
+	assert_contains "$(cat "$WORK/update-signal/available.json")" '"available":false'
+	assert_not_contains "$(cat "$WORK/update-signal/available.json")" '"available":true'
+	assert_absent "$WORK/update-signal/check"
 	teardown
 }
 
@@ -439,6 +465,7 @@ for case in \
 	case_check_only_changes_nothing \
 	case_check_reports_up_to_date \
 	case_second_update_is_a_no_op \
+	case_failed_check_does_not_advertise_an_update \
 	case_pull_failure_re_pins_the_old_digest \
 	case_snapshot_failure_aborts_before_pinning \
 	case_unhealthy_rolls_back_and_restores \
