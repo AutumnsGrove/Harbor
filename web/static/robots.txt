@@ -1,0 +1,4 @@
+# Harbor is tailnet-only and has no public read path (design.md §3). This file
+# exists so a crawler that somehow reaches it is told so once.
+User-agent: *
+Disallow: /

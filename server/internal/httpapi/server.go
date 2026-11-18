@@ -51,6 +51,11 @@ type Server struct {
 	assets fs.FS
 	files  http.Handler
 
+	// scriptHashes are the CSP hashes of the frontend's inline bootstrap
+	// scripts, read from the build's csp.json. Empty in tests and in a binary
+	// built without a frontend.
+	scriptHashes []string
+
 	started time.Time
 	now     func() time.Time
 }
@@ -62,12 +67,13 @@ func New(cfg build.Config, log *slog.Logger, assets fs.FS) *Server {
 		log = slog.New(slog.DiscardHandler)
 	}
 	return &Server{
-		cfg:     cfg,
-		log:     log,
-		assets:  assets,
-		files:   http.FileServerFS(assets),
-		started: time.Now(),
-		now:     time.Now,
+		cfg:          cfg,
+		log:          log,
+		assets:       assets,
+		files:        http.FileServerFS(assets),
+		scriptHashes: loadScriptHashes(assets),
+		started:      time.Now(),
+		now:          time.Now,
 	}
 }
 
