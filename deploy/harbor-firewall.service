@@ -1,0 +1,15 @@
+[Unit]
+Description=Harbor egress firewall (DOCKER-USER rules)
+Documentation=file:///home/autumn/Harbor/docker/security-notes.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /home/autumn/Harbor/deploy/docker-user-firewall.sh --apply
+ExecReload=/bin/bash /home/autumn/Harbor/deploy/docker-user-firewall.sh --apply
+ExecStop=/bin/bash /home/autumn/Harbor/deploy/docker-user-firewall.sh --remove
+
+[Install]
+WantedBy=multi-user.target

@@ -152,7 +152,7 @@ services:
       timeout: 3s
       retries: 3
     ports:
-      - "127.0.0.1:${HARBOR_PORT:-8897}:8080"
+      - "127.0.0.1:${HARBOR_HOST_PORT:-8897}:8080"
     volumes:
       - ./data:/data
       - ./update-signal:/update-signal
@@ -167,9 +167,15 @@ services:
   locally, `backups/` for the pre-update snapshot.
 - **Deployment mode:** `HARBOR_DEPLOYMENT=docker`, surfaced in Settings.
 - **`.env`** (mode 600, never committed) carries: `HARBOR_IMAGE` (the digest pin the watcher
-  rewrites — it must preserve every other line), `HARBOR_UID/GID/PORT/DEPLOYMENT`,
-  `HARBOR_ALLOWED_LOGIN` (the one Tailscale login), `HARBOR_ALLOWED_HOSTS`, `HARBOR_WORKER_URL`,
-  `HARBOR_WORKER_TOKEN` (the `potato` credential), and `OPENROUTER_API_KEY`.
+  rewrites — it must preserve every other line), `HARBOR_UID/GID/HOST_PORT/DEPLOYMENT`,
+  `HARBOR_DATA_DIR=/data`, `HARBOR_UPDATE_DIR=/update-signal`, `HARBOR_ALLOWED_LOGIN` (the one
+  Tailscale login), `HARBOR_ALLOWED_HOSTS`, `HARBOR_WORKER_URL`, `HARBOR_WORKER_TOKEN` (the
+  `potato` credential), and `OPENROUTER_API_KEY`.
+- **`HARBOR_HOST_PORT` is the published port; `HARBOR_PORT` is the port the process listens on.**
+  Two names on purpose: `.env` flows into the container, so a single variable could not mean
+  "8897 on the host, 8080 inside" without the app binding the wrong one. The binary defaults to
+  8080 and `HARBOR_PORT` is never set in `.env`; compose publishes `${HARBOR_HOST_PORT:-8897}` at
+  `127.0.0.1` and maps it to the container's 8080.
 - **One binary, several subcommands** (`harbor serve|healthcheck|snapshot|import|export|backup|
   restore|replay`). The image is distroless, so CLI work runs as
   `docker compose run --rm harbor <subcommand>` (container stopped) or
