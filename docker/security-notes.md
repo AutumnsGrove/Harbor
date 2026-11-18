@@ -57,10 +57,25 @@ whatever Autumn saved. That leaves two controls:
    metadata addresses, refuses redirects to them, and enforces a timeout, a byte
    cap and a retry budget. This is the control that follows a redirect.
 2. **The host firewall** (`deploy/docker-user-firewall.sh`): `DOCKER-USER` rules
-   deny the container's fixed subnet (`172.31.240.0/24`) any route to
+   deny the container's fixed subnet (`172.31.240.0/24`) a *forwarded* route to
    `10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `100.64/10`, and to
    `fd7a:115c:a1e0::/48`, `fc00::/7`, `fe80::/10`, `::1/128`. Everything else —
    the public internet — is allowed.
+
+   **What this does not cover, deliberately and honestly:** `DOCKER-USER` is
+   traversed for packets the host *forwards*. Traffic from the container to the
+   host's own addresses (the bridge gateway, a LAN or tailnet address the host
+   itself holds) is delivered locally through `INPUT`, so these rules do not see
+   it. There is no useful way to blackhole the host from its own container
+   without breaking DNS, so the host-local case is left to the dial-time SSRF
+   guard and to the host's own input policy. Do not read this rule set as "the
+   container cannot see the host".
+
+   **The DNS trap:** if the potato resolves through a LAN resolver, Docker's
+   embedded DNS forwards from the container subnet to that resolver, and these
+   rules reject it — every fetch fails while `/healthz` stays green. `install.sh`
+   runs a public-internet check after applying the rules and warns instead of
+   pretending; if it fails, check `/etc/resolv.conf` on the host.
 
 ```bash
 sudo deploy/docker-user-firewall.sh --check     # all rules present?
