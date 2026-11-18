@@ -1,0 +1,10 @@
+{
+  "harbor": {
+    "kind": "compose",
+    "dir": "/home/autumn/Harbor",
+    "service": "harbor",
+    "actions": ["start", "stop", "restart", "update"],
+    "criticality": "low",
+    "update": { "kind": "unit", "unit": "harbor-update.service" }
+  }
+}

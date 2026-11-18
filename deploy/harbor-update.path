@@ -1,0 +1,11 @@
+# @ROOT@ is replaced with the checkout path by deploy/install.sh.
+[Unit]
+Description=Harbor update signal (Settings check, Settings update)
+
+[Path]
+PathExists=@ROOT@/update-signal/check
+PathExists=@ROOT@/update-signal/requested
+Unit=harbor-update.service
+
+[Install]
+WantedBy=paths.target
