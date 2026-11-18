@@ -58,6 +58,7 @@ web-check:
 # fake docker/curl and never touch the network or the real .env.
 watcher-check:
 	./deploy/watcher/test.sh
+	./deploy/firewall/test.sh
 
 # Rules that CI must enforce and a human can break by accident. The frontend is a
 # prerequisite because three of the rules inspect the shipped shell; `make check`
