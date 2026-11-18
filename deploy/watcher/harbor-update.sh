@@ -270,6 +270,13 @@ job_update() {
 			status "failed" "pinned at $digest but the container could not be reconciled"
 			exit 1
 		fi
+		# The container may have been the reason the last run never finished, so a
+		# successful `up` is not evidence of health. This is the same endpoint the
+		# rest of the script trusts.
+		if ! wait_healthy; then
+			status "failed" "pinned at $digest but the container is not healthy"
+			exit 1
+		fi
 		status "ok" "already pinned at $digest"
 		exit 0
 	fi
