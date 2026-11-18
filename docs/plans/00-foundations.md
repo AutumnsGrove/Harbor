@@ -121,8 +121,10 @@ Written before the code, in this order:
 
 **Tooling**
 
-- [ ] `go mod init github.com/AutumnsGrove/Harbor`; Go 1.27 pinned in `go.mod`; Nova pinned to the
-      S11-tested commit (`ef460da`, `v0.5.1-0.20261116000603-ef460da11cfc`) even before it is used.
+- [ ] `go mod init github.com/AutumnsGrove/Harbor`; Go 1.27 pinned in `go.mod`. Nova is pinned to
+      the S11-tested commit (`ef460da`, `v0.5.1-0.20261116000603-ef460da11cfc`) in phase 3, when the
+      first import exists: an unused `require` is dropped by `go mod tidy`, so pinning it in phase 0
+      would only leave a line that the next tidy deletes. S11 needs no build secret either way.
 - [ ] Makefile targets; `make check` runs everything CI runs. `build` depends on `web`; `clean`
       removes `bin/`, `web/build/*` and restores `web/build/.gitkeep`.
 - [ ] SvelteKit scaffold (static adapter, no SSR), import `tokens.css` verbatim as `src/app.css`,
