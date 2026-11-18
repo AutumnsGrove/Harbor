@@ -5,7 +5,7 @@ const KINDS={
   note:{n:'Note',i:'sticky-note',lib:164},image:{n:'Image',i:'image',lib:89},paper:{n:'Paper',i:'file-text',lib:34},
   podcast:{n:'Podcast',i:'mic',lib:27},place:{n:'Place',i:'map-pin',lib:41},movie:{n:'Movie',i:'film',lib:22}
 };
-const SOURCES={app:{n:'In-app',i:'monitor'},telegram:{n:'Telegram',i:'send'},shortcut:{n:'iOS Shortcut',i:'smartphone'},quick:{n:'Quick-save page',i:'zap'},import:{n:'Import',i:'upload'}};
+const SOURCES={app:{n:'In-app',i:'monitor'},telegram:{n:'Telegram',i:'send'},shortcut:{n:'iOS Shortcut',i:'smartphone'},quick:{n:'Quick-save page',i:'zap'},share:{n:'Share target',i:'share-2'},import:{n:'Import',i:'upload'}};
 const HL={amber:'#f2b866',magenta:'#ff5f93',teal:'#58d4a8',blue:'#6ea8ff'};
 const HL_NAMES=Object.keys(HL);
 
@@ -65,16 +65,15 @@ const SPACES=[
  {id:'hw',n:'Desk & hardware',t:'auto',lib:63,rule:{tags_any:['hardware','desk']},desc:'Grows by itself.'},
  {id:'lab',n:'Homelab',t:'saved',lib:88,rule:{tags_any:['homelab','tailscale','sqlite']},desc:'A saved search.'},
  {id:'kitchen',n:'Kitchen',t:'auto',lib:129,rule:{tags_any:['baking','noodles','coffee','miso']},desc:'Grows by itself.'},
- {id:'recent',n:'Recent reading',t:'auto',lib:31,rule:{kinds:['article','paper'],within:14},desc:'Articles and papers from the last two weeks.'},
+ {id:'recent',n:'Recent reading',t:'auto',lib:31,rule:{kinds:['article','paper'],within_days:14},desc:'Articles and papers from the last two weeks.'},
  {id:'refs',n:'Design refs',t:'manual',lib:210,ids:['t1','b1','b2','m1','pl1'],desc:'Imported from a Raindrop collection.',imported:true}
 ];
 const TAG_ALIASES={'sqlite3':'sqlite','SQLite':'sqlite','home-lab':'homelab','local first':'local-first'};
-const SUGGESTION={name:'Raspberry Pi & SBCs',why:'You saved 6 items about single-board computers this month.',rule:{tags_any:['hardware','storage'],within:30},count:6};
+const SUGGESTION={name:'Raspberry Pi & SBCs',why:'You saved 6 items about single-board computers this month.',rule:{tags_any:['hardware','storage'],within_days:30},count:6};
 const DELETED0=[{id:'d1',kind:'article',title:'Ten tips for faster Docker builds',site:'devblog.example',left:23,cv:{t:'grad',ar:1.5,c:['#233a5a','#0b1626','#6ea8ff']}},{id:'d2',kind:'recipe',title:'Overnight focaccia',site:'saltandslate.example',left:11,cv:{t:'grad',ar:1.2,c:['#6b5a2a','#221c0c','#ffd77a']}},{id:'d3',kind:'note',title:'Untitled note',site:'In-app',left:2,cv:null}];
 const DOORS=[
  {id:'telegram',n:'Telegram bot',i:'send',desc:'Links, text, photos, documents and albums.',last:'12 s ago',made:'Oct 2',tok:'tg_••••9f3a'},
- {id:'shortcut',n:'iOS Shortcut and share sheet',i:'smartphone',desc:'The share sheet in every app. Also the PWA share target on Android.',last:'3 days ago',made:'Oct 2',tok:'sh_••••c81e'},
- {id:'quick',n:'Quick-save page',i:'zap',desc:'One input, pinned to the home screen. Tailnet only.',last:'4 days ago',made:'Oct 2',tok:'qk_••••027b'}
+ {id:'shortcut',n:'iOS Shortcut',i:'smartphone',desc:'The iOS share sheet. Public, write-only, one token.',last:'3 days ago',made:'Oct 2',tok:'sh_••••c81e'}
 ];
 const BACKUPS=[['Nov 3, 03:00','48.2 MB','R2 + MacBook Air'],['Nov 2, 03:00','48.0 MB','R2 + MacBook Air'],['Nov 1, 03:00','47.7 MB','R2 only (Air offline)'],['Oct 31, 03:00','47.5 MB','R2 + MacBook Air']];
 const STATUS={poll:'8 s ago',queue:1,mirror:0,mirrorBytes:'0 B',backup:'Nov 3, 03:00',disk:41,links:'Nov 3, 04:00',linkSlice:'50 checked, 1 dead',version:'r482.9f3c1a2',saves:[3,5,2,6,4,7,2,9,5,12],worker:'ok',items:1284,week:12};

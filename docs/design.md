@@ -58,14 +58,19 @@ usable before images, highlights, and spaces land; nothing in this list is cut.
 ## 3. Stack and deployment (settled 2026-11-03)
 
 Follows the established shape from Warbler, Polaris, and bwmon — a Go binary with the SvelteKit
-build embedded, shipped as a small Docker image, updated by a host-side watcher.
+build embedded, shipped as a small Docker image, built and published by GitHub Actions, and updated
+by a host-side watcher. The potato never builds Harbor and never holds a host-installed binary; it
+pulls one digest-pinned image like every other service in the homelab.
 
 ### The build
 
 - **Backend:** Go, module `github.com/AutumnsGrove/Harbor`, server under `server/`, entry point
-  `server/cmd/harbor`. Static binary, `CGO_ENABLED=0`, distroless final image, non-root.
+  `server/cmd/harbor`. Static binary, `CGO_ENABLED=0`, distroless final image, non-root. Go 1.27 is
+  the target toolchain, matching the sibling services.
 - **Frontend:** SvelteKit in `web/`, built to static `web/build`, embedded with
   `//go:embed all:build` (see Warbler's `web/embed.go`). No Node at runtime; one artifact to ship.
+  **`web/build/` is never committed** — only a `.gitkeep` placeholder is tracked. `make build`,
+  CI and the Docker frontend stage all build it fresh, so source and output cannot drift.
 - **SQLite:** [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) — pure Go, no cgo, so
   cross-compiles stay trivial. Same as Polaris and Ivy.
 - **AI:** all AI goes through **Nova** (`github.com/AutumnsGrove/nova`), the in-house Go agent
@@ -79,12 +84,15 @@ build embedded, shipped as a small Docker image, updated by a host-side watcher.
     [#49](https://github.com/AutumnsGrove/nova/issues/49) is still open for bookkeeping). Harbor
     is its first consumer and can use `embed.NewRoles` with an `index` role pinned to 1024 dims.
   Enrichment is a pipeline of one-shot calls, not an agent loop. `message.Parts` carries images to
-  the vision-capable chat model. Nova is pinned by tag or commit in `go.mod`; if its repo is private,
-  CI and the Docker build need `GOPRIVATE` and a read token (spike S11).
+  the vision-capable chat model. Nova is pinned to a commit or tag in `go.mod`. S11 (2026-11-18)
+  confirmed the repository is **public**, so no `GOPRIVATE` or build secret is needed; the tested
+  commit is `ef460da` (`v0.5.1-0.20261116000603-ef460da11cfc`), which carries `embed`,
+  `embed/openrouter` and `embed.NewRoles`.
 - **Version string:** `r<commit count>.<short sha>`, stamped with `-ldflags -X`, shown in Settings
   and in `/healthz`.
 - **Makefile** with the usual targets: `dev`, `web`, `build`, `test`, `docker`, `docker-run`,
-  `deploy`, `clean`.
+  `deploy`, `clean`. `build` depends on `web`; `clean` removes `web/build/*` and restores the
+  `.gitkeep`.
 
 ### Why embed the frontend
 
@@ -92,13 +100,44 @@ One process to run, one binary to ship, no reverse proxy for static assets, no N
 almost no RAM. The SvelteKit app is served by the Go server, so auth, host checks, and the identity
 lock apply to the UI and the API identically — there is no separate static origin to misconfigure.
 
+### Packaging and publishing (settled 2026-11-18)
+
+Harbor is one more container in the homelab sequence, not a binary deployed by hand. The pattern is
+copied from Warbler, Ivy and Polaris:
+
+- **Nothing built is committed.** `web/build/` is git-ignored except a `.gitkeep`; `bin/` is
+  ignored; the Go binary exists only inside the image. `.dockerignore` excludes `.git`, `data/`,
+  `update-signal/`, `node_modules`, `web/build` and the local caches, so the image context is
+  source only.
+- **The Dockerfile builds both halves.** A `node:22-bookworm` frontend stage runs
+  `pnpm install --frozen-lockfile` and `pnpm build`, pinned to `--platform=$BUILDPLATFORM` so it
+  runs once natively rather than under QEMU. A `golang:1.27-alpine` stage is pinned the same way and
+  cross-compiles with `CGO_ENABLED=0`; only the tiny distroless runtime stage is assembled per
+  target arch. The runtime carries the CA certificates it needs for outbound HTTPS, runs as uid
+  1000 on a read-only rootfs, and labels the image with
+  `org.opencontainers.image.source=https://github.com/AutumnsGrove/Harbor` so GHCR links it to the
+  repository.
+- **GitHub Actions publishes one image per commit.** On a push to `main` that passes every test
+  job, the publish job in `ci.yml` builds `linux/amd64` + `linux/arm64`, tags
+  `ghcr.io/autumnsgrove/harbor:latest` and the short SHA, stamps
+  `r<commit count>.<short sha>`, and uses the GitHub Actions layer cache. Pull requests never push.
+  A manual `workflow_dispatch` can publish a deliberately broken tag for the phase-0 rollback
+  drill without touching `latest`.
+- **The potato never builds.** Compose pulls the image; the host watcher resolves and pins the
+  digest in `.env`. If the pull fails, the GHCR package is probably private: make it public (or log
+  the potato in to GHCR) once, at first publish.
+
+The division is the same one used everywhere else in the homelab: GitHub owns the build, the
+registry owns the artifact, the potato owns the data.
+
 ### Container
 
 ```yaml
 # docker-compose.yml at the repo root, like Warbler's, so Meridian's compose actions find it
 services:
   harbor:
-    build: .
+    # No `build:` on the potato. The image comes from GHCR; only a developer
+    # running `docker compose up --build` builds locally from the same Dockerfile.
     image: ${HARBOR_IMAGE:-ghcr.io/autumnsgrove/harbor:latest}
     restart: unless-stopped
     env_file: [.env]                    # digest pin + secrets; see below
@@ -108,19 +147,22 @@ services:
     security_opt: ["no-new-privileges:true"]
     tmpfs: ["/tmp"]
     healthcheck:                        # distroless has no curl; the binary checks itself
-      test: ["CMD", "/harbor", "healthcheck"]
+      test: ["CMD", "/app/harbor", "healthcheck"]
       interval: 30s
       timeout: 3s
       retries: 3
     ports:
-      - "127.0.0.1:${HARBOR_PORT:-8895}:8080"
+      - "127.0.0.1:${HARBOR_PORT:-8897}:8080"
     volumes:
       - ./data:/data
       - ./update-signal:/update-signal
 ```
 
-- **Port 8895** (8893 is reserved for Cairn, 8894 for Coffer) — loopback only; `tailscale serve` is
-  the only way in. Confirm it's free with `ss -ltn` before first install.
+- **Port 8897** (loopback only; `tailscale serve` is the only way in). S7 on 2026-11-18 found
+  **8895 already held by Pixelsort** (`pixelsort-pixelsort-1` publishes `127.0.0.1:8895`, and
+  `tailscale serve` already proxies `:8895`). 8893 is Sepia, 8894 is reserved for Coffer, 8896 is
+  Outpost; 8897 was free on both loopback and the tailnet. Re-check with `ss -ltn` anyway, because a
+  new service can appear before deploy day.
 - **Data:** `~/Harbor/data/` — `harbor.db` (+ WAL), `archives/` if anything is ever stored
   locally, `backups/` for the pre-update snapshot.
 - **Deployment mode:** `HARBOR_DEPLOYMENT=docker`, surfaced in Settings.
@@ -131,7 +173,7 @@ services:
 - **One binary, several subcommands** (`harbor serve|healthcheck|snapshot|import|export|backup|
   restore|replay`). The image is distroless, so CLI work runs as
   `docker compose run --rm harbor <subcommand>` (container stopped) or
-  `docker compose exec harbor /harbor <subcommand>` (running).
+  `docker compose exec harbor /app/harbor <subcommand>` (running).
 
 ### The update path (inherited, not reinvented)
 
@@ -160,13 +202,20 @@ Meridian tap ───────► systemctl start harbor-update.service  (no
 
 - The app **never names an image**. It writes `requested` with the literal `latest`; the watcher
   owns the allowed repository and accepts only `<repo>@sha256:<64 hex>`.
+- A **bare start is an update**. Meridian's Update action starts `harbor-update.service` with no
+  signal file, so the watcher treats that as "resolve `latest`, pin, snapshot, pull, recreate,
+  health-check, roll back on failure". Settings and the timer use the same script.
 - A `harbor-tick.timer` every 10 minutes refreshes a heartbeat and catches missed signals. It
   never updates on its own.
+- `docs/update.md` is the operator page (a phase-0 deliverable, modeled on Warbler's): signal files,
+  digest-only rule, health window, snapshot restore, GHCR visibility, and what to do when an update
+  fails.
 - Endpoints: `GET /healthz` (public to Docker/Meridian, two fields), `GET /api/version`,
   `POST /api/update/check`, `GET /api/update/available`, `POST /api/update/start`,
   `GET /api/update/status`, `GET /api/busy`.
 - Meridian target: `kind: compose`, `dir: /home/autumn/Harbor`, `service: harbor`,
-  `update: { kind: unit, unit: harbor-update.service }`.
+  `update: { kind: unit, unit: harbor-update.service }`. Ready-to-copy tile/target/observe snippets
+  live in `deploy/meridian/` (phase 0), mirroring Warbler's.
 - Full tile, vital, allowlist, observed-unit, and homelab-repo checklist:
   [docs/meridian.md](meridian.md). Do not wire any of it before `/healthz` exists on the box.
 - The watcher never updates `docker-compose.yml`, the units, or the script themselves — those come
@@ -189,6 +238,13 @@ request needs `Tailscale-User-Login` equal to `HARBOR_ALLOWED_LOGIN`, with exact
 `GET /healthz` and `GET /api/status`, which are exempt only on a path match **and** only when the
 header is absent (host-local callers: Docker, Meridian). Counts only; neither exposes content.
 
+S10 measured this on the potato on 2026-11-18: a real tailnet request carried
+`Tailscale-User-Login`, `Tailscale-User-Name`, `X-Forwarded-For` and `X-Forwarded-Proto: https`; a
+forged `Tailscale-User-Login` sent from the tailnet was **overwritten** with the real login; the peer
+inside the container was always `172.17.0.1` (the Docker bridge gateway); and a host-local `curl`
+carried no identity header. `X-Forwarded-For` is diagnostic only — never use it as identity, and
+never accept the peer address as proof of loopback.
+
 **Egress (a deliberate difference from Warbler).** Harbor must reach `openrouter.ai`, the Worker,
 and — because fetching saved pages is its job — arbitrary public sites. A hostname allowlist is
 therefore impossible. The controls are (1) the in-app SSRF guard, enforced at dial time, which
@@ -199,9 +255,12 @@ ULA `fd7a:115c:a1e0::/48`, `*.ts.net`, `0.0.0.0` and non-80/443 ports; and (2) a
 ### What CI does
 
 On every push: `gofmt`, `go vet`, `go test -race`, pnpm check/test/build, the no-outside-addresses
-frontend check. On a push to `main` that passes: build `linux/amd64` + `linux/arm64`, publish
-`ghcr.io/autumnsgrove/harbor` tagged `latest` and the short SHA. The potato only ever pulls; it
-never builds.
+frontend check, the packaging checks (`git ls-files web/build` is only `.gitkeep`, `.dockerignore`
+excludes build output), and the functional Playwright smoke (no screenshot or visual-regression
+comparison; see [plans/testing.md](plans/testing.md)). On a push to `main` that passes every job, the
+publish job builds `linux/amd64` + `linux/arm64` and publishes `ghcr.io/autumnsgrove/harbor` tagged
+`latest` and the short SHA. The potato only ever pulls; it never builds. A pull request never pushes,
+and a failing test never produces an image.
 
 ## 4. Architecture
 
@@ -919,6 +978,9 @@ the first real import. Details, the milestone, and the cut list are in
   would break the static, cross-compiled binary; Polaris set the same precedent).
 - Go backend + SvelteKit embedded with `go:embed`, shipped as a distroless Docker image.
 - Docker Compose on the potato, GHCR multi-arch images, digest-pinned `.env`.
+- GitHub Actions is the only builder: the Dockerfile builds the frontend and Go binary, and the
+  gated publish job pushes one image per passing `main` commit. `web/build/` is never committed;
+  the potato only pulls.
 - Updates use the Warbler watcher: systemd path unit + oneshot service + tick timer, automatic
   health check, rollback, and pre-update DB snapshot. Meridian can trigger it.
 - Save path never depends on enrichment succeeding.
@@ -1042,10 +1104,32 @@ the first real import. Details, the milestone, and the cut list are in
 - Nova is pinned; `go test -race` runs with `CGO_ENABLED=1` in CI while the shipped binary stays
   `CGO_ENABLED=0`.
 
+**Settled in the 2026-11-18 packaging and spike pass**
+
+- Harbor ships as a **container only**. GitHub Actions builds the frontend and the Go binary inside
+  the Dockerfile and publishes a multi-arch image to GHCR; nothing built is committed (`web/build`
+  is ignored except a `.gitkeep`), and the potato never builds. This is the Warbler/Ivy/Polaris
+  pattern, not a hand-installed binary.
+- The publish job runs only on a push to `main` that passes every test job, tags `latest` and the
+  short SHA, and can publish a `broken-test` tag by manual dispatch for the rollback drill. Pull
+  requests never push.
+- The port is **8897**. S7 found 8895 already taken by Pixelsort; 8893 is Sepia, 8894 is reserved
+  for Coffer, and 8896 is Outpost.
+- S5 passed: `pplx-embed-v1-0.6b` returns 1024 unnormalised dimensions deterministically, with
+  usage/cost, and `embed.NewRoles` refuses a wrong `Dims` instead of truncating.
+- S10 passed: `tailscale serve` overwrites a forged `Tailscale-User-Login`, the Docker peer is the
+  bridge gateway, and a host-local caller carries no identity header. The header-based lock stands.
+- S11 passed: Nova is public and fetchable from a clean Docker build at commit `ef460da`; no build
+  secret is needed.
+- E2E tests are **functional only**. There is no screenshot comparison, pixel-diff or visual
+  regression suite; the mockup is reviewed by a human, and Playwright asserts behaviour and
+  accessibility instead of appearance.
+
 **Also settled**
 
 - Go for the potato service; SvelteKit embedded (Python loses on deployment and memory).
-- Port **8895** (8893 Cairn, 8894 Coffer already reserved); confirm free at install.
+- Port **8897** (8893 Sepia, 8894 Coffer reserved, 8895 Pixelsort, 8896 Outpost); confirm free at
+  install.
 - Notes and links share one `items` table; images are `items` with `media` rows.
 - Smart Spaces evaluate live from stored rules (`auto`), plus explicit saved queries (`saved`) and
   hand-curated `manual` collections; `space_items` is the membership table.
@@ -1056,13 +1140,11 @@ the first real import. Details, the milestone, and the cut list are in
 ### Still open
 
 - Hybrid ranking weights (keyword vs semantic) — tune once there is real search data.
-- The implementation spikes in
-  [open-questions.md](open-questions.md#g-things-to-verify-with-a-spike-not-decisions) (streaming
-  upload, D1 claim, vector cache, Browser Rendering, PDF extraction, port, transcripts) plus the
-  four added 2026-11-04: a real Raindrop export sample (S9), Tailscale-serve header and Docker
-  source-address behaviour (S10), Nova module access in CI/Docker (S11), and image decode memory
-  and EXIF (S12). Nova's `embed` prerequisite has landed, so vector search is no longer blocked
-  on Nova.
+- The remaining implementation spikes: Worker streaming upload (S1), D1 claim semantics (S2),
+  brute-force vector cache (S3), Browser Rendering on the free plan (S4), PDF extraction (S6), video
+  transcripts (S8), a real Raindrop export (S9), and image decode memory/EXIF (S12). S5, S7, S10 and
+  S11 were answered on 2026-11-18 (S7 changed the port to 8897); see
+  [plans/spikes.md](plans/spikes.md). Nova's `embed` prerequisite is no longer a blocker.
 
 ### How it is built (settled 2026-11-03)
 

@@ -11,31 +11,35 @@ These are the twelve from [open-questions.md §G](../open-questions.md#g-things-
 (S1–S8 from the research thread, S9–S12 added by the 2026-11-04 plan audit), now with the phase each
 one gates and the pass condition that has to be met.
 
-| ID | Spike | Gates | Timebox |
-|---|---|---|---|
-| S1 | Worker streaming upload | phase 1 exit | 90 min |
-| S2 | D1 claim semantics | phase 1 exit | 60 min |
-| S3 | Brute-force vector cache | phase 10 exit | 90 min |
-| S4 | Browser Rendering on the free plan | phase 11 exit | 2 h |
-| S5 | Nova `embed` live call | phase 3 smoke / phase 10 exit | 45 min |
-| S6 | PDF text extraction in Go | phase 6 exit | 2 h |
-| S7 | Port 8895 free | phase 0 start | 5 min |
-| S8 | Video transcript source | phase 7 exit | 90 min |
-| S9 | Real Raindrop export sample | phase 5 start | 30 min |
-| S10 | Tailscale serve headers + Docker peer address | phase 0 start | 45 min |
-| S11 | Nova as a dependency in CI/Docker | phase 0 exit | 45 min |
-| S12 | Image decode memory + EXIF | phase 6 exit | 90 min |
+| ID | Spike | Gates | Timebox | Verdict |
+|---|---|---|---|---|
+| S1 | Worker streaming upload | phase 1 exit | 90 min | pending |
+| S2 | D1 claim semantics | phase 1 exit | 60 min | pending |
+| S3 | Brute-force vector cache | phase 10 exit | 90 min | pending |
+| S4 | Browser Rendering on the free plan | phase 11 exit | 2 h | pending |
+| S5 | Nova `embed` live call | phase 3 smoke / phase 10 exit | 45 min | **pass** |
+| S6 | PDF text extraction in Go | phase 6 exit | 2 h | pending |
+| S7 | Port 8895 free | phase 0 start | 5 min | **changed-plan → 8897** |
+| S8 | Video transcript source | phase 7 exit | 90 min | pending |
+| S9 | Real Raindrop export sample | phase 5 start | 30 min | pending |
+| S10 | Tailscale serve headers + Docker peer address | phase 0 start | 45 min | **pass** |
+| S11 | Nova as a dependency in CI/Docker | phase 0 exit | 45 min | **pass locally; CI at phase 0** |
+| S12 | Image decode memory + EXIF | phase 6 exit | 90 min | pending |
 
 S7, S9, S10 and S11 are cheap and can be done now (S9 is ten minutes in Raindrop's export screen
 plus sanitising). S1/S2 are prerequisites for writing the Worker; do them first.
 S3/S4/S6/S8 are cheap to defer until their phase, but each can invalidate a design assumption, so
 they must be answered *before* the phase's code is finished, not after.
 
+S5, S7, S10 and S11 were run on 2026-11-18. S7 changed the port; S5 and S10 passed in full; S11
+passed locally, with its GitHub Actions half waiting for phase 0's first CI run. The remaining
+spikes are still open.
+
 ---
 
 ## S7 — Port 8895 is free
 
-**Question:** is 8895 actually unused on the potato, given 8893 Cairn and 8894 Coffer are reserved?
+**Question:** is 8895 actually unused on the potato, given 8893 Sepia, 8894 Coffer and 8896 Outpost are already assigned?
 
 ```bash
 ssh potato-remote 'ss -ltn | grep -E ":(8893|8894|8895)\b" || echo "8895 free"'
@@ -44,6 +48,15 @@ ssh potato-remote 'ss -ltn | grep -E ":(8893|8894|8895)\b" || echo "8895 free"'
 **Pass:** no listener on 8895, and `docker ps` shows no container publishing it.
 **Fail:** pick the next free port, update design.md §3, [meridian.md](../meridian.md), and
 `.env.example`. One commit.
+
+**Verdict (2026-11-18): changed-plan — 8895 is taken by Pixelsort.**
+**What happened:** `ss -ltn` on the potato shows `127.0.0.1:8895` and the tailnet address on 8895 in
+use; `docker ps` shows `pixelsort-pixelsort-1 127.0.0.1:8895->8895/tcp`, and the homelab port map
+lists 8895 as Pixelsort. `tailscale serve` already proxies `:8895` to it. Port **8897** is free on
+both loopback and the tailnet, with no Docker container publishing it.
+**Consequence:** Harbor now uses **8897** everywhere (design §3, README, meridian.md, plans,
+mockup). On deploy day the homelab port map adds "8897 Harbor" (8895 stays Pixelsort) and the
+Meridian snippet points at 8897. Do not reuse 8895.
 
 ---
 
@@ -175,6 +188,15 @@ rejects a mismatched model instead of silently truncating.
 **Fail:** anything else is a Nova issue, filed before phase 3 depends on it — and phase 10 is the
 blocked one, not phase 0.
 
+**Verdict (2026-11-18): pass.**
+**What happened:** two live calls through `embed.NewRoles` with the `index` role and
+`perplexity/pplx-embed-v1-0.6b` returned **1024 dims**, L2 norm **5.151501** (not 1, so the vectors
+are unnormalised), and identical vectors for identical input. Usage was reported: 14 tokens,
+`$0.000000056` per call. A deliberately wrong `Dims: 512` role was refused with
+`embed: role "index": perplexity/pplx-embed-v1-0.6b returned 1024 dimensions, want 512`, not
+silently truncated.
+**Consequence:** design §6/§8 stands: normalise on write, compare with cosine, store `dims`.
+
 ---
 
 ## S6 — PDF text extraction in pure Go
@@ -254,6 +276,19 @@ bridge gateway for both, which is why loopback is not usable as a test).
 **Fail:** if the header can be forged by a tailnet client, the lock must additionally verify the
 caller with `tailscale whois` against the peer address, and the plan changes.
 
+**Verdict (2026-11-18): pass.**
+**What happened:** a throwaway container on `127.0.0.1:8897`, published through
+`tailscale serve --https=8897`, was called four ways. A tailnet request carried a real
+`Tailscale-User-Login`, `Tailscale-User-Name`, `X-Forwarded-For` (the Mac's tailnet address) and
+`X-Forwarded-Proto: https`; the peer inside the container was **172.17.0.1** (the Docker bridge
+gateway). A forged `Tailscale-User-Login` on the same tailnet request was **overwritten** with the
+real login, not passed through. A `curl` from the potato host carried no identity header (and can
+forge one, which is why host-local callers are trusted). The temporary serve mapping and container
+were removed after the test.
+**Consequence:** the header-based identity lock in design §3 is correct. Keep `/healthz` and
+`/api/status` as the only header-absent exemptions; do not use the peer address as a loopback test.
+Record `X-Forwarded-For` as diagnostic only, never as identity.
+
 ---
 
 ## S11 — Nova as a dependency
@@ -267,6 +302,16 @@ from a clean GitHub Actions job and a clean `docker build` with no host credenti
 deploy key or token as a build secret works in both CI and the Dockerfile, and the secret does not
 land in an image layer.
 **Fail:** vendor Nova, or publish it, before phase 0's CI can be green.
+
+**Verdict (2026-11-18): pass locally; the first real CI run is the final confirmation.**
+**What happened:** `github.com/AutumnsGrove/nova` is public. A clean `go get` of commit `ef460da`
+(the commit with `embed`, `embed/openrouter` and `embed.NewRoles`) succeeded from a scratch module
+and from a clean `golang:1.27-alpine` Docker build with no credentials or `GOPRIVATE`. The module
+resolved as `v0.5.1-0.20261116000603-ef460da11cfc`. No GitHub Actions run has happened yet, because
+Harbor has no workflow to run.
+**Consequence:** pin Nova to that commit (or a later tag) in `go.mod`; no build secret is needed.
+Phase 0's first CI run proves the same path on GitHub. Re-check before phase 3 if the repository's
+visibility changes.
 
 ---
 

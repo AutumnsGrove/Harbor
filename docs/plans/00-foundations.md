@@ -8,11 +8,15 @@
 
 ## Goal
 
-An empty Harbor that is already *real*: one Go binary with the SvelteKit shell embedded, in a
-distroless image, publishing to GHCR, running on the potato behind `tailscale serve`, with `/healthz`,
-the identity lock, the Warbler update watcher, and a pre-update `VACUUM INTO` snapshot. No library
-features. The point is that every later phase ships through a pipe that is already proven, so a phase
-can never be "done but undeployable".
+An empty Harbor that is already *real*: one Go binary with the SvelteKit shell embedded, built by
+GitHub Actions into a distroless image and published to GHCR, running on the potato behind
+`tailscale serve`, with `/healthz`, the identity lock, the Warbler update watcher, and a pre-update
+`VACUUM INTO` snapshot. No library features. The point is that every later phase ships through a pipe
+that is already proven, so a phase can never be "done but undeployable".
+
+Nothing built is committed. `web/build/` is a placeholder in git, the Go binary exists only inside
+the image, and the potato only pulls. This is the Warbler/Ivy/Polaris packaging shape, not a host
+binary.
 
 This is the phase that decides whether the deployment story is true. It is also the phase where the
 update and rollback path is exercised **with a deliberately broken image**, because a rollback path
@@ -30,8 +34,12 @@ identity, Meridian wiring (plan only — see [meridian.md](../meridian.md)).
 
 ```
 Makefile                      dev web build test fuzz check docker docker-run deploy clean
-Dockerfile                    multi-stage → gcr distroless, non-root, CGO_ENABLED=0
-docker-compose.yml            project harbor, 127.0.0.1:8895, ./data, ./update-signal
+Dockerfile                    node:22 frontend stage → golang:1.27 cross-build → gcr distroless;
+                              BUILDPLATFORM-pinned build stages, non-root, CGO_ENABLED=0,
+                              org.opencontainers.image.source label
+.dockerignore                 source-only context: no .git, data/, update-signal/, node_modules,
+                              web/build, .svelte-kit, bin, test output
+docker-compose.yml            project harbor, 127.0.0.1:8897, ./data, ./update-signal
 .env.example                  HARBOR_IMAGE (digest), HARBOR_UID/GID/PORT/DEPLOYMENT, HARBOR_ALLOWED_LOGIN,
                               HARBOR_ALLOWED_HOSTS, HARBOR_WORKER_URL, HARBOR_WORKER_TOKEN, OPENROUTER_API_KEY
                               (placeholders only; the real .env is mode 600 and never committed)
@@ -42,6 +50,10 @@ deploy/harbor-update.service  oneshot: digest pin (rewrites only the HARBOR_IMAG
                               pull, recreate, health, rollback
 deploy/harbor-tick.timer      every 10 min heartbeat + missed-signal catch-up
 deploy/install.sh             units, .env, dirs, ss -ltn check, first run
+deploy/watcher/test.sh        shell tests with fake docker/curl: bare start, check-only, pull failure,
+                              unhealthy rollback, snapshot restore, lock contention, timeout paths
+deploy/meridian/*.yaml|json   ready-made tile, targets and observe snippets (same as Warbler's);
+                              never wired before the service actually runs
 deploy/docker-user-firewall.sh  DOCKER-USER rules denying the container RFC1918, loopback, link-local,
                               100.64.0.0/10, fd7a:115c:a1e0::/48 (the tailnet) while allowing the public internet
 server/cmd/harbor/main.go     subcommands: serve · healthcheck · snapshot (import/export/backup/restore/replay
@@ -53,10 +65,14 @@ server/internal/store/        open DB, WAL pragmas, migrations runner (empty mig
 server/internal/store/snapshot.go   VACUUM INTO temp → fsync → rename + integrity check; the watcher calls
                               it as `harbor snapshot --pre-update`, and phase 12's backup reuses it
 web/                          SvelteKit shell: app.css ← tokens.css, nav, empty home, settings stub
+web/build/.gitkeep            the only tracked file under build/; `make web` fills it
 web/embed.go                  //go:embed all:build
+docs/update.md                the watcher flow, signal files, bare-start/Meridian rule, digest pin,
+                              rollback and GHCR visibility — the page a tired operator reads
 contracts/                    README + empty schema stubs so the directory exists from day one
-.github/workflows/ci.yml      gofmt, vet, test -race, fuzz seed corpus, pnpm check/test/build
-.github/workflows/release.yml multi-arch build + push on green main
+.github/workflows/ci.yml      gofmt, vet, test -race, fuzz seed corpus, pnpm check/test/build,
+                              packaging checks; on green main, a gated publish job builds
+                              linux/amd64 + linux/arm64 and pushes latest + short SHA
 ```
 
 ## Tests first
@@ -92,15 +108,27 @@ Written before the code, in this order:
    `<repo>@sha256:<64 hex>` is refused.
 9. `web` — `svelte-check` clean; one vitest test that the API client maps a 403 to a typed error, so
    the client exists and is wired.
+10. **Packaging** — `git ls-files web/build` returns exactly `web/build/.gitkeep`; `.dockerignore`
+    excludes `web/build`, `node_modules`, `data/` and `update-signal/`; a clean checkout with no
+    `web/build` can run `make build` (it builds the frontend first) and `docker build` (the
+    frontend stage fills the embed directory). The built image contains no Node, npm or pnpm, and
+    runs as uid 1000.
+11. **Publish workflow** — the publish job is reachable only on a push to `main` (or manual
+    dispatch), `needs` every test job, and publishes both `latest` and the short SHA. A pull request
+    cannot reach the registry job. The version build arg is `r<commit count>.<short sha>`.
 
 ## Tasks
 
 **Tooling**
 
-- [ ] `go mod init github.com/AutumnsGrove/Harbor`; Go version pinned in `go.mod`.
-- [ ] Makefile targets; `make check` runs everything CI runs.
+- [ ] `go mod init github.com/AutumnsGrove/Harbor`; Go 1.27 pinned in `go.mod`; Nova pinned to the
+      S11-tested commit (`ef460da`, `v0.5.1-0.20261116000603-ef460da11cfc`) even before it is used.
+- [ ] Makefile targets; `make check` runs everything CI runs. `build` depends on `web`; `clean`
+      removes `bin/`, `web/build/*` and restores `web/build/.gitkeep`.
 - [ ] SvelteKit scaffold (static adapter, no SSR), import `tokens.css` verbatim as `src/app.css`,
       set the Schibsted Grotesk face and the dark-only base.
+- [ ] `web/build/.gitkeep` plus `.gitignore` rules (`web/build/*`, `!web/build/.gitkeep`); no build
+      output is ever tracked.
 - [ ] `web/embed.go` with `//go:embed all:build`; static handler serves `index.html` for unknown
       paths (SPA) but **not** for `/api/*`.
 - [ ] `contracts/README.md` stating the rule: a field change lands with a fixture.
@@ -119,21 +147,42 @@ Written before the code, in this order:
 
 **Container and deploy**
 
-- [ ] Dockerfile: build the web app, build the Go binary with `-ldflags "-X …Version=…"`, copy into
-      distroless, `USER 1000`, `ENTRYPOINT ["/harbor"]`.
+- [ ] Dockerfile, following Warbler/Ivy/Polaris: a `node:22-bookworm` web stage pinned to
+      `--platform=$BUILDPLATFORM` (`corepack` + `pnpm@10.32.1`, `pnpm install --frozen-lockfile`,
+      `pnpm build`); a `golang:1.27-alpine` stage pinned the same way, copying the web build into
+      `web/build`, `CGO_ENABLED=0 GOOS/GOARCH` and `-ldflags "-s -w -X …Version=…"`; a
+      `gcr.io/distroless/static-debian12:nonroot` runtime with the CA certificates, `USER 1000`,
+      `EXPOSE 8080`, `HEALTHCHECK CMD ["/app/harbor","healthcheck"]`, and
+      `org.opencontainers.image.source`.
+- [ ] `.dockerignore` (source-only context) and a CI step that asserts `web/build` is not tracked
+      except `.gitkeep`.
+- [ ] `docs/update.md`, modeled on Warbler's: three entry points (Settings, Meridian bare start, by
+      hand), the signal files, the digest-only rule, the 120 s health window, snapshot restore, and
+      the GHCR visibility gotcha. Keep it short enough to follow at 2 a.m.
+- [ ] `deploy/meridian/` snippets for the tile, `/etc/meridian/targets.json` and
+      `/etc/meridian/observe.json`; `docs/meridian.md` remains the explanation, the snippets are
+      what get copied on deploy day.
 - [ ] Compose with `read_only`, `cap_drop: ALL`, `no-new-privileges`, tmpfs `/tmp`, `./data:/data`,
-      `./update-signal:/update-signal`, `127.0.0.1:8895:8080`, `env_file: [.env]`, and the
+      `./update-signal:/update-signal`, `127.0.0.1:8897:8080`, `env_file: [.env]`, and the
       `healthcheck:` from design §3.
 - [ ] Units + `install.sh`; the watcher accepts only `<repo>@sha256:<64 hex>` and refuses anything
       else, rewrites only the `HARBOR_IMAGE=` line of `.env`, and takes the pre-update snapshot with
-      `docker compose exec harbor /harbor snapshot --pre-update`.
+      `docker compose exec harbor /app/harbor snapshot --pre-update`.
+- [ ] The watcher handles **both** a signal file and a bare `systemctl start` (Meridian's Update
+      action): no file means "resolve `latest`, pin, snapshot, pull, recreate, health-check,
+      rollback". Write `deploy/watcher/test.sh` before the script, covering both paths and every
+      failure exit.
 - [ ] `deploy/docker-user-firewall.sh` and its install step: the container can reach the public
       internet but not private, loopback, link-local or tailnet ranges (verify by `docker exec` into
       a throwaway container of the same network: `curl 100.x.x.x` fails, `curl example.com` works).
-- [ ] CI: multi-arch image, tags `latest` + short SHA, provenance attestation if trivial. Tests run
-      with `CGO_ENABLED=1` (the race detector needs cgo) while the image build stays
-      `CGO_ENABLED=0`. Per S11, prove CI and `docker build` can fetch Nova (build secret, not an
-      image layer) even though nothing imports it until phase 3.
+- [ ] CI: a `publish` job in `ci.yml` (the Warbler shape), `needs` every test job, only on a push
+      to `main`; `workflow_dispatch` may publish a `broken-test` tag without touching `latest`.
+      Build `linux/amd64` + `linux/arm64`, tags `latest` + short SHA, GHA layer cache, version build
+      arg. Tests run with `CGO_ENABLED=1` (the race detector needs cgo) while the image build stays
+      `CGO_ENABLED=0`. S11 already proved a clean `docker build` can fetch Nova with no secret;
+      keep that check in CI.
+- [ ] After the first publish, make the GHCR package public (or log the potato in) and verify an
+      anonymous `docker pull` by digest. The source label links the package to the repo.
 - [ ] `security-notes.md`: the egress model (a hostname allowlist is impossible because the app
       fetches arbitrary pages — dial-time SSRF guard in phase 3 plus the host firewall rule here),
       the header-based identity lock and the S10 evidence for it, and the token rotation drill.
@@ -149,20 +198,21 @@ Written before the code, in this order:
 ## Exit criteria
 
 Automated: `make check` green; `/healthz` under 10 ms with no DB; identity lock rejects both a missing
-and a wrong login; the image is non-root and its rootfs read-only (inspect the running container).
+and a wrong login; `git ls-files web/build` shows only `.gitkeep`; a clean `docker build` works; the
+image is non-root, has no Node runtime, and its rootfs is read-only (inspect the running container).
 
 Demo, on the potato, all of it:
 
-1. `docker compose up -d` → `curl localhost:8895/healthz` returns `{"status":"ok","version":"r…"}`;
-   the tailnet URL loads the shell in Safari.
+1. `docker compose up -d` → `curl localhost:8897/healthz` returns `{"status":"ok","version":"r…"}`;
+   the tailnet URL loads the shell in Safari, pulled from GHCR rather than built locally.
 2. Settings → Check finds a newer digest; Update applies it; the version string changes.
 3. **Rollback drill:** push a deliberately broken image tag, apply it, watch the watcher restore the
    previous digest and the app come back healthy. Record the timings; if it takes >120 s, the health
    window is wrong.
 4. `data/backups/pre-update.db` exists after the update and opens in `sqlite3` with an integrity
    check passing.
-5. Port 8895 confirmed free before install (S7 verdict recorded), the identity-lock design matches
-   what S10 measured, and S11 shows CI and Docker can fetch Nova.
+5. Port 8897 confirmed free before install (S7 verdict recorded; 8895 is Pixelsort), the
+   identity-lock design matches what S10 measured, and S11 shows CI and Docker can fetch Nova.
 6. A container restart (and a potato reboot) comes back without manual intervention.
 
 ## Risks
@@ -181,6 +231,11 @@ Demo, on the potato, all of it:
 - **A rollback window loses in-app saves.** Restoring the pre-update snapshot drops anything saved in
   the app during the health window; remote saves come back with `harbor replay` (phase 2). Say so in
   the runbook; do not pretend the rollback is lossless.
+- **A private GHCR package looks like a broken deploy.** The first publish creates the package; make
+  it public or log the potato in before the watcher pulls. The source label is what links it to the
+  repository and lets it inherit visibility.
+- **A stale committed frontend build.** One tracked `web/build/.gitkeep` and no other build files;
+  the Docker frontend stage and `make web` are the only producers. A CI check enforces it.
 
 ## Build-time decisions to record
 
@@ -188,3 +243,7 @@ Demo, on the potato, all of it:
 - Health window (120 s) and poll interval (0.5 s) for the watcher.
 - Whether `install.sh` creates the Tailscale serve mapping or just documents it (lean: document, do
   it by hand once).
+- Publish job in `ci.yml` (gated by tests) vs a separate `docker-publish.yml` (the Ivy/Polaris
+  shape). Chosen: `ci.yml`, because a failing test must never publish an image.
+- Base image pins (`node:22-bookworm`, `golang:1.27-alpine`, `distroless/static-debian12:nonroot`)
+  and whether a `vX.Y.Z` tag is added later. Not needed for v1; `latest` + short SHA is enough.

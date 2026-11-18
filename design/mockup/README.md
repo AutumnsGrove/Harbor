@@ -39,7 +39,7 @@ Routes are plain hashes so they survive a shared link.
 | `#spaces`, `#space-new`, `#space-edit-<id>` | Spaces list, AI suggestion, rule editor with live preview | 9 |
 | `#tags` | Tag manager: rename, merge (leaves aliases), delete | 9 |
 | `#prefs` | Settings hub with the update flow (check, update, health check, rollback note) | 0 |
-| `#doors` | Sources and per-source write-only tokens: rotate, revoke | 4 |
+| `#doors` | Public-door tokens (Telegram, iOS Shortcut): rotate, revoke; the tailnet-only quick-save/share pages are shown separately with no token | 4 |
 | `#import` | Raindrop CSV and Netscape HTML, progress and summary | 5 |
 | `#deleted` | Recently deleted, 30-day purge | 9 |
 | `#data` | Export, storage, backups, restore (CLI only) | 12 |
@@ -66,5 +66,7 @@ reloads.
 - `tokens.css` becomes the app's root CSS variables unchanged.
 - `V.<name>` views map to SvelteKit routes (`/`, `/item/[id]`, `/reader/[id]`, `/spaces/[id]`, `/settings/*`).
 - `ruleTest` in `js/ui.js` is the reference for the Space rule vocabulary:
-  `{tags_all, tags_any, kinds, sources, within, text, similar_to}`, fields ANDed, lists ORed.
+  `{tags_all, tags_any, kinds, sources, within_days, after, before, text, similar_to_item}`, fields
+  ANDed, lists ORed. The mockup uses the same field names as `design.md`/H3; its `similar_to_item`
+  match is still a shared-tag stand-in, not the real cosine.
 - The search ranking, enrichment and sync are intentionally absent; this is the interface only.

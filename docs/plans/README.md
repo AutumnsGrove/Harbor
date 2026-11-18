@@ -87,6 +87,10 @@ These are checked at every exit gate. A phase that violates one is reverted, not
    in-app inside a rollback window.
 10. **Only the owner can write.** Door tokens are revocable one at a time and the Telegram webhook
     drops any sender that is not `TELEGRAM_OWNER_ID` before touching D1.
+11. **Nothing built is committed, and the potato never builds.** `web/build/` is ignored except a
+    `.gitkeep`; the Go binary lives only inside the image. GitHub Actions builds and publishes one
+    multi-arch image per passing `main` commit; Compose pulls it by digest. This is the Warbler /
+    Ivy / Polaris packaging rule, not a local build.
 
 ---
 
@@ -189,7 +193,7 @@ happened, and `make check` is green on `main`.
 
 | # | Phase | State |
 |---|---|---|
-| — | Spikes | ☐ not started |
+| — | Spikes | ◐ S5, S7, S10, S11 answered (S7 → 8897); the rest pending |
 | 0 | Foundations | ☐ not started |
 | 1 | Worker intake | ☐ |
 | 2 | Core library | ☐ |
@@ -215,15 +219,16 @@ phase plan names the parts it adds.
 ```
 Harbor/
 ├── Makefile                 dev · web · build · test · fuzz · docker · deploy · check
-├── Dockerfile               multi-stage, distroless, non-root, read-only rootfs
-├── docker-compose.yml       project `harbor`, loopback 8895, ./data
+├── Dockerfile               multi-stage: node frontend → Go cross-build → distroless runtime
+├── .dockerignore            source-only context; excludes .git, data/, node_modules, web/build
+├── docker-compose.yml       project `harbor`, loopback 8897, ./data, ./update-signal
 ├── .env.example             image digest, UID/GID, port, deployment mode, allowed login/hosts,
 │                            Worker URL + potato token, OpenRouter key (placeholders only)
 ├── contracts/               JSON Schema + fixtures shared by Worker and potato
 │   ├── save.schema.json     POST /save request
 │   ├── job.schema.json      claim response (one job, with blobs)
 │   └── fixtures/            cases both sides validate against
-├── server/                  the Go binary
+├── server/                  the Go binary (built inside the image, never committed)
 │   ├── cmd/harbor/          main: config, wiring, graceful shutdown
 │   └── internal/
 │       ├── build/           version stamp, env config
@@ -244,10 +249,11 @@ Harbor/
 │       ├── transcripts/     captions, published podcast transcripts
 │       ├── backup/          VACUUM INTO, zstd, R2 upload, restore
 │       └── workerclient/    the Worker's HTTP API, typed, contract-validated
-├── web/                     SvelteKit, static output, embedded
+├── web/                     SvelteKit, static output, embedded at image build time
 │   ├── src/app.css          ← design/mockup/css/tokens.css, unchanged
 │   ├── src/lib/             components, api client, stores
 │   ├── src/routes/          / · /item/[id] · /reader/[id] · /spaces/… · /settings/…
+│   ├── build/.gitkeep       the only tracked file in build/; `make web` fills it
 │   └── embed.go             //go:embed all:build
 ├── worker/                  Cloudflare Worker (Hono), D1, R2, Browser Rendering
 │   ├── src/index.ts         routes, auth, rate limit
@@ -255,9 +261,14 @@ Harbor/
 │   ├── migrations/          D1 schema
 │   └── test/                vitest + miniflare + fast-check
 ├── deploy/                  update watcher units, install.sh, security notes
-├── docs/                    design, questions, plans, runbook
-└── .github/workflows/       ci.yml (check), release.yml (multi-arch image)
+├── docs/                    design, questions, plans, update, runbook
+└── .github/workflows/       ci.yml (tests + gated multi-arch publish on main)
 ```
+
+**Packaging rule:** the Dockerfile is the only place the frontend and Go binary are assembled. The
+frontend stage runs on `--platform=$BUILDPLATFORM`, the Go stage cross-compiles with
+`CGO_ENABLED=0`, and only the distroless runtime is per-arch. `ci.yml` publishes `latest` and the
+short SHA only after every test job passes; the potato pulls the digest the watcher pins.
 
 **Package rule:** SQL lives in `store/`, network lives in `fetch/`/`enrich/`/`workerclient/`, and
 nothing above `store` knows about `database/sql`. That is what keeps the fuzz targets small enough to
@@ -282,7 +293,7 @@ be meaningful.
 
 ## What "done" means globally
 
-`make check` green (gofmt, vet, `go test -race`, fuzz smoke, `pnpm check`, vitest, Playwright smoke),
-the phase demo run on the potato, the docs updated, and — from phase 0 onward — a container that has
-survived at least one update-and-rollback cycle. A phase without a deploy is a prototype, not a
-phase.
+`make check` green (gofmt, vet, `go test -race`, fuzz smoke, `pnpm check`, vitest, functional
+Playwright smoke with no screenshot comparison), the phase demo run on the potato, the docs updated,
+and — from phase 0 onward — a container that has survived at least one update-and-rollback cycle. A
+phase without a deploy is a prototype, not a phase.
