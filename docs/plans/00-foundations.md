@@ -159,23 +159,23 @@ Written before the code, in this order:
       `org.opencontainers.image.source`.
 - [x] `.dockerignore` (source-only context) and a CI step that asserts `web/build` is not tracked
       except `.gitkeep`.
-- [ ] `docs/update.md`, modeled on Warbler's: three entry points (Settings, Meridian bare start, by
+- [x] `docs/update.md`, modeled on Warbler's: three entry points (Settings, Meridian bare start, by
       hand), the signal files, the digest-only rule, the 120 s health window, snapshot restore, and
       the GHCR visibility gotcha. Keep it short enough to follow at 2 a.m.
-- [ ] `deploy/meridian/` snippets for the tile, `/etc/meridian/targets.json` and
+- [x] `deploy/meridian/` snippets for the tile, `/etc/meridian/targets.json` and
       `/etc/meridian/observe.json`; `docs/meridian.md` remains the explanation, the snippets are
       what get copied on deploy day.
 - [x] Compose with `read_only`, `cap_drop: ALL`, `no-new-privileges`, tmpfs `/tmp`, `./data:/data`,
       `./update-signal:/update-signal`, `127.0.0.1:8897:8080`, `env_file: [.env]`, and the
       `healthcheck:` from design §3.
-- [ ] Units + `install.sh`; the watcher accepts only `<repo>@sha256:<64 hex>` and refuses anything
+- [x] Units + `install.sh`; the watcher accepts only `<repo>@sha256:<64 hex>` and refuses anything
       else, rewrites only the `HARBOR_IMAGE=` line of `.env`, and takes the pre-update snapshot with
       `docker compose exec harbor /app/harbor snapshot --pre-update`.
-- [ ] The watcher handles **both** a signal file and a bare `systemctl start` (Meridian's Update
+- [x] The watcher handles **both** a signal file and a bare `systemctl start` (Meridian's Update
       action): no file means "resolve `latest`, pin, snapshot, pull, recreate, health-check,
       rollback". Write `deploy/watcher/test.sh` before the script, covering both paths and every
       failure exit.
-- [ ] `deploy/docker-user-firewall.sh` and its install step: the container can reach the public
+- [x] `deploy/docker-user-firewall.sh` and its install step: the container can reach the public
       internet but not private, loopback, link-local or tailnet ranges (verify by `docker exec` into
       a throwaway container of the same network: `curl 100.x.x.x` fails, `curl example.com` works).
 - [ ] CI: a `publish` job in `ci.yml` (the Warbler shape), `needs` every test job, only on a push

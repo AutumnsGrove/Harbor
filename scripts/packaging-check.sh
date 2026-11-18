@@ -103,6 +103,16 @@ else
 	fail ".env.example must set HARBOR_HOST_PORT=8897 and must not set HARBOR_PORT"
 fi
 
+# ── no script may invoke a system command by a bare helper name ─────────────
+# `say` is macOS speech synthesis. A shell helper with that name is one deleted
+# function definition away from reading test output out loud.
+expect
+if ! grep -rn '^[[:space:]]*say[[:space:]]' scripts deploy --include="*.sh" >/dev/null 2>&1; then
+	pass "no shell script invokes the macOS say command"
+else
+	fail "a shell script calls 'say', which speaks on macOS"
+fi
+
 # ── CSP stays strict ────────────────────────────────────────────────────────
 expect
 if ! grep -rEq "(script-src|style-src)[^\"']*unsafe-inline" server/internal/httpapi web/src; then

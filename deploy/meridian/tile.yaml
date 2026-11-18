@@ -1,0 +1,25 @@
+# Harbor's Meridian tile. Paste under the right `section:` in
+# ~/Meridian/config.yaml, then let Meridian pick it up (it watches the file; do
+# not reload it with `docker kill -s HUP`). The vital is deliberately
+# `saved_this_week`: a build stamp says the binary runs, not that the library is
+# being used.
+  - id: harbor
+    name: Harbor
+    section: everyday
+    icon: library
+    description: saved links, notes, images
+    url: https://lepotato.taild95077.ts.net:8897
+    probes:
+      health:
+        kind: http_json
+        url: http://localhost:8897/healthz
+        path: status
+        equals: ok
+      vitals:
+        - kind: json_field
+          label: saved this week
+          url: http://localhost:8897/api/status
+          path: saved_this_week
+    control:
+      target: harbor
+      actions: [restart, stop, start, update]

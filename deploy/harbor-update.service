@@ -1,0 +1,15 @@
+# @ROOT@ is replaced with the checkout path by deploy/install.sh.
+[Unit]
+Description=Harbor update (snapshot, pin digest, pull, recreate, health-check, roll back)
+Documentation=file://@ROOT@/docs/update.md
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+ExecStart=/bin/bash @ROOT@/deploy/watcher/harbor-update.sh
+# The health window is 120 s; leave room for a pull on a slow connection.
+TimeoutStartSec=300
+Nice=10

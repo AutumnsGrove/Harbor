@@ -1,0 +1,10 @@
+# @ROOT@ is replaced with the checkout path by deploy/install.sh.
+[Unit]
+Description=Harbor heartbeat and missed-signal catch-up
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+ExecStart=/bin/bash @ROOT@/deploy/watcher/harbor-tick.sh
