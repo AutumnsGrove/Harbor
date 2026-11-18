@@ -32,9 +32,9 @@ function ruleTest(sp,it){
   if(r.tags_any&&!r.tags_any.some(t=>tg.includes(t)))return false;
   if(r.kinds&&r.kinds.length&&!r.kinds.includes(it.kind))return false;
   if(r.sources&&r.sources.length&&!r.sources.includes(it.src))return false;
-  if(r.within&&it.ago>r.within)return false;
+  if(r.within_days&&it.ago>r.within_days)return false;
   if(r.text&&![it.title,it.sum,it.note,it.site].join(' ').toLowerCase().includes(r.text.toLowerCase()))return false;
-  if(r.similar_to){const o=find(r.similar_to);if(!o||o.id===it.id||!tagNames(o).some(t=>tg.includes(t)))return false}
+  if(r.similar_to_item){const o=find(r.similar_to_item);if(!o||o.id===it.id||!tagNames(o).some(t=>tg.includes(t)))return false}
   return true;
 }
 const DATE_OPTS={'7':'Past week','30':'Past month','365':'Past year'};
@@ -55,9 +55,9 @@ function ruleText(sp){
   if(r.tags_any?.length)p.push('tagged '+r.tags_any.join(' or '));
   if(r.kinds?.length)p.push('kind '+r.kinds.join(' or '));
   if(r.sources?.length)p.push('from '+r.sources.map(s=>SOURCES[s].n).join(' or '));
-  if(r.within)p.push('last '+r.within+' days');
+  if(r.within_days)p.push('last '+r.within_days+' days');
   if(r.text)p.push('mentions “'+r.text+'”');
-  if(r.similar_to)p.push('similar to “'+(find(r.similar_to)?.title||'')+'”');
+  if(r.similar_to_item)p.push('similar to “'+(find(r.similar_to_item)?.title||'')+'”');
   return p.join(', ')||'Everything';
 }
 const count=(n,w)=>n+' '+w+(n===1?'':'s');

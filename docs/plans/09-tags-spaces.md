@@ -12,9 +12,9 @@ later and imported Raindrop collections), bulk actions for cleanup, and Recently
 
 The rule evaluator is the interesting engineering. Its vocabulary is the one in
 [open-questions H3](../open-questions.md) (below), which the mockup's `ruleTest` approximates: the
-AND/OR *semantics* match the mockup, but its field names and its tag-overlap `similar_to` are mockup
-shortcuts that change when the UI is ported (open-questions N7). The reference evaluator in the tests
-is written from this vocabulary, not copied from the mockup's JavaScript.
+field names and AND/OR *semantics* match, but the mockup's `similar_to_item` is a tag-overlap
+stand-in, not real cosine (open-questions N7). The reference evaluator in the tests is written from
+this vocabulary, not copied from the mockup's JavaScript.
 
 ## Scope
 
@@ -80,9 +80,9 @@ sequence, so phase 9 ships a simple implementation of the interface that scans `
 same fixtures — and phase 10 swaps in the cache-backed one without touching the rule code. The
 threshold is config, not UI, so a Space is stable rather than drifting with a slider.
 
-**Mockup deltas to carry into the UI port:** `within` → `within_days`; `similar_to` →
-`similar_to_item` (real cosine, not shared-tag); `text` also searches content and tags; dates compare
-`saved_at`.
+**Mockup deltas to carry into the UI port:** the field names already match (`within_days`,
+`similar_to_item`); the port replaces the mockup's shared-tag `similar_to_item` with real cosine,
+makes `text` search content and tags, and compares dates against `saved_at`.
 
 ## Tests first
 
@@ -97,8 +97,8 @@ threshold is config, not UI, so a Space is stable rather than drifting with a sl
    injection guard).
 3. `rapid`: equivalence between the SQL evaluator and a pure in-memory reference evaluator over
    generated items and rules. If they disagree, one is wrong — this is the strongest test in the phase and it is cheap. The reference evaluator is written from
-   the vocabulary above, not copied from the mockup's JavaScript (the mockup's `similar_to` is a
-   tag-overlap shortcut).
+   the vocabulary above, not copied from the mockup's JavaScript (the mockup's `similar_to_item` is
+   a tag-overlap shortcut).
 4. **Tag normalisation** is covered in phase 3 (test 20). Here, assert only that the manager's
    rename and merge call that same function and refresh `tags_text` and the FTS row for every
    affected item.

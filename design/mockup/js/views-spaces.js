@@ -10,7 +10,7 @@ ACT['open-space']=el=>{S.ui.space=el.dataset.id;S.ui.q='';S.ui.kind='all';locati
 
 /* editor */
 let ED=null;
-const BLANK_RULE=()=>({tags_all:[],tags_any:[],kinds:[],sources:[],within:0,text:'',similar_to:''});
+const BLANK_RULE=()=>({tags_all:[],tags_any:[],kinds:[],sources:[],within_days:0,text:'',similar_to_item:''});
 function startEditor(arg){
   if(arg==='new'){
     const pre=S.prefill&&S.suggestion;
@@ -24,12 +24,12 @@ function tokenField(k,label,ph){
 }
 function editRules(){
   if(ED.t==='manual')return `<div class="callout" style="margin:8px 0"><span>Hand-picked Spaces have no rule. Add items from an item page, or use Select on Home and choose Add to Space.</span></div>`;
-  const r=ED.rule,sim=r.similar_to&&find(r.similar_to);
+  const r=ED.rule,sim=r.similar_to_item&&find(r.similar_to_item);
   return `<datalist id="vocab">${Object.keys(vocab()).map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
   ${tokenField('tags_all','Tagged with all of','Add tag')}${tokenField('tags_any','Tagged with any of','Add tag')}
   <div class="rule"><div class="lab">Kind</div><div class="tokens">${Object.keys(KINDS).map(k=>`<button class="chip sm ghost" data-act="r-toggle" data-k="kinds" data-v="${k}" aria-pressed="${r.kinds.includes(k)}">${KINDS[k].n}</button>`).join('')}</div></div>
   <div class="rule"><div class="lab">Saved from</div><div class="tokens">${Object.entries(SOURCES).map(([k,v])=>`<button class="chip sm ghost" data-act="r-toggle" data-k="sources" data-v="${k}" aria-pressed="${r.sources.includes(k)}">${v.n}</button>`).join('')}</div></div>
-  <div class="rule"><div class="lab">Saved within</div><div class="tokens">${[[0,'Any time'],[7,'7 days'],[14,'14 days'],[30,'30 days'],[90,'90 days']].map(([v,l])=>`<button class="chip sm ghost" data-act="r-within" data-v="${v}" aria-pressed="${r.within===v}">${l}</button>`).join('')}</div></div>
+  <div class="rule"><div class="lab">Saved within</div><div class="tokens">${[[0,'Any time'],[7,'7 days'],[14,'14 days'],[30,'30 days'],[90,'90 days']].map(([v,l])=>`<button class="chip sm ghost" data-act="r-within" data-v="${v}" aria-pressed="${r.within_days===v}">${l}</button>`).join('')}</div></div>
   <div class="rule"><div class="lab">Mentions</div><input class="in" id="r-text" placeholder="A word or phrase" value="${esc(r.text)}" style="height:38px;font-size:var(--t-m)"></div>
   <div class="rule"><div class="lab">Similar to</div><div class="tokens">${sim?`<span class="token">${esc(sim.title)}<button data-act="r-sim-clear" aria-label="Clear">${ico('x')}</button></span>`:`<button class="btn sm" data-act="r-sim">${ico('sparkles')}Pick an item</button>`}<span class="hint">Uses the same index as Related.</span></div></div>`;
 }
@@ -57,13 +57,13 @@ document.addEventListener('keydown',e=>{const k=e.target.dataset?.rk;if(k&&e.key
 ACT['ed-type']=el=>{ED.t=el.dataset.v;route(true)};
 ACT['r-rm']=el=>{ED.rule[el.dataset.k]=ED.rule[el.dataset.k].filter(t=>t!==el.dataset.t);refreshEd()};
 ACT['r-toggle']=el=>{const a=ED.rule[el.dataset.k],v=el.dataset.v,i=a.indexOf(v);i<0?a.push(v):a.splice(i,1);refreshEd()};
-ACT['r-within']=el=>{ED.rule.within=+el.dataset.v;refreshEd()};
-ACT['r-sim']=el=>openMenu(el,S.items.slice(0,12).map(i=>({label:i.title.slice(0,38),v:i.id})),i=>{ED.rule.similar_to=i.v;refreshEd()});
-ACT['r-sim-clear']=()=>{ED.rule.similar_to='';refreshEd()};
+ACT['r-within']=el=>{ED.rule.within_days=+el.dataset.v;refreshEd()};
+ACT['r-sim']=el=>openMenu(el,S.items.slice(0,12).map(i=>({label:i.title.slice(0,38),v:i.id})),i=>{ED.rule.similar_to_item=i.v;refreshEd()});
+ACT['r-sim-clear']=()=>{ED.rule.similar_to_item='';refreshEd()};
 ACT['ed-save']=()=>{
   const n=ED.n.trim();if(!n){toast('Give the Space a name first.');$('#sp-name').focus();return}
   const rule=ED.t==='manual'?undefined:JSON.parse(JSON.stringify(ED.rule));
-  if(rule){if(!rule.within)delete rule.within;if(!rule.text)delete rule.text;if(!rule.similar_to)delete rule.similar_to;['tags_all','tags_any','kinds','sources'].forEach(k=>{if(!rule[k].length)delete rule[k]})}
+  if(rule){if(!rule.within_days)delete rule.within_days;if(!rule.text)delete rule.text;if(!rule.similar_to_item)delete rule.similar_to_item;['tags_all','tags_any','kinds','sources'].forEach(k=>{if(!rule[k].length)delete rule[k]})}
   if(ED.id){const sp=S.spaces.find(s=>s.id===ED.id);Object.assign(sp,{n,t:ED.t,rule})}
   else{S.spaces.push({id:'s'+Date.now(),n,t:ED.t,rule,ids:[],lib:0});if(ED.fromSugg)S.suggestion=null}
   const sp=ED.id?S.spaces.find(s=>s.id===ED.id):S.spaces[S.spaces.length-1];

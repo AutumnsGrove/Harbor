@@ -4,7 +4,9 @@ The refinement agenda, worked through on 2026-11-03. Almost everything is now se
 answers are folded into [design.md](design.md) and recorded here with the reasoning that produced
 them.
 
-**Still open:** hybrid ranking weights and the spikes in section G. Everything else is decided.
+**Still open:** hybrid ranking weights and the remaining spikes in section G (S1–S4, S6, S8, S9,
+S12). S5, S7, S10 and S11 were verified on 2026-11-18; S7 changed the port to 8897. Everything else
+is decided.
 
 Format: ~~question~~ → **decision** → why the alternatives lost.
 
@@ -52,8 +54,9 @@ Node at runtime, no separate static origin. A small JSON API is fine; it is the 
 same identity lock.
 
 ### B3. ~~How is it exposed on the tailnet?~~ — **settled: `tailscale serve`**
-HTTPS + MagicDNS, app bound to `127.0.0.1:8895` in Compose. Confirm the port is free
-(`ss -ltn`) at install; 8893 Cairn and 8894 Coffer are already reserved.
+HTTPS + MagicDNS, app bound to `127.0.0.1:8897` in Compose. Confirm the port is free
+(`ss -ltn`) at install. S7 (2026-11-18) found 8895 already held by Pixelsort, so Harbor moved to
+8897; 8893 is Sepia, 8894 Coffer reserved, 8895 Pixelsort, 8896 Outpost.
 
 ### B4. ~~Worker framework and poll protocol~~ — **settled: Hono + claim-by-update**
 - Hono for routing.
@@ -67,7 +70,8 @@ HTTPS + MagicDNS, app bound to `127.0.0.1:8895` in Compose. Confirm the port is 
 
 ### B5. ~~Where does the SQLite file live, and how is it deployed?~~ — **settled: Compose + host bind mount**
 `~/Harbor` on the potato, `docker-compose.yml` at the repo root, `./data:/data`, `./update-signal`
-mailbox, loopback port 8895 behind `tailscale serve`, image pinned by digest in `.env`. Warbler's
+mailbox, loopback port 8897 behind `tailscale serve`, image pinned by digest in `.env`. The image is
+built by the gated GitHub Actions publish job and pulled from GHCR; the potato never builds. Warbler's
 watcher handles updates. Backup remains open (E2): in-app nightly `VACUUM INTO` → R2, plus a
 documented, actually-run restore drill.
 
@@ -213,22 +217,25 @@ Polaris opening `harbor.db` directly.
    library size (10k vectors × 1024 dims), and confirm the startup load time is acceptable.
 4. **Browser Rendering from a Worker on the free plan** — confirm browser hours accounting and
    whether screenshot/PDF/HTML can be captured in one session.
-5. **Nova `embed` integration** — the primitive has landed; verify one live call through the
-   `index` role returns 1024-dim unnormalized vectors and records usage/cost. Not a blocker.
+5. **Nova `embed` integration** — **verified 2026-11-18 (pass)**: 1024 dims, L2 norm 5.151501,
+   deterministic, 14 tokens / $0.000000056 per call; a wrong `Dims` is refused. See
+   [plans/spikes.md](plans/spikes.md#s5--nova-embed-returns-what-designmd-says).
 6. **PDF text extraction in Go** — pick and prove a pure-Go library on a real text PDF and a real
    scan; measure extraction quality and RSS. The scan-detection threshold depends on this.
-7. **Port 8895** — confirm it is free on the potato (`ss -ltn`) before installing.
+7. **Port 8895 → 8897** — **verified 2026-11-18 (changed-plan)**: 8895 is Pixelsort. Harbor uses **8897**,
+   confirmed free on loopback and the tailnet.
 8. **Video transcript source** — prove caption fetching from the potato's residential IP for a few
    real videos, including a no-caption case and a non-English track. Decide whether a bundled
    yt-dlp is needed or the caption endpoint alone is enough.
 9. **Real Raindrop export** — export the actual library once, commit a sanitised sample, and confirm
    the CSV columns (`id`, `favorite`, folder separators, the highlights field format) before the
    importer's tests are written. Gates phase 5.
-10. **Tailscale serve + Docker identity** — confirm which headers `tailscale serve` adds, that a
-    client cannot forge them, and what the peer address looks like inside the container for a
-    published loopback port. Gates the phase 0 identity-lock design.
-11. **Nova as a dependency** — can CI and the Docker build fetch the Nova module (private repo →
-    `GOPRIVATE` + token), and which tag/commit has `embed`? Gates phase 0 CI.
+10. **Tailscale serve + Docker identity** — **verified 2026-11-18 (pass)**: a forged
+    `Tailscale-User-Login` is overwritten, the Docker peer is the bridge gateway (`172.17.0.1`),
+    and host-local callers carry no identity header. Gates the phase 0 identity-lock design.
+11. **Nova as a dependency** — **verified 2026-11-18 (pass locally; CI at phase 0)**: the repo is
+    public; commit `ef460da` (`v0.5.1-0.20261116000603-ef460da11cfc`) fetches from a clean Docker
+    build with no secret. The first GitHub Actions run in phase 0 proves the same path.
 12. **Image decode memory and EXIF** — measure peak RSS decoding a real 12 MP and a 48 MP phone
     JPEG with the stdlib, pick the EXIF-orientation approach, and set the pixel cap from the number.
     Gates phase 6.
@@ -262,9 +269,8 @@ current extraction.
   similar_to_item}`. `within_days` is the relative window auto Spaces need ("Long reads from the
   past 90 days") — a stored absolute `after` goes stale the next day; `after`/`before` are absolute
   bounds for saved queries. Fields AND, lists OR. `text` matches title, summary, content, note and
-  tags. `similar_to_item` is cosine over the embeddings with a fixed config threshold; the mockup's
-  tag-overlap stand-in is a mockup shortcut, and the mockup's `within`/`similar_to` field names
-  become `within_days`/`similar_to_item` when the UI is ported (N7).
+  tags. `similar_to_item` is cosine over the embeddings with a fixed config threshold; the mockup
+  uses the same field names but its match is a shared-tag stand-in, not real cosine (N7).
 - `auto` spaces evaluate live from their rule; `saved` spaces are explicit queries; `space_items`
   is only for manual pinning.
 - **AI may suggest** a Space from a pattern ("you keep saving ARM SBCs — make a Space?"), but the
@@ -456,9 +462,10 @@ served from the tailnet origin. It posts to the potato (`source='share'`), like 
 separate, much later project (E5, design §10).
 
 ### N7. ~~Space rule vocabulary vs the mockup~~ — **settled: `within_days` added**
-See H3. The mockup is the visual reference and the rule *semantics* oracle for AND/OR behaviour, but
-its field names and its tag-overlap `similar_to` are mockup shortcuts; the equivalence test's
-reference evaluator follows H3, not the mockup's JavaScript.
+See H3. The mockup is the visual reference and the rule *semantics* oracle for AND/OR behaviour, and
+it now carries the settled field names (`within_days`, `similar_to_item`). Its `similar_to_item`
+match is still a tag-overlap shortcut; the equivalence test's reference evaluator follows H3, not the
+mockup's JavaScript.
 
 ### N8. ~~Items, clocks, and deleted URLs~~ — **settled**
 `created_at` (original date), `saved_at` (last save; home sorts on it; imports set it to
@@ -491,3 +498,26 @@ Build sequence 0 → 1 → 2 → 3 → 12a → 5 → 4 → 9. Phase 12a (snapsho
 precedes the import that puts the irreplaceable data on the box. The "I can cancel Raindrop" milestone
 is after phase 9. Phase numbers are stable ids, not the order. Plans README has the detail and the
 cut list.
+
+---
+
+## O. Packaging and test policy (2026-11-18)
+
+### O1. ~~Does Harbor deploy as a binary or a container?~~ — **settled: a published container**
+GitHub Actions builds the frontend and the Go binary inside the Dockerfile and publishes one
+multi-arch image per passing `main` commit to `ghcr.io/autumnsgrove/harbor` (`latest` + short SHA).
+The potato only pulls a digest-pinned image; `web/build/` is git-ignored except `.gitkeep`, and no
+binary is committed. Rejected: building on the potato (slow, RAM-hungry, and every sibling service
+already pulls), and committing `web/build/` (source and output drift, and the image would no longer
+be reproducible from the commit).
+
+### O2. ~~Do the E2E tests compare screenshots?~~ — **settled: no visual regression**
+Playwright keeps three functional flows at desktop and 390 px and asserts URLs, text, state and
+accessibility. It does **not** call `toHaveScreenshot`/`toMatchSnapshot`, keep reference images, or
+pixel-diff anything. Rejected: screenshot comparison is slow (the 20-minute CI job that adds little),
+brittle across fonts and antialiasing, and does not catch the bugs Harbor actually has. Visual drift
+is a human review against `design/mockup/`, not a gate.
+
+### O3. ~~Which port?~~ — **settled: 8897**
+See B3/N12 and spike S7. 8895 is Pixelsort, 8893 Sepia, 8894 Coffer reserved, 8896 Outpost. 8897 was
+verified free on both loopback and the tailnet on 2026-11-18.

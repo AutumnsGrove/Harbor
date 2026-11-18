@@ -5,7 +5,8 @@
 > container registry) is known and accepted; this is a personal library, not a registry. The shape is
 > nailed down in [docs/design.md](docs/design.md), the interface in
 > [design/mockup/](design/mockup/README.md), and the build is sequenced (with tests first) in
-> [docs/plans/](docs/plans/README.md).
+> [docs/plans/](docs/plans/README.md). Spikes S5, S7, S10 and S11 have been run; S7 changed the port
+> to 8897.
 
 A personal save-anything library for one person, built to replace a Raindrop Pro + mymind
 subscription ($157/year) with something owned outright.
@@ -21,10 +22,11 @@ added, rebuilt, or skipped without breaking it.
 `search_bookmarks()` tool was the original motivation; it's deferred (Polaris doesn't support MCP
 yet) and not part of v1.
 
-**Stack (settled):** Go + embedded SvelteKit in a single static binary, SQLite (`modernc`), all AI
-through **Nova** with one OpenRouter key, shipped as a distroless Docker image on `ghcr.io`,
-updated by the same digest-pinned systemd watcher as Warbler. Python was ruled out on
-deployment/memory cost — the parser has to work in Go.
+**Stack (settled):** Go + embedded SvelteKit in one static binary, SQLite (`modernc`), all AI
+through **Nova** with one OpenRouter key, shipped inside a distroless Docker image on `ghcr.io`.
+GitHub Actions builds and publishes the image; no built frontend or binary is committed, and the
+potato only pulls. Updates use the same digest-pinned systemd watcher as Warbler. Python was ruled
+out on deployment/memory cost — the parser has to work in Go.
 
 ---
 
@@ -73,17 +75,20 @@ quick-save page and the Android share target go straight to the potato over the 
 
 **How it gets built:** test-driven, with fuzzing on every untrusted-input boundary (HTML, PDFs, URLs,
 model JSON, Telegram payloads). The rule is that a behaviour starts as a failing test and a phase is
-not done until it has been deployed and its exit demo run on the potato. See
+not done until it has been deployed and its exit demo run on the potato. Playwright covers a few
+functional flows only — there is no screenshot comparison or visual-regression suite. See
 [docs/plans/testing.md](docs/plans/testing.md).
 
 ## Deployment shape
 
 - `~/Harbor` on the potato, Compose project `harbor`, data in `~/Harbor/data`.
-- Port **8895** (proposed; 8893 Cairn and 8894 Coffer are already reserved), loopback only behind
-  `tailscale serve`.
+- Port **8897** (8895 is Pixelsort; 8893 Sepia, 8894 Coffer reserved, 8896 Outpost), loopback only
+  behind `tailscale serve`.
+- GitHub Actions builds the frontend and the Go binary inside the Dockerfile, then publishes
+  `linux/amd64` + `linux/arm64` images on a passing push to `main`. The potato never builds, and no
+  build output is committed to the repository.
 - Update path is Warbler's: Settings → signal file → host watcher → digest pin → health check →
   rollback with a pre-update `VACUUM INTO` snapshot. Meridian can trigger it too.
-- CI publishes multi-arch images on every passing push to `main`; the potato never builds.
 
 ## What this is not (yet)
 

@@ -71,8 +71,11 @@ spec (design.md §)  →  failing test  →  minimal code  →  green  →  refa
 - **Testing Library** for components that carry state: composer merge warning, multi-select bulk bar,
   highlight colour picker, the pending/attention strips.
 - **Playwright** for exactly three flows, desktop and 390 px: *save → pending → item*, *type → results*,
-  *open item → edit → delete → undelete*. Screenshots compared at three widths against the mockup
-  when a visual change is intentional.
+  *open item → edit → delete → undelete*. These are **functional** tests: assert URLs, visible text,
+  state, focus and accessibility roles. There is **no screenshot comparison, pixel diff, or visual
+  regression suite** — no `toHaveScreenshot`, no `toMatchSnapshot`, no committed reference images.
+  A visual change is reviewed by a human against the mockup, not by a 20-minute CI job. On failure,
+  a Playwright trace may be uploaded for debugging; it is not a gate and never runs on success.
 - No component snapshot soup. If a test breaks on a class rename it was testing the wrong thing.
 
 ### Worker
@@ -184,15 +187,16 @@ file-write paths, SQL construction, and XSS respectively. They run on every PR, 
 | `fuzz` | every PR | `make fuzz`: 30 s per changed target + 3 security targets, one `-fuzz` invocation each | yes |
 | `fuzz-nightly` | cron | 10 min per target, all targets | opens an issue on failure |
 | `web` | every PR | `pnpm check`, `pnpm test` (vitest + fast-check), `pnpm build` | yes |
-| `e2e` | every PR | Playwright, 3 flows × 2 viewports | yes |
+| `e2e` | every PR | functional Playwright, 3 flows × 2 viewports; no screenshot diff | yes |
 | `worker` | every PR | vitest + miniflare + fast-check; contract fixtures both directions | yes |
 | `contract` | every PR | Go and TS validate `contracts/fixtures/` | yes |
 | `no-outside-addresses` | every PR | grep the built frontend for off-host URLs (inherited from Warbler) | yes |
+| `packaging` | every PR | `git ls-files web/build` is exactly `.gitkeep`; `.dockerignore` excludes build output and local data; the publish job is main-only and `needs` every test job | yes |
 | `enrich-score` | manual/nightly with key | scored fixture accuracy report | no |
-| `image` | push to `main` | multi-arch build + push, `latest` + short SHA | yes |
+| `publish` | push to `main` after `check`/`web`/`worker`/`contract`/`packaging` | multi-arch build + push, `latest` + short SHA; no PR can reach it | yes |
 
-`make check` is the local equivalent of `check` + `web` + `worker`; if a developer's `make check` is
-green, CI should be green.
+`make check` is the local equivalent of `check` + `web` + `worker` + `packaging`; if a developer's
+`make check` is green, CI should be green.
 
 ---
 
@@ -211,8 +215,10 @@ No global percentage gate — it invites tests written to move a number. Instead
 
 ## 6. What is deliberately not tested
 
-- Pixel-perfect screenshots of every screen. Three flows, three widths, and the mockup as the human
-  reference.
+- **UI screenshot or visual-regression testing.** No Playwright image capture, no pixel diffing, no
+  reference-image folder. It is slow, brittle across fonts/AA, and does not catch the bugs this
+  product actually has. The mockup is the human reference; functional Playwright covers the three
+  flows that matter.
 - Cloudflare's own behaviour (D1/R2 semantics beyond the spikes). We test *our* contract and our
   degraded path, not their uptime.
 - Model quality as a hard gate. It is scored and reported, because a flaky model should not block a
