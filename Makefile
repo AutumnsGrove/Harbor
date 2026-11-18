@@ -25,6 +25,11 @@ build:
 test:
 	$(GO) test -race ./...
 
+# Local run: the identity lock is off (no Tailscale header on a laptop), and the
+# dev defaults put data/ and update-signal/ beside the source.
+dev:
+	HARBOR_DEV_NO_AUTH=1 $(GO) run ./server/cmd/harbor serve
+
 # Go fuzzes exactly one target per invocation, so this is a script rather than a
 # loop in the Makefile.
 fuzz:
