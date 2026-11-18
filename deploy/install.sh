@@ -128,6 +128,18 @@ fi
 systemctl restart harbor-firewall.service
 log "egress rules applied"
 
+# The check that catches the DNS trap: if the host resolves through a LAN
+# resolver, the egress rules reject Docker's forward to it and every fetch fails
+# while /healthz stays green. Warn rather than fail — the box is installed by
+# this point, and a warning is what gets read.
+if docker run --rm --network harbor_egress curlimages/curl:latest \
+	-fsS --max-time 10 https://example.com/ -o /dev/null >/dev/null 2>&1; then
+	log "egress check: the container reaches the public internet"
+else
+	warn "egress check failed: the container cannot reach https://example.com/"
+	warn "  check the host resolver (/etc/resolv.conf) and deploy/docker-user-firewall.sh --check"
+fi
+
 # ── 6. what is left, by hand ────────────────────────────────────────────────
 
 version="$(curl -fsS "http://127.0.0.1:$port/healthz" || true)"
