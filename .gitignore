@@ -10,6 +10,7 @@ wrangler.toml.local
 
 # Local data
 data/
+update-signal/
 *.db
 *.db-shm
 *.db-wal
@@ -20,3 +21,10 @@ data/
 bin/
 dist/
 node_modules/
+
+# The frontend build is produced by `make web`, CI and the Docker frontend stage.
+# Only the placeholder is tracked, so source and output cannot drift.
+web/build/*
+!web/build/.gitkeep
+web/.svelte-kit/
+web/node_modules/
