@@ -15,7 +15,9 @@ const e = env as unknown as Env;
 describe('door dampening', () => {
 	it('allows up to the limit in a window, then refuses with a retry hint', async () => {
 		const k = key('window');
-		const now = 1_800_000_000_000;
+		// The real clock: a hard-coded future timestamp would leave a future window
+		// row behind that the prune test below would later count.
+		const now = Date.now();
 		for (let i = 0; i < 3; i++) {
 			expect((await doorLimit(e, k, { now, limit: 3 })).allowed).toBe(true);
 		}
@@ -29,6 +31,8 @@ describe('door dampening', () => {
 	});
 
 	it('prunes windows older than a day and keeps the current one', async () => {
+		// Start from an empty table so the count is the prune's doing, not leftovers.
+		await env.DB.prepare('DELETE FROM door_limits').run();
 		const nowSec = Math.floor(Date.now() / 1000);
 		const current = Math.floor(nowSec / DOOR_LIMIT_PERIOD);
 		const stale = current - 24 * 60 - 10;
