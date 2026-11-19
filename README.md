@@ -1,8 +1,11 @@
 # Harbor
 
-> **Status: phase 0 built, waiting on the potato.** The binary, the embedded shell, the store, the
-> container and the update watcher exist and pass `make check`; what is left is the deploy, the
-> rollback drill and a green `main`. Name is settled: **Harbor** — a place to bring things in and keep
+> **Status: phase 0 deployed and drilled; phase 1 next.** Harbor is running on the potato behind
+> `tailscale serve` at `https://lepotato.taild95077.ts.net:8897`, on a digest-pinned image that
+> updates itself and rolled back from a deliberately broken one on 2026-11-19 (176 s, recorded in
+> [docs/plans/00-foundations.md](docs/plans/00-foundations.md#deploy-record-2026-11-19)). The binary,
+> the embedded shell, the store, the container and the watcher all pass `make check`; `main` is green
+> including the publish job. Name is settled: **Harbor** — a place to bring things in and keep
 > them safe. The collision with CNCF Harbor (the container registry) is known and accepted; this is a
 > personal library, not a registry. The shape is nailed down in [docs/design.md](docs/design.md), the
 > interface in [design/mockup/](design/mockup/README.md), the build sequence (tests first) in

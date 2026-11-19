@@ -94,6 +94,12 @@ Host check).
 **"could not resolve"** — GHCR is unreachable or the package is private. See
 below.
 
+**A broken `latest` keeps coming back.** A rollback restores the old image; it does
+not move the `latest` tag. If CI published the image that just failed, every later
+Check → Update offers it again and costs another three minutes of outage. Fix it
+on `main` (revert, and the publish job moves `latest` back) or retag `latest` by
+digest from a machine with `write:packages` — see "Drilling the rollback".
+
 ## Restoring by hand
 
 The watcher's rollback copies `data/backups/pre-update.db` back over
@@ -112,6 +118,45 @@ curl -fsS http://127.0.0.1:8897/healthz
 
 Keep a copy of the snapshot before you start; it is the only rollback target.
 
+**A rollback exits non-zero.** `sudo systemctl start harbor-update.service` returns
+failure when it rolled back (the oneshot did not do its job), so Meridian's Update
+action will show red on a box that recovered correctly. Read `status.json`.
+
+## Drilling the rollback
+
+Run this after any change to the watcher, and before trusting a new box. It costs
+about three minutes of Harbor being down.
+
+The watcher always resolves `<repo>:latest`, so a separate drill tag is not
+enough — `latest` itself has to point at the broken image. That is also the real
+failure mode: a commit that passes CI but cannot serve.
+
+```bash
+mkdir -p /tmp/drill && printf 'FROM busybox:1.36\nCMD ["sleep","infinity"]\n' >/tmp/drill/Dockerfile
+docker buildx build --platform linux/amd64,linux/arm64 --push \
+  -t ghcr.io/autumnsgrove/harbor:broken-test /tmp/drill
+docker login ghcr.io -u AutumnsGrove       # needs write:packages
+
+good=$(docker buildx imagetools inspect ghcr.io/autumnsgrove/harbor:latest --format '{{.Manifest.Digest}}')
+broken=$(docker buildx imagetools inspect ghcr.io/autumnsgrove/harbor:broken-test --format '{{.Manifest.Digest}}')
+
+docker buildx imagetools create -t ghcr.io/autumnsgrove/harbor:latest \
+  ghcr.io/autumnsgrove/harbor@$broken
+ssh potato-remote 'sudo systemctl start harbor-update.service'   # ~176 s, exits 1
+
+# put latest back, or the next Update retries the broken image
+docker buildx imagetools create -t ghcr.io/autumnsgrove/harbor:latest \
+  ghcr.io/autumnsgrove/harbor@$good
+```
+
+Pass: `status.json` says `rolled back to … and healthy`, `/healthz` answers with
+the old version, and `.env` is pinned back at `$good`. Record the timings; the
+2026-11-19 run was resolve 19 s → snapshot 4 s → pull 15 s → recreate 4 s →
+health wait **120 s** → restore 17 s → up 4 s.
+
+Where it fails: if `latest` is still the broken image afterwards, the next update
+will take the box down again. The restore step is not optional.
+
 ## Publishing, and the GHCR visibility gotcha
 
 `ci.yml` publishes `linux/amd64` + `linux/arm64` on a push to `main` that passes
@@ -119,7 +164,9 @@ every test job, tagged `latest` and the short SHA, stamped
 `r<commit count>.<short sha>`. A pull request can never reach the publish job.
 
 A **private** package fails the pull with 401/403, which looks exactly like a
-broken deploy. Fix it once, at first publish:
+broken deploy. Harbor's package is **public** (verified 2026-11-19: an anonymous
+token and manifest request both return 200, and the potato has no GHCR login). If
+it ever flips back to private, fix it once:
 
 - make the package public (the `org.opencontainers.image.source` label links it
   to the repository, so it inherits repository visibility), or
