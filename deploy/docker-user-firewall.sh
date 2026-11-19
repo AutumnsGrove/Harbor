@@ -63,11 +63,15 @@ rule_exists() {
 	"$tool" -C "$@" >/dev/null 2>&1
 }
 
+# add_rule takes the chain and the insert position separately from the rule: the
+# position is not part of a rule's identity, and passing it to `-C` (as an earlier
+# version did) makes every existence check fail, so every run duplicates the whole
+# rule set.
 add_rule() {
-	local tool=$1
-	shift
-	if ! rule_exists "$tool" "$@"; then
-		"$tool" -I "$@"
+	local tool=$1 chain=$2 position=$3
+	shift 3
+	if ! rule_exists "$tool" "$chain" "$@"; then
+		"$tool" -I "$chain" "$position" "$@"
 	fi
 }
 
