@@ -13,8 +13,8 @@ one gates and the pass condition that has to be met.
 
 | ID | Spike | Gates | Timebox | Verdict |
 |---|---|---|---|---|
-| S1 | Worker streaming upload | phase 1 exit | 90 min | pending |
-| S2 | D1 claim semantics | phase 1 exit | 60 min | pending |
+| S1 | Worker streaming upload | phase 1 exit | 90 min | **pass** |
+| S2 | D1 claim semantics | phase 1 exit | 60 min | **pass** |
 | S3 | Brute-force vector cache | phase 10 exit | 90 min | pending |
 | S4 | Browser Rendering on the free plan | phase 11 exit | 2 h | pending |
 | S5 | Nova `embed` live call | phase 3 smoke / phase 10 exit | 45 min | **pass** |
@@ -27,13 +27,15 @@ one gates and the pass condition that has to be met.
 | S12 | Image decode memory + EXIF | phase 6 exit | 90 min | pending |
 
 S7, S9, S10 and S11 are cheap and can be done now (S9 is ten minutes in Raindrop's export screen
-plus sanitising). S1/S2 are prerequisites for writing the Worker; do them first.
+plus sanitising). S1/S2 are prerequisites for writing the Worker; do them first — they were run on
+2026-11-19 and both passed, so phase 1 is unblocked.
 S3/S4/S6/S8 are cheap to defer until their phase, but each can invalidate a design assumption, so
 they must be answered *before* the phase's code is finished, not after.
 
 S5, S7, S10 and S11 were run on 2026-11-18. S7 changed the port; S5 and S10 passed in full; S11
 passed locally, and its GitHub Actions half was confirmed on 2026-11-19 by the first green `main`
-run and an anonymous pull on the potato. The remaining spikes are still open.
+run and an anonymous pull on the potato. S1 and S2 were run on 2026-11-19 and both passed (S1 with a
+design correction about chunked bodies). The remaining spikes are still open.
 
 ---
 
@@ -95,6 +97,47 @@ a chunked body), because it decides whether the 25 MB cap is a guarantee or a be
   generation uses `new Function`, which Workers forbid; confirm `@cfworker/json-schema` (or
   precompiled validators) works against `contracts/*.schema.json`.
 
+**Verdict (2026-11-19): pass, with one design correction and one caveat.**
+**What happened:** a throwaway worker (`harbor-spike-s1`, R2 bucket of the same name) deployed to
+`workers.dev`, exercised with `curl`, a raw `http.client` chunked writer and `wrangler tail`.
+
+| Upload | Result | Worker `wallTime` / `cpuTime` |
+|---|---|---|
+| 25 MB declared, ×3 | 2 landed byte-exact; 1 failed with R2 `10043` and wrote **nothing** | 1.5–2.3 s / 1 ms |
+| 26 MB, 50 MB declared | 413, `ms: 0` — rejected before any `put` | 0 ms / 0 ms |
+| 19 MB, 21 MB (Telegram sizes) | 200, byte-exact | 1.6 s / 1 ms |
+| 5 MB at `--limit-rate 200k` (27 s) | 200 | 1.1 s / 1 ms |
+| chunked (`TE: chunked`, no length) 1 MB / 26 MB | 200 / 413, same as declared | 0.8 s / 0 ms |
+
+**The correction:** a chunked body **does** reach the Worker with a `content-length`. A raw
+`Transfer-Encoding: chunked` writer (not curl — curl can buffer) arrives at the Worker with
+`content-length: 27262976` and the 26 MB case is a 413 with `ms: 0`. Cloudflare's edge de-chunks and
+buffers the request before the isolate runs, so **the 25 MB cap is a guarantee, not best effort**, and
+`/upload` does not need to return 411 for a missing `Content-Length` — it needs to treat a missing one
+as "no body" rather than "unknown size". No `RangeError`, no isolate reset, no memory warning in ~20
+events, and CPU stays at 0–3 ms (the free plan allows 10 ms/invocation). Slow clients are fine: the
+wall time is the client's upload, not the Worker's.
+
+**The caveat:** the `10043` on one of three 25 MB puts is real (R2 returned an error; nothing was
+written, so it is a clean failure, not a partial object). Every upload path needs a retry, and the
+potato must still verify size + sha256 when it fetches a blob.
+
+**Also found:** a client that lies about `Content-Length` cannot bypass the cap — the runtime reads
+exactly the declared number of bytes and discards the rest. But it *stores what was declared*, so a
+mislabelled upload becomes a silently **truncated** blob (a claimed 26214400 bytes out of a real
+26 MB arrived as exactly 26214400 bytes). The consumer-side hash catches it; do not assume the size
+on the blob row is the file's size.
+
+**Validator:** `@cfworker/json-schema` works in workerd and returns structured errors
+(`instanceLocation`, `keyword`, `keywordLocation`, `error`). Ajv's default, compiled inside the
+worker, throws `EvalError: Code generation from strings disallowed for this context` — the plan's
+claim, confirmed. Use `@cfworker/json-schema`, or Ajv's standalone precompiled validators; not
+`new Ajv().compile()`.
+
+**Consequence for phase 1:** the streaming design stands as written (no presign/direct-upload
+fallback needed), `Content-Length` handling in plan 01 changes from "411 otherwise" to "cap it when
+present, 0-length body otherwise", and the plan gains a retry plus a truncation check.
+
 ---
 
 ## S2 — D1 claim-by-update
@@ -128,6 +171,36 @@ which, plus the exact SQL, in the phase 1 plan.
 
 **Note:** if the lease does not exist in D1 as a concept, it is our column and our sweep. Decide the
 sweep's home — the Worker's cron, not the potato — so a dead potato doesn't strand jobs forever.
+
+**Verdict (2026-11-19): pass.**
+**What happened:** `harbor-spike-s2` (D1 `harbor-spike-s2`, the phase-1 schema) with `UPDATE … WHERE
+id IN (SELECT …) RETURNING *`, claimed through HTTP from node clients:
+
+| Shape | Claims | Unique | Overlapping claims | Notes |
+|---|---|---|---|---|
+| 2 clients × 200 sequential, `limit=1`, 200 jobs | 200 | 200 | **0** | 63 s, ~80–160 ms/claim |
+| 4 clients × 40, `limit=5`, 200 jobs | 200 | 200 | **0** | 9 s |
+| 40 simultaneous claims, `limit=1`, 200 jobs | 40 | 40 | **0** | one shot |
+| 12 jobs, `limit=5` ×3 | 5 / 5 / 2 | 12 | 0 | no overlap between batches |
+
+`RETURNING *` gives the whole row, including `payload_json`; the batch form is atomic; the two-client
+shape from the plan produced zero double-claims. `done` twice answers `changes: 1` then `changes: 0`
+with the same `done_at` — idempotent, not an error. A claim with `lease=-1`, then the reclaim sweep,
+then a second claim gives `attempts` 1 → 2 and a fresh lease; a claim inside a live lease is refused.
+An album job touched 3 s ago is not claimable, one touched 20 s ago and an ordinary job are, and a
+claim never moves `touched_at` (it writes `updated_at`).
+
+**The finding that matters:** the claim is one atomic statement, and anything you write *after* it in
+the same request can fail while the claim has already committed. The first version of the audit table
+had `PRIMARY KEY (job_id)`; re-claiming an expired job after the sweep then threw on the audit insert
+and the client got an empty 500 for a claim that had succeeded. Keep the claim single-statement and
+treat its response as the truth; any bookkeeping write must be `INSERT OR IGNORE`-shaped or dropped.
+A double-claim is best detected as *two claim rows whose lease windows overlap*, not as "two rows for
+one job" — the latter is the lease working as designed.
+
+**Consequence for phase 1:** the SQL in plan 01 is correct as written, including the batch form and
+the `touched_at` hold; the sweep belongs in the Worker's cron; no `INSERT … ON CONFLICT` ledger or
+at-least-once fallback is needed. Add the "claim first, everything else tolerant" rule to the plan.
 
 ---
 

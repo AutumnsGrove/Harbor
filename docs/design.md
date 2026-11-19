@@ -365,9 +365,14 @@ Two ingestion routes on the Worker:
   (`env.BUCKET.put(key, request.body)` — never buffered in the Worker), then writes the D1 job row
   with `r2_key`, `content_type`, and `bytes`. Metadata travels in headers/query
   (`Content-Type`, `X-Harbor-Filename`, optional `?link=`/`?note=`/`?title=`, size-capped).
-  `Content-Length` is required (411 without it) because R2 streaming wants a known length; spike S1
-  confirms. Returns `200` as soon as R2 has the object. The SHA-256 is computed on the potato when it
-  pulls the blob down, because hashing a 25 MB stream in a Worker would mean buffering it. Only
+  The Worker never buffers the body, but the edge does de-chunk and buffer it before the isolate
+  runs, which is why a `Content-Length` is always present — even for a chunked request (S1). The
+  25 MB cap is therefore a **guarantee**, checked before `put`, not best effort; a request without
+  one is treated as having no body. A client that lies about the length cannot exceed the cap (the
+  runtime reads exactly that many bytes and discards the rest), but what it declares is what lands
+  in R2, so a mislabelled upload becomes a silently truncated blob — the potato verifies size and
+  SHA-256 when it pulls the blob down, and hashes it there because hashing a 25 MB stream in a
+  Worker would mean buffering it. Only
   Telegram groups several files into one item (below).
 
 Both are token-gated and rate-limited, with a content-type allowlist and a hard size cap. A remote
