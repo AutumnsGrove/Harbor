@@ -3,8 +3,10 @@
 # laptop cannot do.
 #
 # One rule shapes the file: a pull request can never reach the registry. The
-# publish job needs every test job and only runs on a push to main (or a manual
-# dispatch for a deliberate broken-image drill, which never touches `latest`).
+# publish job needs every test job and only runs on a push to main. A manual
+# dispatch publishes a spare tag (default `broken-test`) and never moves
+# `latest` — the rollback drill does move `latest` on purpose, from a machine
+# with write:packages, and is written down in docs/update.md.
 name: ci
 
 on:
@@ -14,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Tag to publish for a drill (never `latest`)'
+        description: 'Tag to publish on a manual dispatch (never `latest`)'
         required: false
         default: broken-test
 
@@ -113,7 +115,8 @@ jobs:
 
   publish:
     name: Publish image
-    # A push to main, or a manual dispatch for the rollback drill. Never a PR.
+    # A push to main, or a manual dispatch (a spare tag for a deliberate drill). Never a PR.
+    # A dispatch never moves `latest`; the rollback drill does that on purpose - see docs/update.md.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -171,7 +174,8 @@ jobs:
             echo "- tags: \`${{ steps.meta.outputs.tags }}\`"
             echo
             if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-              echo "Manual dispatch: \`latest\` was not moved. Apply it on the potato with"
-              echo "\`systemctl start harbor-update.service\` only after pinning by digest."
+              echo "Manual dispatch: \`latest\` was not moved. This tag is a spare image, not a drill:"
+              echo "the watcher always resolves \`latest\`. The rollback drill (move \`latest\`,"
+              echo "watch the watcher restore the old digest) is in docs/update.md."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

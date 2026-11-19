@@ -23,7 +23,7 @@ one gates and the pass condition that has to be met.
 | S8 | Video transcript source | phase 7 exit | 90 min | pending |
 | S9 | Real Raindrop export sample | phase 5 start | 30 min | pending |
 | S10 | Tailscale serve headers + Docker peer address | phase 0 start | 45 min | **pass** |
-| S11 | Nova as a dependency in CI/Docker | phase 0 exit | 45 min | **pass locally; CI at phase 0** |
+| S11 | Nova as a dependency in CI/Docker | phase 0 exit | 45 min | **pass** |
 | S12 | Image decode memory + EXIF | phase 6 exit | 90 min | pending |
 
 S7, S9, S10 and S11 are cheap and can be done now (S9 is ten minutes in Raindrop's export screen
@@ -32,8 +32,8 @@ S3/S4/S6/S8 are cheap to defer until their phase, but each can invalidate a desi
 they must be answered *before* the phase's code is finished, not after.
 
 S5, S7, S10 and S11 were run on 2026-11-18. S7 changed the port; S5 and S10 passed in full; S11
-passed locally, with its GitHub Actions half waiting for phase 0's first CI run. The remaining
-spikes are still open.
+passed locally, and its GitHub Actions half was confirmed on 2026-11-19 by the first green `main`
+run and an anonymous pull on the potato. The remaining spikes are still open.
 
 ---
 
@@ -303,15 +303,16 @@ deploy key or token as a build secret works in both CI and the Dockerfile, and t
 land in an image layer.
 **Fail:** vendor Nova, or publish it, before phase 0's CI can be green.
 
-**Verdict (2026-11-18): pass locally; the first real CI run is the final confirmation.**
+**Verdict (2026-11-19): pass, including CI.**
 **What happened:** `github.com/AutumnsGrove/nova` is public. A clean `go get` of commit `ef460da`
 (the commit with `embed`, `embed/openrouter` and `embed.NewRoles`) succeeded from a scratch module
 and from a clean `golang:1.27-alpine` Docker build with no credentials or `GOPRIVATE`. The module
-resolved as `v0.5.1-0.20261116000603-ef460da11cfc`. No GitHub Actions run has happened yet, because
-Harbor has no workflow to run.
+resolved as `v0.5.1-0.20261116000603-ef460da11cfc`. The GitHub Actions half is now proven: every
+run of the `check`, `fuzz`, `image` and `publish` jobs on `main` fetches modules in the Go stage
+with no secret, and the published image pulls anonymously on the potato (no `~/.docker/config.json`
+entry).
 **Consequence:** pin Nova to that commit (or a later tag) in `go.mod`; no build secret is needed.
-Phase 0's first CI run proves the same path on GitHub. Re-check before phase 3 if the repository's
-visibility changes.
+Re-check before phase 3 if the repository's visibility changes.
 
 ---
 

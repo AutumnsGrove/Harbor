@@ -1,6 +1,8 @@
 # Harbor — build plans
 
-**Status: planned. No product code yet.** These are the plans the build will follow. They do not
+**Status: phase 0 is done and running.** These are the plans the build follows, in order. Phase 0
+is deployed on the potato and has survived a real update and a real rollback drill; phase 1 is next.
+They do not
 replace [design.md](../design.md); they say *how and in what order* the thing described there gets
 built, and what "done" means for each step.
 
@@ -194,7 +196,7 @@ happened, and `make check` is green on `main`.
 | # | Phase | State |
 |---|---|---|
 | — | Spikes | ◐ S5, S7, S10, S11 answered (S7 → 8897); the rest pending |
-| 0 | Foundations | ◐ code complete on a branch stack; waiting on the potato deploy, the rollback drill and a green `main` |
+| 0 | Foundations | ✅ deployed 2026-11-18, updated to `r56.4c93aa8` and rollback-drilled 2026-11-19 |
 | 1 | Worker intake | ☐ |
 | 2 | Core library | ☐ |
 | 3 | Enrichment | ☐ |

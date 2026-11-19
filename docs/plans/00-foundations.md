@@ -1,6 +1,6 @@
 # Phase 0 — Foundations: a binary that deploys and updates itself
 
-**Status:** planned · **Design refs:** [§3](../design.md#3-stack-and-deployment-settled-2026-11-03),
+**Status:** done — deployed and drilled 2026-11-19 · **Design refs:** [§3](../design.md#3-stack-and-deployment-settled-2026-11-03),
 [§9](../design.md#9-ui-sveltekit-embedded) (shell only), [§13](../design.md#13-decisions-log)
 **Depends on:** nothing · **Gate:** [S7](spikes.md#s7--port-8895-is-free),
 [S10](spikes.md#s10--tailscale-serve-headers-and-the-docker-peer-address),
@@ -122,7 +122,7 @@ Written before the code, in this order:
 
 **Tooling**
 
-- [ ] `go mod init github.com/AutumnsGrove/Harbor`; Go 1.27 pinned in `go.mod`. Nova is pinned to
+- [x] `go mod init github.com/AutumnsGrove/Harbor`; Go 1.27 pinned in `go.mod`. Nova is pinned to
       the S11-tested commit (`ef460da`, `v0.5.1-0.20261116000603-ef460da11cfc`) in phase 3, when the
       first import exists: an unused `require` is dropped by `go mod tidy`, so pinning it in phase 0
       would only leave a line that the next tidy deletes. S11 needs no build secret either way.
@@ -184,19 +184,26 @@ Written before the code, in this order:
       arg. Tests run with `CGO_ENABLED=1` (the race detector needs cgo) while the image build stays
       `CGO_ENABLED=0`. S11 already proved a clean `docker build` can fetch Nova with no secret;
       keep that check in CI.
-- [ ] After the first publish, make the GHCR package public (or log the potato in) and verify an
-      anonymous `docker pull` by digest. The source label links the package to the repo.
+- [x] After the first publish, make the GHCR package public (or log the potato in) and verify an
+      anonymous `docker pull` by digest. The source label links the package to the repo. Verified
+      2026-11-19: an anonymous token request and `GET /v2/autumnsgrove/harbor/manifests/latest` both
+      return 200, and the potato pulls with no `~/.docker/config.json` entry.
 - [x] `security-notes.md`: the egress model (a hostname allowlist is impossible because the app
       fetches arbitrary pages — dial-time SSRF guard in phase 3 plus the host firewall rule here),
       the header-based identity lock and the S10 evidence for it, and the token rotation drill.
 
 **Wire-up**
 
-- [ ] Deploy to the potato behind `tailscale serve`; confirm the click-through URL from
-      [meridian.md](../meridian.md).
-- [ ] File the Meridian issue at planning time; do **not** add tile/vital configs yet.
-- [ ] Settings shell shows version and the update check/apply flow, disabled where the backend is
-      not yet there.
+- [x] Deploy to the potato behind `tailscale serve`; confirm the click-through URL from
+      [meridian.md](../meridian.md). Live at `https://lepotato.taild95077.ts.net:8897` since
+      2026-11-18.
+- [x] File the Meridian issue at planning time; do **not** add tile/vital configs yet. Filed as
+      [#1](https://github.com/AutumnsGrove/Harbor/issues/1) (Meridian side:
+      [Meridian#15](https://github.com/AutumnsGrove/Meridian/issues/15)). The tile/vital snippets
+      are not wired — that waits until the Status page has numbers.
+- [x] Settings shell shows version and the update check/apply flow, disabled where the backend is
+      not yet there. Exercised end to end on 2026-11-19 through `POST /api/update/check` and
+      `POST /api/update/start` (the browser clicks the same two calls).
 
 ## Exit criteria
 
@@ -217,6 +224,76 @@ Demo, on the potato, all of it:
 5. Port 8897 confirmed free before install (S7 verdict recorded; 8895 is Pixelsort), the
    identity-lock design matches what S10 measured, and S11 shows CI and Docker can fetch Nova.
 6. A container restart (and a potato reboot) comes back without manual intervention.
+
+## Deploy record (2026-11-19)
+
+Run on the real potato (`lepotato`, aarch64), from the real doors. The first install was
+2026-11-18; this is the update, the rollback, the container restart and the reboot.
+
+| Step | Result | Wall clock |
+|---|---|---|
+| `POST /api/update/check` (Settings → Check) | `available.json` with `sha256:f0a3ca06…` | 4 s |
+| `POST /api/update/start` (Settings → Update) | `r52.13940dc` → **`r56.4c93aa8`**, digest pinned | 43 s |
+| Pre-update snapshot | `data/backups/pre-update.db`, `PRAGMA integrity_check` = ok | 53 ms |
+| Rollback drill | bad image pulled, unhealthy, rolled back, `r56.4c93aa8` healthy | **176 s** |
+| Container restart | healthy again immediately, `restart: unless-stopped` | < 1 s |
+| Potato reboot | reboot issued 18:10:12Z, container up 18:11:22Z, `/healthz` ok, all three units active | ~45 s to serving |
+| Tailnet | `https://lepotato.taild95077.ts.net:8897` serves `/healthz` and the shell | — |
+
+The reboot also exposed that the box's own post-boot check did not cover Harbor at all (it had
+never been added since the 2026-11-18 install). Fixed the same day in the homelab repo
+(`homelab#6`): container health plus `http://localhost:8897/healthz` on every boot. That was a real
+gap — the first reboot after install would have emailed a green summary without having asked Harbor
+anything.
+
+**The drill, and how to repeat it.** The watcher always resolves `<repo>:latest`; it never applies
+a digest someone pinned by hand. So a `broken-test` tag alone cannot drill rollback —
+`systemctl start` would just see `latest` still pointing at the good image and do a no-op update.
+What works is moving `latest` itself to the broken image, which is also the real failure mode (a
+commit that passes the tests but cannot serve):
+
+```bash
+# 0. once per machine: a GHCR credential that can push (write:packages)
+docker login ghcr.io -u AutumnsGrove
+
+# 1. a broken image: starts, never healthy (no /app/harbor, so the healthcheck exits 127)
+mkdir -p /tmp/drill
+printf 'FROM busybox:1.36\nCMD ["sleep","infinity"]\n' >/tmp/drill/Dockerfile
+docker buildx build --platform linux/amd64,linux/arm64 --push \
+  -t ghcr.io/autumnsgrove/harbor:broken-test /tmp/drill
+broken=$(docker buildx imagetools inspect ghcr.io/autumnsgrove/harbor:broken-test \
+  --format '{{.Manifest.Digest}}')
+good=$(docker buildx imagetools inspect ghcr.io/autumnsgrove/harbor:latest \
+  --format '{{.Manifest.Digest}}')
+
+# 2. move latest, then let the watcher take it
+docker buildx imagetools create -t ghcr.io/autumnsgrove/harbor:latest \
+  ghcr.io/autumnsgrove/harbor@$broken
+ssh potato-remote 'sudo systemctl start harbor-update.service'   # exits 1 after a rollback
+
+# 3. put latest back — this is the step that matters, or every later update retries the bad image
+docker buildx imagetools create -t ghcr.io/autumnsgrove/harbor:latest \
+  ghcr.io/autumnsgrove/harbor@$good
+```
+
+Timings from the drill: resolve 19 s (`buildx imagetools` on the potato) → snapshot 4 s → pull 7 s
+→ recreate 4 s → health wait **120 s** (the full window; the container was `Up` but `/healthz` never
+answered) → restore 13 s → up 4 s. Total 176 s, of which 137 s is the broken version serving
+nothing. The 120 s health window is doing its job; the number to quote to a human is "about three
+minutes of outage, then the old version is back". (The named steps sum to 171 s; the rest is the
+shell's own overhead between them.)
+
+Two wrinkles worth knowing:
+
+- `systemctl start harbor-update.service` exits **non-zero** after a successful rollback (the oneshot
+  failed its job). Meridian's control target therefore reports a failure even though the box
+  recovered — read `update-signal/status.json`, not the exit code.
+- A rollback does not change `latest`. If the bad image is what CI published, every later Update
+  retries it and costs another three minutes. Fixing that means reverting on `main` and letting the
+  publish job move `latest` back, or retagging `latest` as in step 3.
+
+The `harbor:broken-test` tag is left in the package on purpose: it is the drill artifact, and
+re-tagging it is step 2 above.
 
 ## Risks
 
