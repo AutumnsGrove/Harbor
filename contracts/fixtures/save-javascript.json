@@ -1,0 +1,8 @@
+{
+	"schema": "save",
+	"case": "javascript: link",
+	"valid": false,
+	"body": {
+		"link": "javascript:alert(1)"
+	}
+}

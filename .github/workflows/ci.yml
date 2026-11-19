@@ -75,6 +75,24 @@ jobs:
       - run: cd web && pnpm install --frozen-lockfile
       - run: make web-check
 
+  worker:
+    name: Worker (typecheck, vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: worker/pnpm-lock.yaml
+      - run: cd worker && pnpm install --frozen-lockfile
+      # vitest runs in workerd with real D1 and R2 (miniflare), so this is the
+      # queue's SQL, not a mock of it. No Cloudflare account is involved.
+      - run: cd worker && pnpm typecheck && pnpm test
+
   watcher:
     name: Update watcher (shell)
     runs-on: ubuntu-latest
@@ -120,7 +138,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    needs: [check, fuzz, web, watcher, packaging, image]
+    needs: [check, fuzz, web, worker, watcher, packaging, image]
     runs-on: ubuntu-latest
     permissions:
       contents: read

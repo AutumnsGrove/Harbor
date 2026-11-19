@@ -12,9 +12,21 @@ invisible until deploy day (docs/plans/testing.md §2).
 
 ```
 save.schema.json     POST /save  — a door's request body
+upload.schema.json   POST /upload — metadata from headers and the query string
 job.schema.json      claim response — one job, with its blobs
 fixtures/            cases both sides validate against
 ```
 
-Schemas arrive with the Worker in phase 1. This directory exists from phase 0 so
-the rule is not discovered later.
+Each fixture is self-describing, so a new case needs no index edit:
+
+```json
+{ "schema": "save", "case": "empty body", "valid": false, "body": {}, "note": "why" }
+```
+
+`valid` is what the schema must say about `body`. The Worker's suite
+(`worker/test/contracts.test.ts`) walks the directory with
+`import.meta.glob`; the Go suite reads it at runtime from phase 2. If a fixture
+and the schema disagree, the fixture is the spec until someone edits both.
+
+The Worker imports the three schemas directly, so the deployed validator and the
+fixtures cannot drift apart.

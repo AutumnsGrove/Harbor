@@ -1,0 +1,8 @@
+{
+	"schema": "upload",
+	"case": "no content type",
+	"valid": false,
+	"body": {
+		"filename": "mystery.bin"
+	}
+}

@@ -1,0 +1,26 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://harbor.local/save.schema.json",
+	"title": "POST /save body",
+	"description": "A door's save request. `source` is never in the body: it comes from the bearer token, so a door cannot claim to be another door. Unknown fields are allowed and ignored (forward compatibility); a client that sends none of `link`/`note` is writing nothing and gets a 400. `note` is capped in characters here and in bytes by the 96 KB body cap enforced before parsing.",
+	"type": "object",
+	"properties": {
+		"link": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 2048,
+			"pattern": "^https?://"
+		},
+		"note": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 65536
+		},
+		"title": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 2048
+		}
+	},
+	"anyOf": [{ "required": ["link"] }, { "required": ["note"] }]
+}

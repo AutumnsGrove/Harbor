@@ -1,0 +1,8 @@
+{
+	"schema": "upload",
+	"case": "markdown note",
+	"valid": true,
+	"body": {
+		"content_type": "text/markdown"
+	}
+}

@@ -1,0 +1,10 @@
+{
+	"schema": "upload",
+	"case": "image with a filename",
+	"valid": true,
+	"body": {
+		"content_type": "image/jpeg",
+		"filename": "IMG_0001.jpg",
+		"note": "from the garden"
+	}
+}

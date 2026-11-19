@@ -1,9 +1,11 @@
 # Harbor
 
-> **Status: phase 0 deployed and drilled; phase 1 next.** Harbor is running on the potato behind
+> **Status: phase 1 deployed; the potato side is next.** Harbor is running on the potato behind
 > `tailscale serve` at `https://lepotato.taild95077.ts.net:8897`, on a digest-pinned image that
 > updates itself and rolled back from a deliberately broken one on 2026-11-19 (176 s, recorded in
-> [docs/plans/00-foundations.md](docs/plans/00-foundations.md#deploy-record-2026-11-19)). The binary,
+> [docs/plans/00-foundations.md](docs/plans/00-foundations.md#deploy-record-2026-11-19)), and its
+> public front door is live at `https://harbor.m7jv4v7npb.workers.dev` — a write-only queue with no
+> read path and no library ([worker/](worker/README.md)). The binary,
 > the embedded shell, the store, the container and the watcher all pass `make check`; `main` is green
 > including the publish job. Name is settled: **Harbor** — a place to bring things in and keep
 > them safe. The collision with CNCF Harbor (the container registry) is known and accepted; this is a

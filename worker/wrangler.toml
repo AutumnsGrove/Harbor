@@ -1,0 +1,41 @@
+# Harbor's public front door: a write-only queue on Cloudflare.
+#
+# One rule shapes this file: the Worker holds a queue, an R2 intake bucket and
+# hashed door tokens. It never holds the library, and there is no public read
+# path (design.md §4). The potato pulls; nothing here can reach into the tailnet.
+
+name = "harbor"
+main = "src/index.ts"
+compatibility_date = "2026-08-22"
+
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "harbor"
+database_id = "90cc6ea0-1ee9-4f4d-bf21-d644e3c9cef5"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "harbor-intake"
+
+# Lease reclaim every five minutes; the orphan sweep once a day at 03:17 UTC
+# (not on the hour: a cron that fires with everyone else's is a slower cron).
+[triggers]
+crons = ["*/5 * * * *", "17 3 * * *"]
+
+# Per-IP dampening on the two public doors. Abuse-dampening, not a hard
+# guarantee (design.md §11); the wrapper in src/limits.ts no-ops when the
+# binding is absent, so tests and a binding-less deploy still work.
+[[ratelimits]]
+name = "DOOR_LIMIT"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }
+
+[vars]
+# The bucket is private; /presign signs with a read-only R2 credential that is
+# set as a secret, not here. These three are the non-secret halves.
+R2_BUCKET = "harbor-intake"
+# Seven days, spelled out so the sweep is inspectable from the dashboard.
+ORPHAN_AGE_SECONDS = "604800"

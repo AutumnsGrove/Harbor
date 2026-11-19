@@ -1,0 +1,9 @@
+{
+	"schema": "upload",
+	"case": "bad scheme in the link query",
+	"valid": false,
+	"body": {
+		"content_type": "image/png",
+		"link": "file:///etc/passwd"
+	}
+}

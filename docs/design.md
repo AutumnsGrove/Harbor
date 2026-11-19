@@ -921,8 +921,11 @@ multipart upload. The database
 - **Scheduling:** one in-process scheduler with its last runs persisted in `task_runs` (so a reboot
   never skips a day) owns purge, mirror drain, link check, suggestions, and maintenance. systemd is
   used only for the update watcher and host-side jobs (rsync).
-- **Rate limiting:** Workers rate-limit binding on `/save` (a few/min/IP). Treat as
-  abuse-dampening, not a hard guarantee.
+- **Rate limiting:** a fixed-window counter on `/save` and `/upload`, one D1 row per caller per
+  minute (30/min), because the Workers rate-limit binding always answers `success: true` on live
+  Workers (workers-sdk#16097, reproduced 2026-11-19) and the Cache API is a no-op on `workers.dev`.
+  The binding is still called first, so it starts working for free when Cloudflare fixes it. Treat
+  the whole thing as abuse-dampening, not a hard guarantee.
 - **Cost guardrails:** cap LLM tokens per page, cap page bytes, cap archive size; alert if D1/R2
   usage moves.
 - **Link checking / re-archive:** a daily scheduler picks a **staggered slice** of older items

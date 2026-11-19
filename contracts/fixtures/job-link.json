@@ -1,0 +1,16 @@
+{
+	"schema": "job",
+	"case": "a claimed link job",
+	"valid": true,
+	"body": {
+		"id": "01a1f502-8a8c-72af-9690-d916c0e136fb",
+		"source": "shortcut",
+		"kind": "link",
+		"link": "https://example.com/x",
+		"note": null,
+		"title": null,
+		"group_key": null,
+		"created_at": 1795113823,
+		"blobs": []
+	}
+}
