@@ -131,8 +131,9 @@ Telegram albums only, never to an ordinary save.
    capped. A `link` that is not http(s) is rejected. Unknown fields are ignored (forward
    compatibility), unknown `source` is rejected.
 4. **`POST /upload`.** R2 object exists *before* the D1 row (assert order via a fake binding that
-   records calls). Oversize is rejected by `Content-Length` when present. Disallowed content type is
-   rejected. A body that dies halfway leaves no job row (and an orphan the sweep will take).
+   records calls). Oversize is rejected from the declared length before any R2 write. Disallowed
+   content type is rejected. A body that dies halfway leaves no job row (and an orphan the sweep
+   will take).
 5. **Claim.** One job, two claims → the second gets nothing. `claim?limit=5` over 12 jobs returns 5,
    then 5, then 2, with no overlap. Claim is atomic under concurrency (S2 harness, kept as a test).
    `done` → `status=done`, on a second `done` is idempotent. `failed` stores `last_error` and
@@ -169,8 +170,10 @@ Telegram albums only, never to an ordinary save.
       for each door. No token ever printed after creation.
 - [ ] `/save` with caps: note ≤ 64 KB, link length ≤ 2 KB, JSON body ≤ 96 KB.
 - [ ] `/upload`: raw body only, streaming `BUCKET.put(key, request.body)`, `incoming/<job>/<n>`,
-      `Content-Length` required (411 otherwise, per S1), content-type allowlist (image/*,
-      application/pdf, text/plain, text/markdown), 25 MB, metadata in headers/query.
+      the declared length capped before the `put` (the edge always sends one — S1) with a
+      missing length treated as an empty body, content-type allowlist (image/*, application/pdf,
+      text/plain, text/markdown), 25 MB, metadata in headers/query. A failed R2 `put` is a 502 the
+      door client retries — S1 saw one `10043` in three 25 MB uploads, with nothing written.
 - [ ] `/jobs/claim?limit=N&kinds=link,note,upload` (`kinds` defaults to all; the potato asks only for
       kinds it can process, so before phase 6 an uploaded photo waits safely in the queue instead of
       burning attempts), `/jobs/pending`, `/jobs/replay`, `/jobs/:id/done`, `/jobs/:id/failed`,
@@ -212,10 +215,15 @@ Demo, with `curl` and nothing else behind it:
 
 - **D1 free-tier write limits.** Every save is a write. At 100/month this is nothing, but the sweep
   must not rewrite rows it doesn't need to; batch the lease reclaim.
-- **`Content-Length` and chunked bodies.** A client can lie about `Content-Length`; the runtime
-  enforces the declared length, so a lie fails the upload instead of bypassing the cap. Whether R2
-  accepts a chunked body at all is S1's question; if it does, enforce the cap mid-stream by
-  aborting and state honestly that the guard is best-effort.
+- **`Content-Length` and chunked bodies.** Settled by S1: Cloudflare de-chunks and buffers the
+  request at the edge, so the Worker always sees a `Content-Length` and the 25 MB cap is a guarantee
+  checked before `put`. A client that lies about the length cannot exceed the cap, but stores a
+  truncated blob — the potato verifies size and sha256 on pull, so that is a failed item, not a
+  corrupt one.
+- **A claim is one statement; everything after it must tolerate failure.** S2: the claim commits
+  before any follow-up write, so a bookkeeping insert that throws turns a successful claim into an
+  empty 500. Keep the claim single-statement, trust its `RETURNING`, and make any audit write
+  `INSERT OR IGNORE`-shaped or drop it.
 - **Duplicate delivery is legal.** The potato must be idempotent by canonical URL and sha256, so the
   Worker is allowed at-least-once. Do not build exactly-once semantics the DB cannot support.
 - **Two secrets in two places.** The Worker's token table and the potato's `.env` must be rotated
