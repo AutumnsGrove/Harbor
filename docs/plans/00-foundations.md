@@ -228,7 +228,7 @@ Demo, on the potato, all of it:
 ## Deploy record (2026-11-19)
 
 Run on the real potato (`lepotato`, aarch64), from the real doors. The first install was
-2026-11-18; this is the update, the rollback and the restart drill.
+2026-11-18; this is the update, the rollback, the container restart and the reboot.
 
 | Step | Result | Wall clock |
 |---|---|---|
@@ -237,7 +237,14 @@ Run on the real potato (`lepotato`, aarch64), from the real doors. The first ins
 | Pre-update snapshot | `data/backups/pre-update.db`, `PRAGMA integrity_check` = ok | 53 ms |
 | Rollback drill | bad image pulled, unhealthy, rolled back, `r56.4c93aa8` healthy | **176 s** |
 | Container restart | healthy again immediately, `restart: unless-stopped` | < 1 s |
+| Potato reboot | reboot issued 18:10:12Z, container up 18:11:22Z, `/healthz` ok, all three units active | ~45 s to serving |
 | Tailnet | `https://lepotato.taild95077.ts.net:8897` serves `/healthz` and the shell | — |
+
+The reboot also exposed that the box's own post-boot check did not cover Harbor at all (it had
+never been added since the 2026-11-18 install). Fixed the same day in the homelab repo
+(`homelab#6`): container health plus `http://localhost:8897/healthz` on every boot. That was a real
+gap — the first reboot after install would have emailed a green summary without having asked Harbor
+anything.
 
 **The drill, and how to repeat it.** The watcher always resolves `<repo>:latest`; it never applies
 a digest someone pinned by hand. So a `broken-test` tag alone cannot drill rollback —
@@ -246,7 +253,11 @@ What works is moving `latest` itself to the broken image, which is also the real
 commit that passes the tests but cannot serve):
 
 ```bash
+# 0. once per machine: a GHCR credential that can push (write:packages)
+docker login ghcr.io -u AutumnsGrove
+
 # 1. a broken image: starts, never healthy (no /app/harbor, so the healthcheck exits 127)
+mkdir -p /tmp/drill
 printf 'FROM busybox:1.36\nCMD ["sleep","infinity"]\n' >/tmp/drill/Dockerfile
 docker buildx build --platform linux/amd64,linux/arm64 --push \
   -t ghcr.io/autumnsgrove/harbor:broken-test /tmp/drill
@@ -265,11 +276,12 @@ docker buildx imagetools create -t ghcr.io/autumnsgrove/harbor:latest \
   ghcr.io/autumnsgrove/harbor@$good
 ```
 
-Timings from the drill: resolve 19 s (`buildx imagetools` on the potato) → snapshot 4 s → pull 15 s
+Timings from the drill: resolve 19 s (`buildx imagetools` on the potato) → snapshot 4 s → pull 7 s
 → recreate 4 s → health wait **120 s** (the full window; the container was `Up` but `/healthz` never
-answered) → restore 17 s → up 4 s. Total 176 s, of which 137 s is the broken version serving
+answered) → restore 13 s → up 4 s. Total 176 s, of which 137 s is the broken version serving
 nothing. The 120 s health window is doing its job; the number to quote to a human is "about three
-minutes of outage, then the old version is back".
+minutes of outage, then the old version is back". (The named steps sum to 171 s; the rest is the
+shell's own overhead between them.)
 
 Two wrinkles worth knowing:
 

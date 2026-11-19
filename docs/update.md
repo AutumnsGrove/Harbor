@@ -132,10 +132,11 @@ enough — `latest` itself has to point at the broken image. That is also the re
 failure mode: a commit that passes CI but cannot serve.
 
 ```bash
-mkdir -p /tmp/drill && printf 'FROM busybox:1.36\nCMD ["sleep","infinity"]\n' >/tmp/drill/Dockerfile
+mkdir -p /tmp/drill
+printf 'FROM busybox:1.36\nCMD ["sleep","infinity"]\n' >/tmp/drill/Dockerfile
+docker login ghcr.io -u AutumnsGrove       # needs write:packages; do this first
 docker buildx build --platform linux/amd64,linux/arm64 --push \
   -t ghcr.io/autumnsgrove/harbor:broken-test /tmp/drill
-docker login ghcr.io -u AutumnsGrove       # needs write:packages
 
 good=$(docker buildx imagetools inspect ghcr.io/autumnsgrove/harbor:latest --format '{{.Manifest.Digest}}')
 broken=$(docker buildx imagetools inspect ghcr.io/autumnsgrove/harbor:broken-test --format '{{.Manifest.Digest}}')
@@ -151,8 +152,9 @@ docker buildx imagetools create -t ghcr.io/autumnsgrove/harbor:latest \
 
 Pass: `status.json` says `rolled back to … and healthy`, `/healthz` answers with
 the old version, and `.env` is pinned back at `$good`. Record the timings; the
-2026-11-19 run was resolve 19 s → snapshot 4 s → pull 15 s → recreate 4 s →
-health wait **120 s** → restore 17 s → up 4 s.
+2026-11-19 run was resolve 19 s → snapshot 4 s → pull 7 s → recreate 4 s →
+health wait **120 s** → restore 13 s → up 4 s, **176 s** in total with the shell's
+own overhead between steps.
 
 Where it fails: if `latest` is still the broken image afterwards, the next update
 will take the box down again. The restore step is not optional.

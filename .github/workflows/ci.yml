@@ -115,7 +115,8 @@ jobs:
 
   publish:
     name: Publish image
-    # A push to main, or a manual dispatch for the rollback drill. Never a PR.
+    # A push to main, or a manual dispatch (a spare tag for a deliberate drill). Never a PR.
+    # A dispatch never moves `latest`; the rollback drill does that on purpose - see docs/update.md.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
