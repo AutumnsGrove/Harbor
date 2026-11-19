@@ -1,0 +1,6 @@
+# Local only, never committed (`make -C worker` copies it if you want a dev run).
+# Real values live in `wrangler secret put`, and the door tokens are stored hashed
+# in D1 — mint one with `node scripts/mint-token.mjs`.
+R2_ACCOUNT_ID=0000000000000000000000000000000
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=

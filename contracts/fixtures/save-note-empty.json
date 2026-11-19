@@ -1,0 +1,8 @@
+{
+	"schema": "save",
+	"case": "empty note string",
+	"valid": false,
+	"body": {
+		"note": ""
+	}
+}

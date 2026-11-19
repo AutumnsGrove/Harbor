@@ -1,0 +1,35 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://harbor.local/upload.schema.json",
+	"title": "POST /upload metadata",
+	"description": "POST /upload carries the file as the raw request body; everything else is metadata from headers and the query string. The Worker checks this object, then the declared Content-Length, then streams the body to R2. `content_type` is the allowlist from design §5.",
+	"type": "object",
+	"required": ["content_type"],
+	"properties": {
+		"content_type": {
+			"type": "string",
+			"pattern": "^(image/[a-z0-9.+-]+|application/pdf|text/plain|text/markdown)$"
+		},
+		"filename": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 255
+		},
+		"link": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 2048,
+			"pattern": "^https?://"
+		},
+		"note": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 65536
+		},
+		"title": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 2048
+		}
+	}
+}

@@ -1,0 +1,10 @@
+{
+	"schema": "save",
+	"case": "link, note and title",
+	"valid": true,
+	"body": {
+		"link": "http://example.com",
+		"note": "keep this",
+		"title": "Example"
+	}
+}

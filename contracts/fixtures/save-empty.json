@@ -1,0 +1,7 @@
+{
+	"schema": "save",
+	"case": "empty body",
+	"valid": false,
+	"body": {},
+	"note": "a save with neither a link nor a note writes nothing"
+}

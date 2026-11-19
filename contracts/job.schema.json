@@ -1,0 +1,34 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://harbor.local/job.schema.json",
+	"title": "One claimed job",
+	"description": "What the potato gets from GET/POST /jobs/claim and /jobs/pending. `link` is raw and uncanonicalised: canonicalisation is the potato's job. `blobs` is empty for a link or note job. A blob's `bytes` is what the Worker wrote; the potato still verifies size and sha256 on pull (S1).",
+	"type": "object",
+	"required": ["id", "source", "kind", "created_at", "blobs"],
+	"properties": {
+		"id": { "type": "string", "minLength": 1 },
+		"source": { "type": "string", "enum": ["telegram", "shortcut"] },
+		"kind": { "type": "string", "enum": ["link", "note", "upload"] },
+		"link": { "type": ["string", "null"] },
+		"note": { "type": ["string", "null"] },
+		"title": { "type": ["string", "null"] },
+		"group_key": { "type": ["string", "null"] },
+		"created_at": { "type": "integer" },
+		"status": { "type": "string", "enum": ["queued", "claimed", "done", "failed"] },
+		"attempts": { "type": "integer", "minimum": 0 },
+		"last_error": { "type": "string" },
+		"blobs": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["n", "key", "content_type", "bytes"],
+				"properties": {
+					"n": { "type": "integer", "minimum": 0 },
+					"key": { "type": "string", "minLength": 1 },
+					"content_type": { "type": "string" },
+					"bytes": { "type": "integer", "minimum": 0 }
+				}
+			}
+		}
+	}
+}

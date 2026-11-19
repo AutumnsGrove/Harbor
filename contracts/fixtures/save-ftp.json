@@ -1,0 +1,8 @@
+{
+	"schema": "save",
+	"case": "non-http scheme",
+	"valid": false,
+	"body": {
+		"link": "ftp://example.com/file"
+	}
+}

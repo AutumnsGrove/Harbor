@@ -1,0 +1,11 @@
+{
+	"schema": "job",
+	"case": "blobs is required",
+	"valid": false,
+	"body": {
+		"id": "x",
+		"source": "shortcut",
+		"kind": "link",
+		"created_at": 1
+	}
+}

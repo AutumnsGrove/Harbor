@@ -1,0 +1,12 @@
+{
+	"schema": "job",
+	"case": "kind outside the enum",
+	"valid": false,
+	"body": {
+		"id": "x",
+		"source": "shortcut",
+		"kind": "video",
+		"created_at": 1,
+		"blobs": []
+	}
+}

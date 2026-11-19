@@ -1,0 +1,14 @@
+{
+	"schema": "save",
+	"case": "unknown fields are ignored",
+	"valid": true,
+	"body": {
+		"link": "https://example.com",
+		"source": "telegram",
+		"future_field": [
+			1,
+			2
+		]
+	},
+	"note": "forward compatibility: the body may grow fields this Worker does not know yet"
+}

@@ -1,0 +1,8 @@
+{
+	"schema": "save",
+	"case": "link only",
+	"valid": true,
+	"body": {
+		"link": "https://example.com/a?b=1"
+	}
+}

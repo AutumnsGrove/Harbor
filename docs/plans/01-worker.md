@@ -1,6 +1,6 @@
 # Phase 1 — The Worker: a public door that can only append
 
-**Status:** planned · **Design refs:** [§4](../design.md#4-architecture),
+**Status:** done — deployed 2026-11-19, exit demo run · **Design refs:** [§4](../design.md#4-architecture),
 [§5](../design.md#5-save-path), [§11](../design.md#11-operations),
 [open-questions B4/E1/E6/E7](../open-questions.md)
 **Depends on:** phase 0 (CI, image) · **Gates:** [S1](spikes.md#s1--worker-streams-a-25-mb-upload-to-r2),
@@ -162,34 +162,44 @@ Telegram albums only, never to an ordinary save.
 
 ## Tasks
 
-- [ ] `wrangler.toml` with D1 + R2 + cron; `.dev.vars` for local tokens; document secrets in the repo
+- [x] `wrangler.toml` with D1 + R2 + cron; `.dev.vars` for local tokens; document secrets in the repo
       README, never commit them.
-- [ ] Migration 0001 (jobs, blobs, tokens) and a `migrations/README` explaining that D1 migrations
-      are applied by `wrangler d1 migrations apply`.
-- [ ] Token bootstrap: a small script or documented `wrangler d1 execute` to insert a hashed token
-      for each door. No token ever printed after creation.
-- [ ] `/save` with caps: note ≤ 64 KB, link length ≤ 2 KB, JSON body ≤ 96 KB.
-- [ ] `/upload`: raw body only, streaming `BUCKET.put(key, request.body)`, `incoming/<job>/<n>`,
-      the declared length capped before the `put` (the edge always sends one — S1) with a
-      missing length treated as an empty body, content-type allowlist (image/*, application/pdf,
-      text/plain, text/markdown), 25 MB, metadata in headers/query. A failed R2 `put` is a 502 the
-      door client retries — S1 saw one `10043` in three 25 MB uploads, with nothing written.
-- [ ] `/jobs/claim?limit=N&kinds=link,note,upload` (`kinds` defaults to all; the potato asks only for
+- [x] Migration 0001 (jobs, blobs, tokens) and a `migrations/README` explaining that D1 migrations
+      are applied by `wrangler d1 migrations apply`. Migration **0002** adds `door_limits` (see the
+      rate-limiting note below).
+- [x] Token bootstrap: `worker/scripts/mint-token.mjs` prints the token once and the SQL to insert
+      its hash. No token is stored in the Worker in plaintext.
+- [x] `/save` with caps: note ≤ 64 KB, link length ≤ 2 KB, JSON body ≤ 96 KB.
+- [x] `/upload`: raw body only, `BUCKET.put(key, request.body)` for a request that carries a length,
+      `incoming/<job>/<n>`, the declared length capped before the `put` (the edge always sends one —
+      S1) with a counting stream as defence in depth, content-type allowlist (image/*,
+      application/pdf, text/plain, text/markdown), 25 MB, metadata in headers/query. A failed R2
+      `put` is a 502 the door client retries — S1 saw one `10043` in three 25 MB uploads, with
+      nothing written.
+- [x] `/jobs/claim?limit=N&kinds=link,note,upload` (`kinds` defaults to all; the potato asks only for
       kinds it can process, so before phase 6 an uploaded photo waits safely in the queue instead of
       burning attempts), `/jobs/pending`, `/jobs/replay`, `/jobs/:id/done`, `/jobs/:id/failed`,
       all `potato` scope (the potato holds one credential, a distinct row so it can be rotated
       alone; door tokens never reach these routes).
-- [ ] Cron: lease reclaim (every 5 min), orphan sweep (daily), 7-day window.
-- [ ] `/presign` (`potato` scope) returning `{url, expires_at}` for a known `r2_key`, signed S3-style
-      with `aws4fetch`. Create the read-only R2 API credential scoped to this bucket and store it as
-      a Worker secret; record its exact scope in `security-notes.md`.
-- [ ] `/healthz` returning `{status, version}` with no D1 read.
-- [ ] Rate limiting per IP and per token; 429 with `Retry-After`.
-- [ ] Fill in `contracts/`; add the Go validator in phase 2.
-- [ ] Deploy: a second Cloudflare account-scoped Worker, a custom hostname or `workers.dev`, recorded
-      in `security-notes.md` as the second allowed egress host.
-- [ ] Verify design §4's route table and §11's sweep details match what shipped; the table is the
-      source of truth, so fix the code or fix the table in the same commit.
+- [x] Cron: lease reclaim (every 5 min), orphan sweep (daily 03:17 UTC), 7-day window with an
+      `ORPHAN_AGE_SECONDS` override for an operator who wants to sweep sooner.
+- [~] `/presign` (`potato` scope) returning `{url, expires_at}` for a known `r2_key`, signed S3-style
+      with `aws4fetch`. Implemented and unit-tested against fake credentials; **the read-only R2 API
+      token does not exist yet**, so the deployed route answers 503 rather than signing something
+      that would 403. Create it in the dashboard and `wrangler secret put R2_ACCOUNT_ID`,
+      `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; then verify one real fetch and record the token's
+      scope in `docker/security-notes.md`.
+- [x] `/healthz` returning `{status, version}` with no D1 read.
+- [x] Rate limiting per caller; 429 with `Retry-After`. **Not the binding**: it always answers
+      `success: true` on live Workers (workers-sdk#16097, reproduced here with a 2/10 s limit), and the
+      Cache API is a no-op on `workers.dev`. The counter is one D1 row per `(caller, window)`
+      (migration 0002), incremented with an UPSERT and pruned daily; the binding call is kept as a
+      cheap first check for the day Cloudflare fixes it.
+- [x] Fill in `contracts/`; the Go validator arrives in phase 2.
+- [x] Deploy: `https://harbor.m7jv4v7npb.workers.dev` on `workers.dev` (no custom hostname yet),
+      recorded in `docker/security-notes.md` as the allowed egress host for the potato.
+- [x] Verify design §4's route table and §11's sweep details match what shipped: §11 said "Workers
+      rate-limit binding", which is now false, so design §11 changed in the same commit.
 
 ## Exit criteria
 
@@ -210,6 +220,37 @@ Demo, with `curl` and nothing else behind it:
    leaves live keys alone.
 7. Mark ten jobs done, backdate them 30 days, run both crons: all ten, their blobs and R2 objects
    remain, and `GET /jobs/replay?since=` returns them.
+
+## Deploy record (2026-11-19)
+
+Live at **`https://harbor.m7jv4v7npb.workers.dev`** (`workers_dev`, no custom hostname yet), D1
+`harbor`, R2 `harbor-intake`, crons `*/5 * * * *` and `17 3 * * *`, `/healthz` →
+`{"status":"ok","version":"r61.a592778"}`. Every exit-demo step below ran against that deployment
+with `curl` and two node claim clients, then the demo data was cleared and the sample rows kept.
+
+| Demo step | Result |
+|---|---|
+| 1. save from a door token | `200` `{"status":"queued",…}`; one `queued` row with `source=shortcut` |
+| 2. 20 MB upload / 26 MB upload | `200` with `bytes=20971520` and the object under `incoming/<job>/0`; `413` for 26 MB, nothing written |
+| 3. two claim loops, 200 jobs | **200 claims, 200 unique, 0 double-claims**, 44 s |
+| 4. claim loop killed mid-job | after the lease: the 5-minute cron requeued 190 jobs, a re-claim showed `attempts: 2` |
+| 5. revoke `shortcut` | saves `401`, `telegram` still `200`, `potato` still `200`, `shortcut` on `/jobs/claim` `403` |
+| 6. orphan sweep | 20 MB object orphaned (rows deleted), deleted by the real daily cron within ~2 min at `ORPHAN_AGE_SECONDS=60`; ten `done` jobs and their blobs untouched |
+| 7. replay | `GET /jobs/replay?since=` returned exactly the ten backdated `done` jobs |
+| — | rate limit: 30/min per caller, then `429` with `retry-after` |
+
+Three things were found by doing it rather than by testing it:
+
+- **`/healthz` returned `unknown`** until the version was read from `c.env.VERSION`; the var is
+  passed at deploy time (`--var VERSION:r<count>.<sha>`), the same stamp the image carries.
+- **Hono's `c.req.header()` returns `undefined`, not `null`,** for a missing header — the upload
+  length check read `"undefined"` as a number and answered 400 for every upload until it was
+  normalised. The unit tests caught this only because they had no `Content-Length` at all.
+- **The rate-limiting binding does not work** (see the task above). Shipping a no-op limiter and
+  calling the task done would have been the wrong call, so the counter moved into D1.
+
+Still open on this phase: the R2 read-only credential for `/presign` (module says 503), and a
+custom hostname if `workers.dev` ever becomes a problem.
 
 ## Risks
 

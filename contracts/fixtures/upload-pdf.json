@@ -1,0 +1,9 @@
+{
+	"schema": "upload",
+	"case": "pdf",
+	"valid": true,
+	"body": {
+		"content_type": "application/pdf",
+		"filename": "paper.pdf"
+	}
+}

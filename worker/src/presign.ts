@@ -1,0 +1,46 @@
+import { AwsClient } from 'aws4fetch';
+import { PRESIGN_TTL_SECONDS } from './constants';
+import type { Env } from './types';
+
+// A short-lived, S3-style GET for one known key. The browser fetches the bytes
+// straight from R2: they never pass through the Worker (a Worker-served signed
+// URL would be a public read path, design.md §11) and the potato needs no R2
+// credentials for ordinary reads.
+//
+// The credential is a read-only R2 API token, held as a Worker secret, scoped to
+// this bucket. It is not in D1 and never leaves the Worker.
+
+export interface PresignResult {
+	url: string;
+	expires_at: number;
+}
+
+export function presignConfigured(env: Env): boolean {
+	return Boolean(env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY);
+}
+
+/** Only keys the queue knows about, and only under the prefixes this phase writes. */
+export function presignKeyAllowed(key: string): boolean {
+	if (!key || key.length > 512) return false;
+	if (key.includes('..') || key.startsWith('/')) return false;
+	return /^(incoming|media|archives)\/[A-Za-z0-9._\-/]+$/.test(key);
+}
+
+export async function presign(env: Env, key: string, now: number): Promise<PresignResult> {
+	if (!presignConfigured(env)) throw new Error('presign is not configured');
+	const client = new AwsClient({
+		accessKeyId: env.R2_ACCESS_KEY_ID as string,
+		secretAccessKey: env.R2_SECRET_ACCESS_KEY as string,
+		service: 's3',
+		region: 'auto',
+	});
+
+	const encoded = key.split('/').map(encodeURIComponent).join('/');
+	const url = new URL(`https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_BUCKET}/${encoded}`);
+	url.searchParams.set('X-Amz-Expires', String(PRESIGN_TTL_SECONDS));
+
+	// aws4fetch signs the query rather than the headers, which is what makes the
+	// URL itself the capability.
+	const signed = await client.sign(url.toString(), { method: 'GET', aws: { signQuery: true } });
+	return { url: signed.url.toString(), expires_at: now + PRESIGN_TTL_SECONDS };
+}

@@ -1,0 +1,9 @@
+{
+	"schema": "upload",
+	"case": "svg is image/*",
+	"valid": true,
+	"body": {
+		"content_type": "image/svg+xml"
+	},
+	"note": "allowed by the allowlist; the potato is what must not serve it inline"
+}

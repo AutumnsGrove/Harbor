@@ -91,6 +91,15 @@ docker run --rm --network harbor_egress curlimages/curl -sS --max-time 5 http://
 docker run --rm --network harbor_egress curlimages/curl -sS --max-time 5 https://example.com/ -o /dev/null -w '%{http_code}\n' ; # 200
 ```
 
+### The one host the potato must reach
+
+The Worker is `https://harbor.m7jv4v7npb.workers.dev` (phase 1, deployed 2026-11-19). It is on the
+public internet, which these rules already allow, so nothing in the firewall changes when the
+potato's poll loop starts dialling it. What matters is the direction of the trust: the potato is
+the *client*, holds the only `potato`-scope token, and the Worker has no route into the tailnet. If
+the Worker is ever moved to a custom hostname, update the potato's `HARBOR_WORKER_URL` and this
+line together — a stale host is a silent "no saves arriving" with a green `/healthz`.
+
 ## Writes, and what a rollback costs
 
 The rootfs is read-only. The process may write only to:
