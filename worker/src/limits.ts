@@ -72,9 +72,13 @@ export async function doorLimit(env: Env, key: string, opts: DoorLimitOptions = 
 	return { allowed: true, retryAfter: 0 };
 }
 
-/** Windows older than a day are dead rows; the daily sweep clears them. */
+/**
+ * Windows older than a day are dead rows; the daily sweep clears them.
+ * `now` is unix **seconds** (the same clock `doorLimit` floors to a window), so
+ * the cutoff is in the same unit as the stored `window` column.
+ */
 export async function pruneDoorLimits(env: Env, now: number): Promise<number> {
-	const cutoff = Math.floor(now / 1000 / DOOR_LIMIT_PERIOD) - 24 * 60;
+	const cutoff = Math.floor(now / DOOR_LIMIT_PERIOD) - 24 * 60;
 	const res = await env.DB.prepare('DELETE FROM door_limits WHERE window < ?').bind(cutoff).run();
 	return res.meta.changes ?? 0;
 }

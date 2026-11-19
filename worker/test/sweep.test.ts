@@ -50,11 +50,45 @@ describe('orphan sweep', () => {
 		expect((await jobRow(id))?.status).toBe('queued');
 	});
 
-	it('runs from the daily cron without crashing, and the five-minute cron does not sweep', async () => {
+	it('the five-minute cron only reclaims: it never sweeps', async () => {
 		await env.BUCKET.put('incoming/orphan-2/0', new Uint8Array([1]));
 		const worker = (await import('../src/index')).default;
-		const envs = env as unknown as Cloudflare.Env;
-		await worker.scheduled({ cron: '*/5 * * * *', scheduledTime: Date.now(), noRetry() {} } as ScheduledController, envs);
+		await worker.scheduled(
+			{ cron: '*/5 * * * *', scheduledTime: Date.now(), noRetry() {} } as ScheduledController,
+			env as unknown as Cloudflare.Env,
+		);
 		expect(await env.BUCKET.head('incoming/orphan-2/0')).not.toBeNull();
+	});
+
+	it('the daily cron sweeps orphans and prunes old dampener windows', async () => {
+		const worker = (await import('../src/index')).default;
+		const nowSec = Math.floor(Date.now() / 1000);
+
+		// An orphan object, old enough for a one-second window to catch it. The
+		// comparison is whole-second granular (now is floored), so wait two.
+		await env.BUCKET.put('incoming/cron-orphan/0', new Uint8Array([1]));
+		await new Promise((resolve) => setTimeout(resolve, 2500));
+
+		// A stale dampener window, and a live job whose blob never made it to R2.
+		await env.DB.prepare('INSERT INTO door_limits (key, window, hits, updated_at) VALUES (?, ?, 1, ?)')
+			.bind('stale', Math.floor(nowSec / 60) - 24 * 60 - 5, nowSec)
+			.run();
+		const missing = await seedJob({
+			status: 'queued',
+			withBlob: true,
+			created_at: nowSec - 8 * 24 * 3600,
+		});
+
+		// The suite's bindings set ORPHAN_AGE_SECONDS=1 so this exercises the real
+		// construction path rather than a spread copy of the env.
+		await worker.scheduled(
+			{ cron: '17 3 * * *', scheduledTime: Date.now(), noRetry() {} } as ScheduledController,
+			env as unknown as Cloudflare.Env,
+		);
+
+		expect(await env.BUCKET.head('incoming/cron-orphan/0')).toBeNull();
+		const limits = await env.DB.prepare("SELECT key FROM door_limits WHERE key = 'stale'").first();
+		expect(limits).toBeNull();
+		expect((await jobRow(missing))?.status).toBe('failed');
 	});
 });

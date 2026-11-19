@@ -63,6 +63,18 @@ describe('identity', () => {
 		expect(row?.last_seen_at).toBeTypeOf('number');
 	});
 
+	it('refuses a door whose token id is not a known source', async () => {
+		await env.DB.prepare(
+			'INSERT INTO tokens (id, scope, sha256, label, created_at) VALUES (?, ?, ?, ?, ?)',
+		)
+			.bind('ios', 'door', await sha256Hex('ios-token'), 'ios', Math.floor(Date.now() / 1000))
+			.run();
+		const res = await call('POST', '/save', { token: 'ios-token', body: '{"link":"https://example.com/ios"}' });
+		expect(res.res.status).toBe(403);
+		const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM jobs WHERE source = 'ios'").first<{ n: number }>();
+		expect(rows?.n).toBe(0);
+	});
+
 	it('stores only the hash of a token', async () => {
 		const stored = await env.DB.prepare('SELECT sha256 FROM tokens').all<{ sha256: string }>();
 		const hashes = (stored.results ?? []).map((r) => r.sha256);

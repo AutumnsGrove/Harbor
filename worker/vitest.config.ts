@@ -12,7 +12,7 @@ export default defineConfig(async () => {
 		plugins: [
 			cloudflareTest({
 				wrangler: { configPath: './wrangler.toml' },
-				miniflare: { bindings: { TEST_MIGRATIONS: migrations, VERSION: 'test', DOOR_LIMIT_MAX: '100000' } },
+				miniflare: { bindings: { TEST_MIGRATIONS: migrations, VERSION: 'test', DOOR_LIMIT_MAX: '100000', ORPHAN_AGE_SECONDS: '1' } },
 			}),
 		],
 		test: {

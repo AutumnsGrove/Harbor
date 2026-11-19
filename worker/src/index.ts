@@ -88,6 +88,16 @@ function tooMany(retryAfter: number): Response {
 }
 
 const KINDS: Kind[] = ['link', 'note', 'upload'];
+const SOURCES: Source[] = ['telegram', 'shortcut'];
+
+/**
+ * The token id *is* the source. A token minted under another name is a
+ * misconfiguration, and the failure must be loud here rather than a job the
+ * potato rejects later because its `source` is outside the contract's enum.
+ */
+function doorSource(id: string): Source | null {
+	return SOURCES.includes(id as Source) ? (id as Source) : null;
+}
 
 function parseKinds(raw: string | undefined): Kind[] | null {
 	if (!raw) return [];
@@ -163,10 +173,13 @@ route('POST', '/save', 'door', async (c) => {
 	const result = validate('save', body.value);
 	if (!result.valid) return json({ error: 'invalid', errors: result.errors }, 400);
 
+	const source = doorSource(principal.id);
+	if (!source) return json({ error: 'unknown door' }, 403);
+
 	const input = body.value as { link?: string; note?: string; title?: string };
 	const now = nowSeconds();
 	const id = await enqueueLink(c.env, now, {
-		source: principal.id as Source,
+		source,
 		link: input.link ?? null,
 		note: input.note ?? null,
 		title: input.title ?? null,
@@ -213,6 +226,9 @@ route('POST', '/upload', 'door', async (c) => {
 	const incoming = c.req.raw.body;
 	if (!incoming) return json({ error: 'no body' }, 400);
 
+	const source = doorSource(principal.id);
+	if (!source) return json({ error: 'unknown door' }, 403);
+
 	const ref = newUploadRef();
 	let object: R2Object | null;
 	try {
@@ -221,7 +237,7 @@ route('POST', '/upload', 'door', async (c) => {
 			// the production path, and S1 proved it streams a 25 MB body in ~2 s.
 			object = await c.env.BUCKET.put(ref.key, incoming, {
 				httpMetadata: { contentType },
-				customMetadata: { source: principal.id, job: ref.id },
+				customMetadata: { source, job: ref.id },
 			});
 		} else {
 			// No declared length: only reachable from a direct in-process call, since
@@ -232,7 +248,7 @@ route('POST', '/upload', 'door', async (c) => {
 			if (buffered.byteLength === 0) return json({ error: 'no body' }, 400);
 			object = await c.env.BUCKET.put(ref.key, buffered, {
 				httpMetadata: { contentType },
-				customMetadata: { source: principal.id, job: ref.id },
+				customMetadata: { source, job: ref.id },
 			});
 		}
 	} catch {
@@ -242,7 +258,7 @@ route('POST', '/upload', 'door', async (c) => {
 
 	const now = nowSeconds();
 	const id = await insertUpload(c.env, now, ref, {
-		source: principal.id as Source,
+		source,
 		contentType,
 		// What actually landed, not what was claimed: a lying Content-Length
 		// truncates, and the potato re-verifies size and sha256 on pull.

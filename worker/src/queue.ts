@@ -270,7 +270,8 @@ export async function sweepOrphans(
 	const { results: orphans } = await env.DB.prepare(
 		`SELECT b.job_id AS job_id, b.r2_key AS r2_key FROM blobs b
 		 JOIN jobs j ON j.id = b.job_id
-		 WHERE b.created_at < ? AND j.status IN ('queued', 'claimed')`,
+		 WHERE b.created_at < ? AND j.status IN ('queued', 'claimed')
+		   AND b.r2_key LIKE 'incoming/%'`,
 	)
 		.bind(cutoff)
 		.all<{ job_id: string; r2_key: string }>();

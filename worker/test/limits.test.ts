@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DOOR_LIMIT_PERIOD, doorLimit, doorLimitKey } from '../src/limits';
+import { DOOR_LIMIT_PERIOD, doorLimit, doorLimitKey, pruneDoorLimits } from '../src/limits';
 import type { Env } from '../src/types';
 import { call, env, resetAll, seedTokens, TOKENS } from './helpers';
 
@@ -26,6 +26,24 @@ describe('door dampening', () => {
 
 		// The next window starts clean.
 		expect((await doorLimit(e, k, { now: now + DOOR_LIMIT_PERIOD * 1000, limit: 3 })).allowed).toBe(true);
+	});
+
+	it('prunes windows older than a day and keeps the current one', async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const current = Math.floor(nowSec / DOOR_LIMIT_PERIOD);
+		const stale = current - 24 * 60 - 10;
+		await env.DB.prepare('INSERT INTO door_limits (key, window, hits, updated_at) VALUES (?, ?, 1, ?)')
+			.bind('stale', stale, nowSec)
+			.run();
+		await env.DB.prepare('INSERT INTO door_limits (key, window, hits, updated_at) VALUES (?, ?, 1, ?)')
+			.bind('live', current, nowSec)
+			.run();
+
+		expect(await pruneDoorLimits(e, nowSec)).toBe(1);
+		const rows = await env.DB.prepare('SELECT key FROM door_limits ORDER BY key').all<{ key: string }>();
+		const keys = (rows.results ?? []).map((r) => r.key);
+		expect(keys).toContain('live');
+		expect(keys).not.toContain('stale');
 	});
 
 	it('keys by door and caller, so one noisy source cannot starve another', () => {

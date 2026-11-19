@@ -12,8 +12,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 const [id, scope = 'door'] = process.argv.slice(2);
-if (!id || !['door', 'potato'].includes(scope)) {
-	console.error('usage: mint-token.mjs <id> [door|potato]');
+// The token id *is* the job's `source`, and `source` is an enum in
+// contracts/job.schema.json. A door minted under another name would write jobs
+// the potato rejects, so the name is checked here rather than discovered later.
+const DOORS = ['telegram', 'shortcut'];
+const valid = (scope === 'door' && DOORS.includes(id)) || (scope === 'potato' && id === 'potato');
+if (!valid) {
+	console.error(`usage: mint-token.mjs <${DOORS.join('|')}> door   |   mint-token.mjs potato potato`);
 	process.exit(2);
 }
 

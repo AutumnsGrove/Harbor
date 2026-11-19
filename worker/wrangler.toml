@@ -36,6 +36,6 @@ simple = { limit = 30, period = 60 }
 [vars]
 # The bucket is private; /presign signs with a read-only R2 credential that is
 # set as a secret, not here. These three are the non-secret halves.
+# The orphan window defaults to seven days in src/constants.ts. Override it at
+# deploy time when you want an early sweep: `wrangler deploy --var ORPHAN_AGE_SECONDS:60`.
 R2_BUCKET = "harbor-intake"
-# Seven days, spelled out so the sweep is inspectable from the dashboard.
-ORPHAN_AGE_SECONDS = "604800"
