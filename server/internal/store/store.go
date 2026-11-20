@@ -11,6 +11,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -33,7 +34,10 @@ type Store struct {
 // fresh, proves it can write there, applies the pragmas, and runs the
 // migrations. Every failure is fatal and says which step failed — a store that
 // half-opens is worse than one that refuses.
-func Open(dataDir string) (*Store, error) {
+func Open(dataDir string) (*Store, error) { return OpenWith(dataDir, slog.Default()) }
+
+// OpenWith is Open with an explicit logger, for the boot integrity check.
+func OpenWith(dataDir string, log *slog.Logger) (*Store, error) {
 	if err := prepareDir(dataDir); err != nil {
 		return nil, err
 	}
@@ -77,6 +81,8 @@ func Open(dataDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate %s: %w", path, err)
 	}
+
+	checkOnBoot(db, log)
 
 	return &Store{db: db, path: path}, nil
 }
