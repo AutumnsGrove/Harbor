@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,7 +80,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	}
 
 	var appliedAt string
-	if err := db.QueryRow(`SELECT applied_at FROM schema_migrations WHERE version = '0001'`).Scan(&appliedAt); err != nil {
+	if err := db.QueryRow(`SELECT applied_at FROM schema_migrations WHERE version = 1`).Scan(&appliedAt); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasSuffix(appliedAt, "Z") {
@@ -101,12 +102,12 @@ func TestMigrateRecordsNothingWhenAMigrationFails(t *testing.T) {
 		t.Errorf("migrate() error = %q, want it to name the migration", err)
 	}
 
-	var recorded int
-	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&recorded); err != nil {
-		t.Fatal(err)
+	if n := tableCount(t, db, "schema_migrations"); n != 0 {
+		t.Errorf("a failed first migration left schema_migrations behind (%d)", n)
 	}
-	if recorded != 0 {
-		t.Errorf("schema_migrations recorded %d failed migrations, want 0", recorded)
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 0 {
+		t.Errorf("user_version = %d, %v after a failed migration, want 0", version, err)
 	}
 	var table string
 	if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='things'`).Scan(&table); err == nil {
@@ -159,13 +160,135 @@ func TestMigrateRejectsUnexpectedNames(t *testing.T) {
 }
 
 func TestShippedMigrationsLoad(t *testing.T) {
-	// Phase 0 ships an empty set with a .gitkeep; the point of the test is that
-	// the directory is readable and non-SQL files are ignored.
 	migrations, err := readMigrations(migrationsFS())
 	if err != nil {
 		t.Fatalf("readMigrations() error = %v", err)
 	}
-	if len(migrations) != 0 {
-		t.Errorf("the shipped set holds %d migrations, want 0 before phase 2", len(migrations))
+	if len(migrations) == 0 || migrations[0].version != 1 || migrations[0].name != "init" {
+		t.Fatalf("shipped migrations = %+v, want 0001_init first", migrations)
 	}
+}
+
+// plans/02 test 4: PRAGMA user_version is the fast check, schema_migrations the
+// history. They must move together.
+func TestMigrateKeepsUserVersionAndHistoryTogether(t *testing.T) {
+	db := rawDB(t)
+	files := fstest.MapFS{
+		"migrations/0001_first.sql":  {Data: []byte(`CREATE TABLE things (name TEXT);`)},
+		"migrations/0002_second.sql": {Data: []byte(`ALTER TABLE things ADD COLUMN size INTEGER;`)},
+	}
+	if err := migrate(context.Background(), db, files); err != nil {
+		t.Fatal(err)
+	}
+
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 2 {
+		t.Errorf("user_version = %d, want 2", version)
+	}
+	rows, err := db.Query(`SELECT version, name FROM schema_migrations ORDER BY version`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var v int
+		var name string
+		if err := rows.Scan(&v, &name); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%d:%s", v, name))
+	}
+	if strings.Join(got, ",") != "1:first,2:second" {
+		t.Errorf("history = %v, want [1:first 2:second]", got)
+	}
+}
+
+func TestMigrateRollsBackUserVersionWithAFailedMigration(t *testing.T) {
+	db := rawDB(t)
+	files := fstest.MapFS{
+		"migrations/0001_ok.sql":     {Data: []byte(`CREATE TABLE things (name TEXT);`)},
+		"migrations/0002_broken.sql": {Data: []byte(`ALTER TABLE things ADD COLUMN a; NOT SQL;`)},
+	}
+	if err := migrate(context.Background(), db, files); err == nil {
+		t.Fatal("migrate() error = nil, want the broken migration reported")
+	}
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 1 {
+		t.Errorf("user_version = %d after a failed 0002, want 1", version)
+	}
+}
+
+// design.md §7: numbering is strictly sequential in merge order, so a gap means
+// a migration went missing.
+func TestMigrateRejectsAGapInTheSequence(t *testing.T) {
+	files := fstest.MapFS{
+		"migrations/0001_a.sql": {Data: []byte("SELECT 1;")},
+		"migrations/0003_c.sql": {Data: []byte("SELECT 1;")},
+	}
+	err := migrate(context.Background(), rawDB(t), files)
+	if err == nil || !strings.Contains(err.Error(), "0002") {
+		t.Fatalf("migrate() error = %v, want it to name the missing 0002", err)
+	}
+}
+
+// Forward-only (design.md §3): a database written by a newer Harbor is refused,
+// not downgraded or half-understood.
+func TestMigrateRefusesADatabaseFromTheFuture(t *testing.T) {
+	db := rawDB(t)
+	if _, err := db.Exec(`PRAGMA user_version = 7`); err != nil {
+		t.Fatal(err)
+	}
+	files := fstest.MapFS{"migrations/0001_a.sql": {Data: []byte("SELECT 1;")}}
+	err := migrate(context.Background(), db, files)
+	if err == nil || !strings.Contains(err.Error(), "newer") {
+		t.Fatalf("migrate() error = %v, want a refusal that says the database is newer", err)
+	}
+}
+
+// Phase 0 shipped an empty migration set but its runner already created a
+// schema_migrations table, with a TEXT version. The potato's database has it.
+// Migration 0001 creates the design's shape, so the empty legacy table must be
+// replaced, and a legacy table that holds rows must stop the boot.
+func TestMigrateReplacesTheEmptyPhaseZeroHistoryTable(t *testing.T) {
+	db := rawDB(t)
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(context.Background(), db, migrationsFS()); err != nil {
+		t.Fatalf("migrate() over a phase-0 database error = %v", err)
+	}
+	var kind string
+	if err := db.QueryRow(`SELECT type FROM pragma_table_info('schema_migrations') WHERE name = 'version'`).Scan(&kind); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "INTEGER" {
+		t.Errorf("schema_migrations.version is %q, want INTEGER", kind)
+	}
+}
+
+func TestMigrateRefusesALegacyHistoryTableWithRows(t *testing.T) {
+	db := rawDB(t)
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
+		INSERT INTO schema_migrations VALUES ('0001', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(context.Background(), db, migrationsFS()); err == nil {
+		t.Fatal("migrate() error = nil, want a refusal rather than guessing at history")
+	}
+}
+
+func tableCount(t *testing.T, db *sql.DB, name string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = ?`, name).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
