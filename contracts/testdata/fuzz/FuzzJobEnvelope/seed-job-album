@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"01a1f502-8a8c-72af-9690-d916c0e136f2\",\"source\":\"telegram\",\"kind\":\"upload\",\"link\":null,\"note\":null,\"title\":null,\"group_key\":\"-100123:42\",\"created_at\":1795113825,\"blobs\":[{\"n\":1,\"key\":\"incoming/01a1f502-8a8c-72af-9690-d916c0e136f2/1\",\"content_type\":\"image/png\",\"bytes\":1024},{\"n\":2,\"key\":\"incoming/01a1f502-8a8c-72af-9690-d916c0e136f2/2\",\"content_type\":\"image/png\",\"bytes\":2048}]}")
