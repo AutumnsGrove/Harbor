@@ -1,0 +1,2 @@
+go test fuzz v1
+string("https://example.com/a%20b?q=a%26b&fbclid=1")

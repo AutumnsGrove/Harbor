@@ -134,7 +134,22 @@ func stripTracking(rawQuery string) string {
 		}
 		kept = append(kept, pair)
 	}
-	return strings.Join(kept, "&")
+	return escapeQuery(strings.Join(kept, "&"))
+}
+
+// escapeQuery percent-encodes whitespace and control bytes, which url.Parse
+// tolerates in a query but which would not survive being trimmed or pasted
+// again: a key must read back as itself.
+func escapeQuery(q string) string {
+	var b strings.Builder
+	for i := 0; i < len(q); i++ {
+		if c := q[i]; c <= ' ' || c == 0x7f {
+			fmt.Fprintf(&b, "%%%02X", c)
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 func isTracking(name string) bool {

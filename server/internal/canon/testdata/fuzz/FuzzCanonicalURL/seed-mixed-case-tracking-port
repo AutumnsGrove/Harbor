@@ -1,0 +1,2 @@
+go test fuzz v1
+string("https://ExAmple.COM:443/a/B?utm_source=x&id=7#frag")

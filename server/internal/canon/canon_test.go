@@ -44,6 +44,7 @@ func TestCanonicalURL(t *testing.T) {
 		{"unicode host is lowercased first", "https://BÜCHER.example/a", "https://xn--bcher-kva.example/a"},
 		{"punycode host is left alone", "https://xn--bcher-kva.example/a", "https://xn--bcher-kva.example/a"},
 		{"ipv6 host", "http://[::1]:80/a", "http://[::1]/a"},
+		{"space in query is escaped so the key survives a trim", "http://0? #", "http://0/?%20"},
 		{"percent-encoded path is kept", "https://example.com/a%20b", "https://example.com/a%20b"},
 	}
 	for _, tt := range tests {
