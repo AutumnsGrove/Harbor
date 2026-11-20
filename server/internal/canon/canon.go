@@ -16,6 +16,8 @@ import (
 // The rules (design.md §5, plans/02-core-library.md "Build-time decisions"):
 //   - the scheme must be http or https and must be present; it is never guessed
 //   - credentials in the URL are refused rather than silently stored or dropped
+//   - a host containing '%' (a decoded %25 or an IPv6 zone ID) is refused: it
+//     cannot be written back out and read in again as the same key
 //   - scheme and host are lowercased, a unicode host becomes punycode, and the
 //     default port (80 for http, 443 for https) is removed
 //   - the fragment is dropped, and so are utm_*, fbclid and gclid parameters;
@@ -100,7 +102,10 @@ func canonicalHost(host string) (string, error) {
 		return "", errors.New("canon: URL has no host")
 	}
 	host = strings.ToLower(host)
-	if strings.ContainsAny(host, " \t\r\n/\\?#@[]") {
+	// '%' can only arrive here by url.Parse decoding %25 in the host (or an IPv6
+	// zone ID). Re-emitting it unescaped would not parse back to the same key,
+	// and neither is a hostname a library of web pages can mean.
+	if strings.ContainsAny(host, " \t\r\n/\\?#@[]%") {
 		return "", fmt.Errorf("canon: host %q is not valid", host)
 	}
 	labels := strings.Split(host, ".")

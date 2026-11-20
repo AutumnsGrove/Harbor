@@ -81,6 +81,9 @@ func TestCanonicalURLRejects(t *testing.T) {
 		{"port out of range", "https://example.com:99999/a"},
 		{"control character", "https://example.com/a\x00b"},
 		{"space in host", "https://exa mple.com/a"},
+		{"percent escape in host", "http://exa%25mple.com/a"},
+		{"percent escape that would change on re-parse", "http://exa%25ab.com/a"},
+		{"ipv6 zone id", "http://[fe80::1%25eth0]/a"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
