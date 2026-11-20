@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"x\",\"source\":\"shortcut\",\"kind\":\"link\",\"created_at\":1}")

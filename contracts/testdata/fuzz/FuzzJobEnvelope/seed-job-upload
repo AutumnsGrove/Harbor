@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"id\":\"01a1f502-8a8c-72af-9690-d916c0e136f1\",\"source\":\"shortcut\",\"kind\":\"upload\",\"link\":null,\"note\":\"a photo\",\"title\":null,\"group_key\":null,\"created_at\":1795113824,\"blobs\":[{\"n\":0,\"key\":\"incoming/01a1f502-8a8c-72af-9690-d916c0e136f1/0\",\"content_type\":\"image/jpeg\",\"bytes\":19922944}]}")
