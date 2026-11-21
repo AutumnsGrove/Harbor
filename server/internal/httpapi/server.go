@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
+	"github.com/AutumnsGrove/Harbor/server/internal/store"
 )
 
 const (
@@ -58,15 +59,30 @@ type Server struct {
 
 	started time.Time
 	now     func() time.Time
+
+	// library is nil in phase-0 tests and in a binary built without a database.
+	// /api/status answers either way; a count it cannot read is a log line, not
+	// a failed request (design.md §3).
+	library *store.Store
+}
+
+// Option adds a dependency to a Server. It is a functional option so the
+// phase-0 tests and the update endpoints keep their three-argument New.
+type Option func(*Server)
+
+// WithStore lets /api/status report the library's counts. Passing nil is the
+// same as not calling it.
+func WithStore(library *store.Store) Option {
+	return func(s *Server) { s.library = library }
 }
 
 // New builds a Server around an embedded frontend. assets is web.Assets() in the
 // binary and an in-memory fs in tests.
-func New(cfg build.Config, log *slog.Logger, assets fs.FS) *Server {
+func New(cfg build.Config, log *slog.Logger, assets fs.FS, opts ...Option) *Server {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Server{
+	s := &Server{
 		cfg:          cfg,
 		log:          log,
 		assets:       assets,
@@ -75,6 +91,10 @@ func New(cfg build.Config, log *slog.Logger, assets fs.FS) *Server {
 		started:      time.Now(),
 		now:          time.Now,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Handler returns the whole middleware chain. Order matters and mirrors
