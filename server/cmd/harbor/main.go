@@ -74,6 +74,26 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	}
 }
 
+// enrichmentProcessor builds the enrichment stage. With a Nova key it is the
+// real pipeline, and its prompt version and embedding model come from the
+// adapter's constants so the row records what was actually called; without a
+// key it returns nil, which is the phase-2 shell, so a missing key never stops
+// a save (design.md §6).
+func enrichmentProcessor(cfg build.Config, library *store.Store, log *slog.Logger) queue.Processor {
+	if cfg.OpenRouterAPIKey == "" {
+		log.Warn("OPENROUTER_API_KEY is not set; enrichment will only mark items ready", "env", build.EnvOpenRouterAPIKey)
+		return nil
+	}
+	novaClient := enrichnova.New(enrichnova.Config{APIKey: cfg.OpenRouterAPIKey, Log: log})
+	pipeline := enrich.New(
+		enrich.HTTPFetcher{Client: fetch.New(fetch.WithUserAgent("Harbor/" + build.Version() + " (+https://github.com/AutumnsGrove/Harbor)"))},
+		novaClient, novaClient, novaClient, library, log,
+	)
+	pipeline.PromptVersion = enrichnova.PromptVersion
+	pipeline.EmbeddingModel = enrichnova.EmbedModel
+	return pipeline
+}
+
 // serve is the container's whole life: load the environment contract, build the
 // handler, listen, and stop cleanly when the orchestrator asks.
 func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) error {
@@ -103,22 +123,7 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 	workCtx, stopWork := context.WithCancel(context.Background())
 	defer stopWork()
 
-	// With a Nova key the enrichment stage is the real pipeline; without one it
-	// is phase 2's shell, so a missing key never stops a save (design.md §6).
-	var processor queue.Processor
-	if cfg.OpenRouterAPIKey != "" {
-		novaClient := enrichnova.New(enrichnova.Config{APIKey: cfg.OpenRouterAPIKey, Log: log})
-		pipeline := enrich.New(
-			enrich.HTTPFetcher{Client: fetch.New(fetch.WithUserAgent("Harbor/" + build.Version() + " (+https://github.com/AutumnsGrove/Harbor)"))},
-			novaClient, novaClient, novaClient, library, log,
-		)
-		pipeline.PromptVersion = enrichnova.PromptVersion
-		pipeline.EmbeddingModel = enrichnova.EmbedModel
-		processor = pipeline
-	} else {
-		log.Warn("OPENROUTER_API_KEY is not set; enrichment will only mark items ready", "env", build.EnvOpenRouterAPIKey)
-	}
-	go queue.NewEnricher(library, processor, log).Run(workCtx)
+	go queue.NewEnricher(library, enrichmentProcessor(cfg, library, log), log).Run(workCtx)
 
 	// pending is what /api/pending shows: the saves still at the Worker. Nil is
 	// a valid state and answers an empty list.
