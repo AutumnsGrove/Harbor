@@ -4,7 +4,7 @@
 	// phases land; what is here is real data from /api/items.
 	import { onMount } from 'svelte';
 
-	import { api, isApiError, type Item } from '#lib/api';
+	import { api, isApiError, type Item, type PendingJob } from '#lib/api';
 
 	import Card from '../lib/components/Card.svelte';
 	import Composer from '../lib/components/Composer.svelte';
@@ -17,6 +17,9 @@
 	let problem = $state<string | null>(null);
 	let composing = $state(false);
 	let toast = $state<string | null>(null);
+	let pending = $state<PendingJob[]>([]);
+	let pendingProblem = $state<string | null>(null);
+	let lastPending = new Set<string>();
 
 	let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -67,9 +70,50 @@
 		composing = false;
 		say(merged ? `Merged into “${item.title || item.url}”` : 'Saved.');
 		void load();
+		void loadPending();
 	}
 
-	onMount(load);
+	// The pending window follows the 30 s loop, but only while the tab is
+	// visible. A job that disappears from the list has become an item, which is
+	// the moment to reload the feed (design.md §5).
+	async function loadPending() {
+		try {
+			const answer = await api.pending.list();
+			const ids = new Set(answer.jobs.map((job) => job.id));
+			const finished = [...lastPending].some((id) => !ids.has(id));
+			pending = answer.jobs;
+			pendingProblem = null;
+			lastPending = ids;
+			if (finished) await load();
+		} catch (error) {
+			pendingProblem = isApiError(error) ? error.message : 'The Worker is not answering.';
+		}
+	}
+
+	function pendingTitle(job: PendingJob): string {
+		if (!job.url) return job.title;
+		try {
+			return job.title === job.url ? new URL(job.url).hostname.replace(/^www\./, '') : job.title;
+		} catch {
+			return job.title;
+		}
+	}
+
+	function pendingAge(iso: string): string {
+		const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+		if (seconds < 60) return 'now';
+		if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+		return `${Math.round(seconds / 3600)}h`;
+	}
+
+	onMount(() => {
+		void load();
+		void loadPending();
+		const timer = setInterval(() => {
+			if (document.visibilityState === 'visible') void loadPending();
+		}, 30_000);
+		return () => clearInterval(timer);
+	});
 </script>
 
 <svelte:head>
@@ -84,7 +128,7 @@
 		<p>{problem}</p>
 		<button class="btn" onclick={load}><Icon name="refresh" /> Try again</button>
 	</div>
-{:else if items.length === 0}
+{:else if items.length === 0 && pending.length === 0}
 	<!-- The real first-run screen from the mockup. Import is a stub until
 	     phase 5; the composer works now, so it is a button, not a promise. -->
 	<header class="pagehead">
@@ -138,7 +182,25 @@
 		</div>
 	{/if}
 
+	{#if pendingProblem}
+		<p class="pending-note" role="status">
+			<Icon name="alert" size={14} /> Pending saves are unavailable right now. The library itself is fine.
+		</p>
+	{/if}
+
 	<div class="feed">
+		{#each pending as job (job.id)}
+			<article class="card pending" aria-label={`${job.title} — saving`}>
+				<div class="cover">
+					<span class="kindmark"><Icon name="clock" size={20} /></span>
+				</div>
+				<div class="body">
+					<h3>{pendingTitle(job)}</h3>
+					<p class="sub"><span>{job.source}</span><span>· {pendingAge(job.createdAt)}</span></p>
+					<p class="more">Waiting for the potato to pull this save.</p>
+				</div>
+			</article>
+		{/each}
 		{#each items as item (item.id)}
 			<Card {item} />
 		{/each}

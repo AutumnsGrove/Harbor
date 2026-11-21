@@ -75,6 +75,14 @@ describe('the API client', () => {
 		expect(path).toBe('/api/items?limit=20&cursor=abc%2B%2F%3D&deleted=true');
 	});
 
+	it('reads the pending window through the potato', async () => {
+		const fetch = vi.fn(async () => respond({ jobs: [{ id: 'job-1', title: 'x' }] }));
+		vi.stubGlobal('fetch', fetch);
+
+		await expect(api.pending.list()).resolves.toEqual({ jobs: [{ id: 'job-1', title: 'x' }] });
+		expect((fetch.mock.calls[0] as unknown as [string])[0]).toBe('/api/pending');
+	});
+
 	it('posts to the update endpoints without a body', async () => {
 		const fetch = vi.fn(async () => respond({ status: 'checking' }, { status: 202 }));
 		vi.stubGlobal('fetch', fetch);

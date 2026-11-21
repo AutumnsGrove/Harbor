@@ -157,7 +157,7 @@ transaction and takes a `VACUUM INTO` snapshot first when the DB is non-empty.
 - [ ] `scheduler` skeleton: a registry of named tasks whose last run is persisted in `task_runs`, so
       a reboot never skips a day (later phases register their tasks into it).
 - [x] `harbor replay --since <time>` using the Worker's replay route.
-- [ ] Pending window: `GET /jobs/pending` (queued + claimed, read-only) renders as greyed cards at
+- [x] Pending window: `GET /jobs/pending` (queued + claimed, read-only) renders as greyed cards at
       the top of the home grid, with the source icon. They clear on the next refresh when they become
       items.
 - [x] `POST /api/items` (in-app save) writing locally, then handing the item to the enrichment queue.
@@ -224,8 +224,9 @@ The server side is complete and the shell has its first real screens. What is in
   path), `model`, `canon`, `workerclient`, `queue` (ingest + the enrichment shell), `harbor replay`.
 - `POST/GET /api/items`, `GET/PATCH/DELETE /api/items/:id`, `POST /api/items/:id/restore`,
   `GET /api/items/lookup` for the merge warning, and real counts in `/api/status`.
-- Home (masonry feed, first run), the composer with the server's merge answer, the item page, and
-  Recently deleted in Settings.
+- Home (masonry feed, first run, the pending cards), the composer with the server's merge answer, the
+  item page, and Recently deleted in Settings. `GET /api/pending` proxies the Worker's read-only list
+  and answers empty when no Worker is configured.
 
 Decisions the plan left open, now made:
 
@@ -245,8 +246,8 @@ Decisions the plan left open, now made:
 
 Still open in this phase:
 
-- The pending window: `GET /jobs/pending` is cliented but not exposed by the Go server or drawn as
-  greyed cards. It is the remaining exit-demo step that is not just "deploy and look".
 - The scheduler skeleton (`task_runs` registry). Nothing in phase 2 registers a task, so this can
-  land with the first phase that needs it; the column and table already exist.
+  land with the first phase that needs it; the table already exists in `0001`.
 - The potato demo itself: curl a save, watch it appear, re-save, edit, delete, replay, kill mid-poll.
+  The same flow has been run locally against a fake Worker (claim → item → done, `replay` twice with
+  no change), which is what the automated tests encode; the deploy is what is missing.

@@ -34,19 +34,20 @@
 			match = null;
 			return;
 		}
+		let cancelled = false;
 		const timer = setTimeout(async () => {
 			try {
 				const answer = await api.items.lookup(candidate);
-				if (url.trim() === candidate && answer.exists && answer.item) {
-					match = answer.item;
-				} else {
-					match = null;
-				}
+				if (cancelled || url.trim() !== candidate) return;
+				match = answer.exists && answer.item ? answer.item : null;
 			} catch {
-				match = null;
+				if (!cancelled) match = null;
 			}
 		}, 350);
-		return () => clearTimeout(timer);
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+		};
 	});
 
 	function message(error: unknown): string {

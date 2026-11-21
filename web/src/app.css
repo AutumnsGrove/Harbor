@@ -939,3 +939,28 @@ input.switch:checked::after {
 		font-size: var(--t-2xl);
 	}
 }
+
+/* pending cards: real saves that are still at the Worker (design.md §5) */
+.card.pending {
+	cursor: default;
+}
+
+.card.pending .cover {
+	background: var(--amb-soft);
+	border: 1px dashed rgba(242, 184, 102, 0.45);
+}
+
+.card.pending .kindmark {
+	color: var(--amb);
+	background: none;
+	box-shadow: none;
+}
+
+.pending-note {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 18px;
+	color: var(--amb);
+	font-size: var(--t-s);
+}

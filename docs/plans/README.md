@@ -200,7 +200,7 @@ happened, and `make check` is green on `main`.
 | — | Spikes | ◐ S1, S2, S5, S7, S10, S11 answered (S7 → 8897); S3, S4, S6, S8, S9, S12 pending |
 | 0 | Foundations | ✅ deployed 2026-11-18, updated to `r56.4c93aa8` and rollback-drilled 2026-11-19 |
 | 1 | Worker intake | ✅ deployed 2026-11-19; exit demo run, `/presign` still needs its R2 credential |
-| 2 | Core library | ◐ store, Worker ingest, items API and the library UI are in the tree and green; pending strip and the potato demo outstanding |
+| 2 | Core library | ◐ store, Worker ingest, items API, pending window and the library UI are in the tree and green; the potato demo and scheduler skeleton outstanding |
 | 3 | Enrichment | ☐ |
 | 4 | Front doors | ☐ |
 | 5 | Import | ☐ |

@@ -100,6 +100,10 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 	workCtx, stopWork := context.WithCancel(context.Background())
 	defer stopWork()
 	go queue.NewEnricher(library, log).Run(workCtx)
+
+	// pending is what /api/pending shows: the saves still at the Worker. Nil is
+	// a valid state and answers an empty list.
+	var pending httpapi.PendingSource
 	switch {
 	case cfg.WorkerURL == "" && cfg.WorkerToken == "":
 		log.Warn("no Worker configured; remote saves will not be pulled", "env", build.EnvWorkerURL)
@@ -110,12 +114,13 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 		if err != nil {
 			return err
 		}
+		pending = client
 		go queue.NewLoop(queue.NewIngestor(client, library, log)).Run(workCtx)
 	}
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           httpapi.New(cfg, log, web.Assets(), httpapi.WithStore(library)).Handler(),
+		Handler:           httpapi.New(cfg, log, web.Assets(), httpapi.WithStore(library), httpapi.WithPending(pending)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      120 * time.Second,

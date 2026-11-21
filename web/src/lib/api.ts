@@ -117,6 +117,24 @@ export type Item = {
 	deletedAt?: string;
 };
 
+/**
+ * A save the Worker has accepted and the potato has not pulled yet. The card is
+ * greyed out, and opening it does not claim anything (design.md §5).
+ */
+export type PendingJob = {
+	id: string;
+	title: string;
+	url: string | null;
+	source: ItemSource;
+	kind: string;
+	status: string;
+	createdAt: string;
+};
+
+export type PendingResponse = {
+	jobs: PendingJob[];
+};
+
 export type ItemListResponse = {
 	items: Item[];
 	/** Opaque; pass it back to get the next page. null when there is no more. */
@@ -173,6 +191,11 @@ export const api = {
 		/** The merge question lives on the server; the UI never re-implements it. */
 		lookup: (url: string) =>
 			request<LookupResponse>(`/api/items/lookup?url=${encodeURIComponent(url)}`)
+	},
+
+	pending: {
+		/** Read-only: the Worker's queued + claimed jobs that are not items yet. */
+		list: () => request<PendingResponse>('/api/pending')
 	},
 
 	update: {
