@@ -815,39 +815,20 @@ input.switch:checked::after {
 	color: var(--ink);
 }
 
-.item-grid {
+/* One column until phase 6 lands covers: an item with no image is prose, and
+   an empty 4:3 placeholder is not a cover. The media column returns with it. */
+.item-page {
 	display: grid;
-	grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-	gap: 48px;
-	align-items: start;
-}
-
-.item-aside {
-	display: grid;
-	gap: 16px;
-	position: sticky;
-	top: 84px;
-}
-
-.item-cover {
-	display: grid;
-	place-items: center;
-	gap: 10px;
-	aspect-ratio: 4 / 3;
-	border-radius: var(--r-l);
-	background:
-		radial-gradient(120% 90% at 20% 0%, var(--surf2) 0%, transparent 60%),
-		linear-gradient(140deg, var(--surf2), var(--surf) 55%, var(--surf3));
-	color: var(--dim);
-	font-size: var(--t-s);
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
+	gap: 22px;
+	max-width: 860px;
+	min-width: 0;
+	margin: 0 auto;
 }
 
 .item-source {
-	display: flex;
+	display: inline-flex;
 	align-items: center;
-	gap: 8px;
+	gap: 6px;
 	color: var(--mute);
 	font-size: var(--t-s);
 	overflow-wrap: anywhere;
@@ -857,50 +838,257 @@ input.switch:checked::after {
 	color: var(--acc);
 }
 
-.meta {
+/* where an item came from and when, at the bottom like the mockup */
+.prov {
 	display: grid;
-	gap: 10px;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 8px 20px;
 	margin: 0;
 	font-size: var(--t-s);
 }
 
-.meta > div {
-	display: flex;
-	justify-content: space-between;
-	gap: 12px;
-	border-top: 1px solid var(--line);
-	padding-top: 10px;
-}
-
-.meta dt {
+.prov dt {
 	color: var(--dim);
 }
 
-.meta dd {
+.prov dd {
 	margin: 0;
 	color: var(--mute);
-	text-align: right;
-}
-
-.item-body {
-	display: grid;
-	gap: 22px;
-	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .item-title {
+	display: block;
+	width: 100%;
 	height: auto;
 	padding: 6px 8px;
 	margin: -6px -8px 0;
 	background: none;
 	font: 600 var(--t-3xl) / 1.12 var(--font);
 	letter-spacing: -0.025em;
-	text-wrap: balance;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	overflow: hidden;
+	resize: none;
 }
 
 .item-title:hover,
 .item-title:focus {
 	background: var(--surf);
+}
+
+/* the header line under the title: kind pill, host, saved day */
+.metaline {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 12px;
+	margin-top: -10px;
+	color: var(--mute);
+	font-size: var(--t-s);
+}
+
+.metaline .dot {
+	width: 3px;
+	height: 3px;
+	border-radius: 50%;
+	background: var(--dim);
+}
+
+/* the kind is editable here, so the badge is a select in a pill */
+.kindpick {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 11px;
+	border-radius: var(--pill);
+	background: rgba(255, 255, 255, 0.07);
+	color: var(--ink);
+	cursor: pointer;
+}
+
+.kindpick:hover {
+	background: var(--surf2);
+}
+
+.kindpick select {
+	all: unset;
+	cursor: pointer;
+	font: inherit;
+	padding-right: 1px;
+}
+
+/* the model's summary: prose, and labelled as the model's */
+.sumbox {
+	display: grid;
+	gap: 8px;
+}
+
+.sumbox p {
+	font-size: var(--t-l);
+	line-height: 1.55;
+	text-wrap: pretty;
+}
+
+/* one section per fact group; the rule after the eyebrow is the divider */
+.sec {
+	display: grid;
+	gap: 18px;
+}
+
+.sec > .eyebrow {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.sec > .eyebrow::after {
+	content: '';
+	flex: 1;
+	height: 1px;
+	background: var(--line);
+}
+
+/* facts sit next to each other rather than stretching across the column */
+.facts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px 40px;
+	margin: 0;
+}
+
+.facts > div {
+	min-width: 110px;
+}
+
+.facts dt,
+.lab {
+	margin-bottom: 4px;
+	color: var(--dim);
+	font-size: var(--t-xs);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.facts dd {
+	margin: 0;
+	font-weight: 500;
+}
+
+.cols2 {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px 28px;
+}
+
+.cols2 > div {
+	min-width: 0;
+}
+
+.ing li {
+	padding: 7px 0;
+	border-top: 1px solid var(--line);
+}
+
+.steps {
+	counter-reset: step;
+	display: grid;
+	gap: 12px;
+}
+
+.steps li {
+	counter-increment: step;
+	display: flex;
+	gap: 14px;
+}
+
+.steps li::before {
+	content: counter(step);
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	background: var(--surf2);
+	color: var(--mute);
+	font-size: var(--t-s);
+}
+
+.pricerow {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 6px 16px;
+}
+
+.price {
+	font-size: var(--t-3xl);
+	font-weight: 600;
+	letter-spacing: -0.02em;
+}
+
+p.okc {
+	color: var(--ok);
+}
+
+p.ambc {
+	color: var(--amb);
+}
+
+.abstract,
+.addr {
+	color: var(--mute);
+	line-height: 1.6;
+}
+
+.hours li {
+	padding: 6px 0;
+	border-top: 1px solid var(--line);
+	color: var(--mute);
+	font-size: var(--t-s);
+}
+
+.hours li:first-child {
+	border-top: 0;
+}
+
+.tagrow {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 4px 10px;
+	border-radius: var(--pill);
+	background: var(--surf);
+	color: var(--mute);
+	font-size: var(--t-s);
+}
+
+.hint {
+	color: var(--dim);
+	font-size: var(--t-s);
+	line-height: 1.5;
+}
+
+.dim {
+	color: var(--dim);
+}
+
+.ambc {
+	color: var(--amb);
+}
+
+/* the spacer the actions row already uses, so Save and Delete sit apart */
+.sp {
+	flex: 1;
 }
 
 .actions {
@@ -916,17 +1104,8 @@ input.switch:checked::after {
 }
 
 @media (max-width: 900px) {
-	.item-grid {
-		grid-template-columns: minmax(0, 1fr);
-		gap: 24px;
-	}
-
-	.item-aside {
-		position: static;
-	}
-
-	.item-cover {
-		aspect-ratio: 16 / 7;
+	.item-page {
+		max-width: none;
 	}
 }
 
@@ -937,6 +1116,10 @@ input.switch:checked::after {
 
 	.item-title {
 		font-size: var(--t-2xl);
+	}
+
+	.cols2 {
+		grid-template-columns: minmax(0, 1fr);
 	}
 }
 

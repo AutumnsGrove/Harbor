@@ -1,41 +1,50 @@
 <script lang="ts">
-	// The item page skeleton: title, note, kind, and the delete/restore pair.
-	// Media, reader and highlights arrive with phases 6 and 8; the placeholders
-	// say so rather than pretending.
+	// The item page: title, the kind picker, the model's summary, a per-kind panel
+	// built on details_json, the owner's note, tags and provenance. The reader and
+	// highlights arrive with phase 8 and media with phase 6; nothing here pretends
+	// otherwise.
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 
-	import { api, isApiError, type Item, type ItemKind } from '#lib/api';
+	import { api, isApiError, type Item } from '#lib/api';
+	import { kindIcons, kinds } from '#lib/kinds';
 
 	import Icon from '../../../lib/components/Icon.svelte';
-
-	const kinds: { value: ItemKind; label: string }[] = [
-		{ value: 'article', label: 'Article' },
-		{ value: 'product', label: 'Product' },
-		{ value: 'book', label: 'Book' },
-		{ value: 'recipe', label: 'Recipe' },
-		{ value: 'video', label: 'Video' },
-		{ value: 'tweet', label: 'Post' },
-		{ value: 'note', label: 'Note' },
-		{ value: 'image', label: 'Image' },
-		{ value: 'paper', label: 'Paper' },
-		{ value: 'podcast', label: 'Podcast' },
-		{ value: 'place', label: 'Place' },
-		{ value: 'movie', label: 'Movie' }
-	];
+	import KindPanel from '../../../lib/components/KindPanel.svelte';
+	import SummaryBlock from '../../../lib/components/SummaryBlock.svelte';
+	import TagRow from '../../../lib/components/TagRow.svelte';
 
 	const id = $derived(page.params.id ?? '');
 
 	let item = $state<Item | null>(null);
 	let title = $state('');
 	let note = $state('');
-	let kind = $state<ItemKind>('article');
+	let kind = $state<Item['kind']>('article');
 	let loading = $state(true);
 	let saving = $state(false);
 	let confirmingDelete = $state(false);
 	let problem = $state<string | null>(null);
 	let notice = $state<string | null>(null);
+	let titleEl = $state<HTMLTextAreaElement | null>(null);
+	let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// A confirmation is not a permanent label: it fades so the page is not left
+	// saying "Saved." twenty minutes later.
+	function say(message: string) {
+		notice = message;
+		clearTimeout(noticeTimer);
+		noticeTimer = setTimeout(() => (notice = null), 4000);
+	}
+
+	// The title is a textarea so a long one wraps instead of clipping; it has to
+	// be told its height on every change, including the first load.
+	$effect(() => {
+		void title;
+		if (!titleEl) return;
+		titleEl.style.height = 'auto';
+		titleEl.style.height = `${titleEl.scrollHeight}px`;
+	});
 
 	const dirty = $derived(
 		item !== null && (title !== item.title || note !== item.note || kind !== item.kind)
@@ -73,7 +82,7 @@
 		try {
 			const answer = await api.items.update(item.id, { title, note, kind });
 			adopt(answer.item);
-			notice = 'Saved.';
+			say('Saved.');
 		} catch (error) {
 			problem = message(error);
 		} finally {
@@ -102,7 +111,7 @@
 			const answer = await api.items.restore(item.id);
 			adopt(answer.item);
 			confirmingDelete = false;
-			notice = 'Restored to the library.';
+			say('Restored to the library.');
 		} catch (error) {
 			problem = message(error);
 		} finally {
@@ -119,6 +128,14 @@
 		}
 	}
 
+	function day(iso: string): string {
+		return new Date(iso).toLocaleDateString(undefined, {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric'
+		});
+	}
+
 	function when(iso: string): string {
 		return new Date(iso).toLocaleString(undefined, {
 			year: 'numeric',
@@ -128,7 +145,6 @@
 			minute: '2-digit'
 		});
 	}
-
 	onMount(load);
 </script>
 
@@ -136,94 +152,135 @@
 	<title>{item ? item.title || 'Item' : 'Item'} — Harbor</title>
 </svelte:head>
 
-<p class="breadcrumb">
-	<a href="/"><Icon name="arrow-left" size={15} /> Library</a>
-</p>
+<div class="item-page">
+	<p class="breadcrumb">
+		<a href="/"><Icon name="arrow-left" size={15} /> Library</a>
+	</p>
 
-{#if loading}
-	<div class="empty"><p class="muted">Opening the item…</p></div>
-{:else if !item}
-	<div class="empty">
-		<h3>{problem ?? 'No such item.'}</h3>
-		<p>It may have been purged, or the id is wrong.</p>
-		<a class="btn" href="/">Back to the library</a>
-	</div>
-{:else if item}
-	{@const entry = item}
-	{#if entry.deletedAt}
-		<div class="callout amb banner" role="status">
-			<Icon name="trash" size={16} />
-			<span>This item is in Recently deleted. It is hidden from the library until restored.</span>
-			<button class="btn sm" onclick={restore} disabled={saving}>Restore</button>
+	{#if loading}
+		<div class="empty"><p class="muted">Opening the item…</p></div>
+	{:else if !item}
+		<div class="empty">
+			<h3>{problem ?? 'No such item.'}</h3>
+			<p>It may have been purged, or the id is wrong.</p>
+			<a class="btn" href="/">Back to the library</a>
 		</div>
-	{/if}
-
-	<div class="item-grid">
-		<aside class="item-aside">
-			<div class="item-cover">
-				<Icon name={entry.kind === 'note' ? 'file-text' : 'link'} size={30} />
-				<span>{kinds.find((k) => k.value === entry.kind)?.label ?? 'Item'}</span>
+	{:else if item}
+		{@const entry = item}
+		{#if entry.deletedAt}
+			<div class="callout amb banner" role="status">
+				<Icon name="trash" size={16} />
+				<span>This item is in Recently deleted. It is hidden from the library until restored.</span>
+				<button class="btn sm" onclick={restore} disabled={saving}>Restore</button>
 			</div>
-			{#if entry.url}
-				<a class="item-source" href={entry.url} target="_blank" rel="noreferrer">
-					<span>{hostOf(entry.url)}</span>
-					<Icon name="external-link" size={14} />
-				</a>
-			{/if}
-			<dl class="meta">
-				<div><dt>Source</dt><dd>{entry.source}</dd></div>
-				<div><dt>Saved</dt><dd>{when(entry.savedAt)}</dd></div>
-				{#if entry.createdAt !== entry.savedAt}
-					<div><dt>First saved</dt><dd>{when(entry.createdAt)}</dd></div>
-				{/if}
-				{#if entry.readLater}
-					<div><dt>Space</dt><dd class="ambc">Read later</dd></div>
-				{/if}
-			</dl>
-			{#if entry.state === 'failed'}
-				<p class="pill amb"><Icon name="alert" size={13} /> Enrichment failed</p>
-			{/if}
-		</aside>
+		{/if}
 
-		<div class="item-body">
-			<input class="in item-title" bind:value={title} aria-label="Title" placeholder="Untitled" />
+		<textarea
+			class="in item-title"
+			bind:value={title}
+			bind:this={titleEl}
+			rows={1}
+			aria-label="Title"
+			placeholder="Untitled"
+		></textarea>
 
-			<label class="field">
-				<span>Note</span>
-				<textarea class="ta" bind:value={note} placeholder="Anything worth remembering"></textarea>
-			</label>
-
-			<div class="field">
-				<label for="item-kind">Kind</label>
-				<select class="in" id="item-kind" bind:value={kind}>
+		<div class="metaline">
+			<label class="kindpick">
+				<Icon name={kindIcons[entry.kind]} size={14} />
+				<select bind:value={kind} aria-label="Kind">
 					{#each kinds as option (option.value)}
 						<option value={option.value}>{option.label}</option>
 					{/each}
 				</select>
-			</div>
-
-			{#if problem}
-				<p class="callout amb" role="status">{problem}</p>
-			{:else if notice}
-				<p class="callout ok" role="status">{notice}</p>
+			</label>
+			{#if entry.url}
+				<a class="item-source" href={entry.url} target="_blank" rel="noreferrer">
+					{hostOf(entry.url)}
+					<Icon name="external-link" size={13} />
+				</a>
+				<i class="dot"></i>
 			{/if}
-
-			<div class="actions">
-				<button class="btn pri" onclick={save} disabled={saving || !dirty}>
-					{saving ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
-				</button>
-				<span class="sp"></span>
-
-				{#if confirmingDelete && !entry.deletedAt}
-					<span class="dim">Move to Recently deleted?</span>
-					<button class="btn ghost" onclick={() => (confirmingDelete = false)}>Cancel</button>
-					<button class="btn danger" onclick={remove} disabled={saving}>Delete</button>
-				{:else if !entry.deletedAt}
-					<button class="btn ghost" onclick={() => (confirmingDelete = true)} disabled={saving}>
-						<Icon name="trash" /> Delete
-					</button>
-				{/if}
-			</div>
+			<span>Saved {day(entry.savedAt)}</span>
+			{#if entry.readLater}
+				<span class="pill amb"><Icon name="clock" size={13} /> Read later</span>
+			{/if}
+			{#if entry.state === 'failed'}
+				<span class="pill amb"><Icon name="alert" size={13} /> Enrichment failed</span>
+			{/if}
 		</div>
-	</div>
-{/if}
+
+		{#if entry.state === 'failed'}
+			<p class="callout amb" role="status">
+				<Icon name="alert" size={15} />
+				<span>{entry.lastError || 'Enrichment failed. Retry it from the library when you are ready.'}</span>
+			</p>
+		{/if}
+
+		{#if problem}
+			<p class="callout amb" role="status">{problem}</p>
+		{:else if notice}
+			<p class="callout ok" role="status">{notice}</p>
+		{/if}
+
+		<div class="actions">
+			{#if dirty}
+				<button class="btn pri" onclick={save} disabled={saving}>
+					{saving ? 'Saving…' : 'Save changes'}
+				</button>
+			{/if}
+			<span class="sp"></span>
+
+			{#if confirmingDelete && !entry.deletedAt}
+				<span class="dim">Move to Recently deleted?</span>
+				<button class="btn ghost" onclick={() => (confirmingDelete = false)}>Cancel</button>
+				<button class="btn danger" onclick={remove} disabled={saving}>Delete</button>
+			{:else if !entry.deletedAt}
+				<button class="btn ghost" onclick={() => (confirmingDelete = true)} disabled={saving}>
+					<Icon name="trash" /> Delete
+				</button>
+			{/if}
+		</div>
+
+		<SummaryBlock summary={entry.summary} />
+
+		<KindPanel kind={entry.kind} details={entry.details} />
+
+		<label class="field">
+			<span>Your note</span>
+			<textarea class="ta" bind:value={note} placeholder="Anything worth remembering"></textarea>
+		</label>
+
+		<section class="sec">
+			<div class="eyebrow">Tags</div>
+			{#if entry.tags?.length}
+				<TagRow tags={entry.tags} />
+			{:else}
+				<p class="hint">
+					{entry.state === 'failed'
+						? 'No tags: enrichment failed, so none were added.'
+						: 'No tags yet. Enrichment adds them, and they are edited once Spaces arrive.'}
+				</p>
+			{/if}
+		</section>
+
+		<section class="sec">
+			<div class="eyebrow">Details</div>
+			<dl class="prov">
+				{#if entry.url}
+					<dt>Address</dt>
+					<dd>{entry.url}</dd>
+				{/if}
+				<dt>Saved</dt>
+				<dd>{when(entry.savedAt)}, via {entry.source}</dd>
+				{#if entry.createdAt !== entry.savedAt}
+					<dt>First saved</dt>
+					<dd>{when(entry.createdAt)}</dd>
+				{/if}
+				{#if entry.deletedAt}
+					<dt>Status</dt>
+					<dd>In Recently deleted</dd>
+				{/if}
+			</dl>
+		</section>
+	{/if}
+</div>

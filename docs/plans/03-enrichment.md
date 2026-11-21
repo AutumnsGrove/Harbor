@@ -1,6 +1,7 @@
 # Phase 3 — Enrichment: the library organises itself
 
-**Status:** in progress — fetch, extract, the tag/write path, the pipeline and the Nova adapters landed 2026-11-21; the UI and scored set still to come · **Design refs:** [§6](../design.md#6-enrichment-pipeline),
+**Status:** in progress — the pipeline, the Nova adapters, the per-kind item page and the first live
+run all landed 2026-11-21; the scored fixture set still to come · **Design refs:** [§6](../design.md#6-enrichment-pipeline),
 [§8](../design.md#8-search) (FTS only), [C1–C5](../open-questions.md),
 [§9](../design.md#9-ui-sveltekit-embedded) (attention strip, kind badges)
 **Depends on:** phase 2 · **Gate:** [S5](spikes.md#s5--nova-embed-returns-what-designmd-says)
@@ -149,7 +150,7 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
 - [x] Write path: item row updated in one transaction with FTS and embedding; `enriched_at` set.
 - [x] `kind_source`: AI default, `manual` once a user edits it, and a manual kind is never overwritten
       by re-enrichment.
-- [ ] Per-kind item layouts, ported from `design/mockup` — each is a small switch over which
+- [x] Per-kind item layouts, ported from `design/mockup` — each is a small switch over which
       `details_json` fields to show (recipe: ingredients/method; video: chapters/transcript
       placeholder; product: current price; paper: abstract + text-layer state; place: address/hours;
       …). The fields come from JSON-LD/microdata via `extract/jsonld.go`, not from the model. Build a
@@ -160,8 +161,8 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
       session, amber per the colour rules.
 - [ ] Scored fixture set: ~40 real saves with human kind + tag sets; `make enrich-score` prints
       accuracy and per-kind confusion.
-- [ ] Measured cost: log and record the actual $/save from the first 100 real saves; put the number in
-      design.md §6's cost paragraph.
+- [x] Measured cost: the first live saves were logged and their real $/save is in design.md §6
+      ($0.000788 for four saves, ~$0.0002 each). Re-measure after 100 real saves if the prompt changes.
 
 ## What landed (2026-11-21)
 
@@ -192,6 +193,17 @@ Decisions made here:
   an oversized body, a non-HTML content type and a wrong-sized vector are terminal immediately.
 - **PDFs are terminal until phase 6.** The item stays, the reason is `last_error`, and the attention
   strip (still to land) will show it.
+- **The layout follows the data, not the label, in one case only.** If the item's kind is the
+  `article` fallback and the page's JSON-LD names something more specific (Recipe, VideoObject,
+  Product, Place, Book, Movie, ScholarlyArticle), the panel shows that shape. A deliberate kind is
+  never overruled — someone who filed a product as a video sees the product facts they chose.
+- **No cover and no media column yet.** Until phase 6 there is nothing to put in one, and the mockup
+  only draws media when a cover exists. Phase 6 brings the column back alongside real images; the
+  body components do not change.
+- **The JSON-LD `description` is not rendered.** Enrichment always writes a summary, and two prose
+  blocks that say the same thing is noise; papers keep their `abstract`.
+- **Tags are read-only** until phase 9's tag editor, and the empty state says so. Cards still show no
+  tags because the list DTO deliberately omits them.
 - **Nova adapters** (`enrich/nova`) implement the three pipeline interfaces: `decide` with one
   choice question over the twelve kinds plus `paywalled`/`video` nouls; one strict JSON-schema chat
   call for title/summary/tags; `embed` through a role with `Dims: 1024`. Prompt files are embedded
@@ -204,8 +216,53 @@ Decisions made here:
 - **Attention strip**: `store.FailedItems` reads the failed rows (not the logs, so a restart keeps
   them); `POST /api/items/:id/retry` resets attempts, clears the reason and requeues. Home shows an
   amber strip with up to three retryable failures, dismissible for the session.
+- **Per-kind item page**: `details` (the parsed `details_json`) rides on every single-item response —
+  GET, PATCH, restore, retry, create — and never on a list, so the grid stays one lean query. The
+  page is one 860px column: title, kind picker, the model's summary, the kind panel, the note, tags,
+  then provenance. `KindPanel.svelte` renders recipe ingredients/method, product price and
+  availability, place address/hours, video length and link, book, film and paper fields, and an
+  author/published/section line for everything else. The formatters (ISO 8601 durations, price,
+  availability, rating, address, dates) live in `web/src/lib/details.ts` with vitest tests.
+- **First live Nova run (2026-11-21)**: four real saves through `serve` with a key — a recipe page,
+  two articles and a typed note — all reached `ready` on the first attempt, with no retries and no
+  warnings except the expected "no Worker configured". The recipe classified as `recipe` and its
+  panel fields arrived intact (`PT10M`/`PT20M`/`PT30M`, `Makes 12`, six ingredients, five steps).
+  `typesafe/jev-1.14` is still a valid role model and served as the dated snapshot
+  `typesafe/jev-1.14-20261014`; the Decisions endpoint accepted the two `noul` questions with no
+  criteria; `deepseek/deepseek-v4.1-flash-1017` served itself and honoured strict `json_schema` (the
+  answer parsed with no fence); `pplx-embed-v1-0.6b` returned 1024 dims, stored under its own name.
+  Cost: **$0.000788 for four saves (~$0.0002/save)**, from $0.00012 for the recipe to $0.00030 for
+  the note, whose summary ran long.
 
-Still open: per-kind layouts, the scored fixture set, and the cost measurement. The Nova calls themselves need a live key for the first real run.
+Still open: the scored fixture set.
+
+## The live run, in detail (2026-11-21)
+
+What was checked and what it showed, because these are the three questions that needed a real key:
+
+- **Model slugs are current.** `typesafe/jev-1.14` is accepted by the Decisions endpoint and is
+  served as `typesafe/jev-1.14-20261014`; `deepseek/deepseek-v4.1-flash-1017` and
+  `perplexity/pplx-embed-v1-0.6b` are served under the names requested. The usage log records both
+  the requested and the served name, so a silent alias change is visible.
+- **`noul` without criteria works.** Both `paywalled` and `video` were asked with only
+  `Instructions`; the endpoint answered the whole question set and the call parsed.
+- **Strict `json_schema` works on this path.** The write call returned a bare JSON object with
+  exactly `title`/`summary`/`tags`, 3–6 tags, no fence and no prose, for all four saves.
+- **The empty-string trap did not bite.** `enrich.New` still leaves `PromptVersion` and
+  `EmbeddingModel` empty and `cmd/harbor` fills them from the `nova` constants; the rows record
+  `tag.v1`, `extract.v1` and `perplexity/pplx-embed-v1-0.6b`, and the vectors are 1024 floats.
+
+Per save, from the usage log (input tokens dominated by page text):
+
+| save | classify | write | embed | total |
+| --- | --- | --- | --- | --- |
+| recipe page (6 ingredients, 5 steps) | $0.000057 | $0.000061 | $0.000002 | **$0.00012** |
+| article, ~1.5k tokens in | $0.000066 | $0.000098 | $0.000002 | **$0.00017** |
+| article, ~1.8k tokens in | $0.000074 | $0.000131 | $0.000002 | **$0.00021** |
+| typed note (no fetch, no classify) | — | $0.000296 | $0.000001 | **$0.00030** |
+
+The note is the expensive one because its summary was long (347 output tokens); the cap that matters
+is `MaxTokens: 800` on the write call, not the page length.
 
 ## Exit criteria
 
