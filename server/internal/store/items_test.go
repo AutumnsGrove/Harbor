@@ -185,7 +185,8 @@ func TestListItemsPagesWithACursor(t *testing.T) {
 // values so a stale term stops matching (plans/02 test 7).
 func TestUpdateItemBumpsUpdatedAtAndRewritesFTS(t *testing.T) {
 	s := openTestStore(t)
-	created := mustCreate(t, s, ItemInput{ID: "a", Title: "Sourdough", Note: "feed daily"})
+	past := time.Now().UTC().Add(-time.Hour)
+	created := mustCreate(t, s, ItemInput{ID: "a", Title: "Sourdough", Note: "feed daily", CreatedAt: past, SavedAt: past})
 
 	title, note := "Rye", "feed weekly"
 	item, err := s.UpdateItem(context.Background(), "a", ItemPatch{Title: &title, Note: &note})
@@ -195,8 +196,8 @@ func TestUpdateItemBumpsUpdatedAtAndRewritesFTS(t *testing.T) {
 	if item.Title != "Rye" || item.Note != "feed weekly" {
 		t.Errorf("update did not stick: %q/%q", item.Title, item.Note)
 	}
-	if !item.UpdatedAt.After(created.UpdatedAt) && !item.UpdatedAt.Equal(created.UpdatedAt) {
-		t.Errorf("updated_at went backwards: %v -> %v", created.UpdatedAt, item.UpdatedAt)
+	if !item.UpdatedAt.After(created.UpdatedAt) {
+		t.Errorf("updated_at did not move on an edit: %v -> %v", created.UpdatedAt, item.UpdatedAt)
 	}
 	if !item.CreatedAt.Equal(created.CreatedAt) {
 		t.Errorf("created_at moved on an edit: %v -> %v", created.CreatedAt, item.CreatedAt)
@@ -469,7 +470,7 @@ func TestMergeNoteOrderIsStable(t *testing.T) {
 		}
 
 		// Order: a's text, then b's, then c's (accidental duplicates collapse).
-		got := noteSegments(third.Note)
+		got := mergedSegments(third.Note)
 		want := dedupe([]string{a, b, c})
 		if strings.Join(got, "|") != strings.Join(want, "|") {
 			rt.Fatalf("note segments = %q, want %q (from %q)", got, want, third.Note)
@@ -486,25 +487,50 @@ func TestMergeNoteOrderIsStable(t *testing.T) {
 	})
 }
 
-// noteSegments splits a merged note back into its chunks, dropping the
-// timestamp comments and the separator, so a property test can talk about order
-// without tripping over letters inside a comment.
-func noteSegments(note string) []string {
-	var out []string
-	for _, segment := range strings.Split(note, "---") {
-		s := strings.TrimSpace(segment)
-		for strings.HasPrefix(s, "<!--") {
-			end := strings.Index(s, "-->")
-			if end < 0 {
-				break
-			}
-			s = strings.TrimSpace(s[end+3:])
+// mergedSegments splits a merged note back into its chunks the way the package
+// does — a separator counts only when the stamp comment follows it — and drops
+// the comments, so the property can talk about order without tripping over
+// letters inside a timestamp.
+func mergedSegments(note string) []string {
+	var (
+		out   []string
+		start int
+		i     int
+	)
+	for i < len(note) {
+		j := strings.Index(note[i:], "\n\n---\n\n")
+		if j < 0 {
+			break
 		}
+		j += i
+		if strings.HasPrefix(note[j+len("\n\n---\n\n"):], "<!-- saved ") {
+			out = append(out, trimSegment(note[start:j]))
+			start = j + len("\n\n---\n\n")
+			i = start
+			continue
+		}
+		i = j + 1
+	}
+	out = append(out, trimSegment(note[start:]))
+	var kept []string
+	for _, s := range out {
 		if s != "" {
-			out = append(out, s)
+			kept = append(kept, s)
 		}
 	}
-	return out
+	return kept
+}
+
+func trimSegment(segment string) string {
+	s := strings.TrimSpace(segment)
+	for strings.HasPrefix(s, "<!--") {
+		end := strings.Index(s, "-->")
+		if end < 0 {
+			break
+		}
+		s = strings.TrimSpace(s[end+3:])
+	}
+	return s
 }
 
 func dedupe(in []string) []string {
@@ -526,4 +552,95 @@ func containsString(all []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// Review finding: purging from the Recently deleted view is the normal flow,
+// and the item is already out of FTS by then. Retracting it a second time made
+// FTS5 report a corrupt index and rolled the purge back.
+func TestPurgeItemWorksAfterSoftDelete(t *testing.T) {
+	s := openTestStore(t)
+	mustCreate(t, s, ItemInput{ID: "a", Note: "sourdough notes", ReadLater: true})
+	if err := s.SoftDeleteItem(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PurgeItem(context.Background(), "a"); err != nil {
+		t.Fatalf("PurgeItem after SoftDeleteItem: %v", err)
+	}
+	if n := count(t, s.db, `SELECT count(*) FROM items WHERE id = 'a'`); n != 0 {
+		t.Error("the item survived the purge")
+	}
+	// The index has to stay usable for everything else afterwards.
+	mustCreate(t, s, ItemInput{ID: "b", Note: "other notes"})
+	if got := ftsHits(t, s, "other"); len(got) != 1 || got[0] != "b" {
+		t.Errorf("search is unusable after the purge: %v", got)
+	}
+}
+
+// Review finding: an edit to a soft-deleted item must land, and must not put it
+// back into the index.
+func TestUpdateItemOnASoftDeletedRow(t *testing.T) {
+	s := openTestStore(t)
+	mustCreate(t, s, ItemInput{ID: "a", Title: "old", Note: "sourdough notes"})
+	if err := s.SoftDeleteItem(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+
+	title := "renamed"
+	if _, err := s.UpdateItem(context.Background(), "a", ItemPatch{Title: &title}); err != nil {
+		t.Fatalf("UpdateItem on a soft-deleted row: %v", err)
+	}
+	item, err := s.GetItem(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Title != "renamed" {
+		t.Errorf("title = %q, want the edit to stick", item.Title)
+	}
+	if item.DeletedAt == nil {
+		t.Error("the edit restored the item")
+	}
+	if got := ftsHits(t, s, "sourdough"); len(got) != 0 {
+		t.Errorf("editing a deleted item made it searchable: %v", got)
+	}
+}
+
+// Review finding: the first save of a URL is an insert, and merged has to say
+// so — the composer warning and queue logging key on it.
+func TestMergeItemReportsAnInsertOnTheFirstSave(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	first, merged, err := s.MergeItem(ctx, ItemInput{ID: "a", URL: ptr("https://example.com/a"), Note: "one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged {
+		t.Errorf("first save of %s reported merged = true", *first.URL)
+	}
+	_, merged, err = s.MergeItem(ctx, ItemInput{ID: "b", URL: ptr("https://example.com/a"), Note: "two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merged {
+		t.Error("second save of the same URL reported merged = false")
+	}
+}
+
+// Review finding: noteAlreadyPresent split on a bare "---", so a note holding a
+// horizontal rule could make the next note look like a duplicate.
+func TestMergeAppendsANoteThatContainsAHorizontalRule(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustCreate(t, s, ItemInput{
+		ID: "a", URL: ptr("https://example.com/a"),
+		Note: "intro\n\n---\n\nafter the rule",
+	})
+	item, _, err := s.MergeItem(ctx, ItemInput{ID: "b", URL: ptr("https://example.com/a"), Note: "after the rule"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(item.Note, "after the rule") != 2 {
+		t.Errorf("note = %q, want the new note appended rather than swallowed", item.Note)
+	}
 }

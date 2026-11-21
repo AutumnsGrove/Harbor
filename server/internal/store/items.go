@@ -96,7 +96,7 @@ const itemColumns = `seq, id, url, url_original, title, note, kind, kind_source,
 // canonical URL is ErrDuplicateURL — the merge rule lives in MergeItem, so a
 // caller that wants merge-on-resave has to say so.
 func (s *Store) CreateItem(ctx context.Context, in ItemInput) (model.Item, error) {
-	item, err := s.writeItem(ctx, in, false)
+	item, _, err := s.writeItem(ctx, in, false)
 	if err != nil {
 		return model.Item{}, err
 	}
@@ -110,29 +110,30 @@ func (s *Store) CreateItem(ctx context.Context, in ItemInput) (model.Item, error
 func (s *Store) MergeItem(ctx context.Context, in ItemInput) (item model.Item, merged bool, err error) {
 	if !hasURL(in) {
 		// A note has no key to merge on: two identical notes are two thoughts.
-		item, err := s.writeItem(ctx, in, false)
+		item, _, err := s.writeItem(ctx, in, false)
 		return item, false, err
 	}
-	item, err = s.writeItem(ctx, in, true)
-	if err != nil {
-		return model.Item{}, false, err
-	}
-	return item, true, nil
+	// merged is the row-found fact itself, not "we went down the merge branch":
+	// a first save of a URL is an insert and callers log it as one.
+	return s.writeItem(ctx, in, true)
 }
 
 func hasURL(in ItemInput) bool { return in.URL != nil && strings.TrimSpace(*in.URL) != "" }
 
 // writeItem is the single insert/merge implementation, so the two entry points
 // cannot drift.
-func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.Item, error) {
+func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.Item, bool, error) {
 	if strings.TrimSpace(in.ID) == "" {
-		return model.Item{}, errors.New("store: an item needs an id")
+		return model.Item{}, false, errors.New("store: an item needs an id")
 	}
 	if err := validate(in); err != nil {
-		return model.Item{}, err
+		return model.Item{}, false, err
 	}
 
-	var out model.Item
+	var (
+		out    model.Item
+		merged bool
+	)
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		var (
 			existing model.Item
@@ -149,6 +150,7 @@ func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.
 			default:
 				return err
 			}
+			merged = found
 		}
 
 		now := time.Now().UTC()
@@ -288,9 +290,9 @@ func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.
 		return nil
 	})
 	if err != nil {
-		return model.Item{}, err
+		return model.Item{}, false, err
 	}
-	return out, nil
+	return out, merged, nil
 }
 
 // GetItem is by public id and includes soft-deleted rows: the Recently deleted
@@ -373,8 +375,14 @@ func (s *Store) UpdateItem(ctx context.Context, id string, p ItemPatch) (model.I
 		}
 		item.UpdatedAt = time.Now().UTC()
 
-		if err := ftsDelete(ctx, tx, before); err != nil {
-			return err
+		// A soft-deleted row is not in the index: retracting it again fails, and
+		// re-inserting it would make a deleted item searchable. Edit the row
+		// only; Restore re-indexes.
+		indexed := before.DeletedAt == nil
+		if indexed {
+			if err := ftsDelete(ctx, tx, before); err != nil {
+				return err
+			}
 		}
 		if err := updateItemRow(ctx, tx, item); err != nil {
 			return err
@@ -383,8 +391,10 @@ func (s *Store) UpdateItem(ctx context.Context, id string, p ItemPatch) (model.I
 		if err != nil {
 			return err
 		}
-		if err := ftsInsert(ctx, tx, fresh); err != nil {
-			return err
+		if indexed {
+			if err := ftsInsert(ctx, tx, fresh); err != nil {
+				return err
+			}
 		}
 		out = fresh
 		return nil
@@ -441,8 +451,13 @@ func (s *Store) PurgeItem(ctx context.Context, id string) error {
 		if err != nil {
 			return err
 		}
-		if err := ftsDelete(ctx, tx, item); err != nil {
-			return err
+		// SoftDeleteItem already retracted this row from FTS, and FTS5 rejects a
+		// second retraction as a corrupt index. Purging from the Recently
+		// deleted view is the normal path, so this guard is not an edge case.
+		if item.DeletedAt == nil {
+			if err := ftsDelete(ctx, tx, item); err != nil {
+				return err
+			}
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
 		if err != nil {
@@ -713,17 +728,17 @@ func ftsDelete(ctx context.Context, tx *sql.Tx, m model.Item) error {
 // searchableNote drops the merge's timestamp comments: they are provenance for
 // a human reading the row, not text worth searching.
 func searchableNote(note string) string {
-	if !strings.Contains(note, "<!--") {
-		return note
-	}
-	var b strings.Builder
-	for _, segment := range strings.Split(note, noteSeparator) {
-		if b.Len() > 0 {
-			b.WriteString(noteSeparator)
+	for {
+		i := strings.Index(note, stampPrefix)
+		if i < 0 {
+			return note
 		}
-		b.WriteString(stripStampComment(segment))
+		end := strings.Index(note[i:], "-->")
+		if end < 0 {
+			return note[:i]
+		}
+		note = note[:i] + note[i+end+len("-->"):]
 	}
-	return b.String()
 }
 
 // --- the note merge rule (design.md §5) -------------------------------------
@@ -749,15 +764,47 @@ func appendNote(existing, incoming string, at time.Time) string {
 		"<!-- saved " + at.UTC().Format(time.RFC3339) + " -->\n\n" + inc
 }
 
+// stampPrefix opens the comment this package writes in front of every appended
+// note. It is what makes a separator ours rather than the user's: a note of
+// their own may contain "\n\n---\n\n" (a horizontal rule), and that must not
+// look like a segment boundary.
+const stampPrefix = "<!-- saved "
+
 // noteAlreadyPresent compares trimmed segment text, ignoring the timestamp
-// comment this package writes in front of an appended note.
+// comment. Only separators followed by our stamp count, so a note holding a
+// horizontal rule cannot make the next note look like a duplicate.
 func noteAlreadyPresent(existing, note string) bool {
-	for _, segment := range strings.Split(existing, "---") {
+	for _, segment := range noteSegments(existing) {
 		if strings.TrimSpace(stripStampComment(segment)) == note {
 			return true
 		}
 	}
 	return false
+}
+
+// noteSegments splits on the separators this package wrote: a separator that is
+// not followed by a stamp belongs to the note's own text.
+func noteSegments(existing string) []string {
+	var (
+		segments []string
+		start    int
+		i        int
+	)
+	for i < len(existing) {
+		j := strings.Index(existing[i:], noteSeparator)
+		if j < 0 {
+			break
+		}
+		j += i
+		if strings.HasPrefix(existing[j+len(noteSeparator):], stampPrefix) {
+			segments = append(segments, existing[start:j])
+			start = j + len(noteSeparator)
+			i = start
+			continue
+		}
+		i = j + 1
+	}
+	return append(segments, existing[start:])
 }
 
 func stripStampComment(s string) string {
