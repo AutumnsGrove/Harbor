@@ -178,11 +178,12 @@ func New(f Fetcher, d Decider, w Writer, e Embedder, s Store, log *slog.Logger) 
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
+	// PromptVersion and EmbeddingModel are deliberately unset. The wiring in
+	// cmd/harbor must supply the adapter's constants, and an unset pipeline
+	// fails every item loudly instead of writing a row with a guessed model.
 	return &Enricher{
 		Fetcher: f, Decider: d, Writer: w, Embedder: e, Store: s, Log: log,
-		PromptVersion:  DefaultPromptVersion,
 		ExtractVersion: DefaultExtractVersion,
-		EmbeddingModel: "perplexity/pplx-embed-v1-0.6b",
 		Now:            time.Now,
 	}
 }
@@ -200,6 +201,11 @@ func RetryDelay(attempt int) time.Duration {
 // row. It returns the cause for the loop's log line; the loop continues with
 // the next item either way.
 func (e *Enricher) Process(ctx context.Context, item model.Item) error {
+	if e.PromptVersion == "" || e.EmbeddingModel == "" {
+		cause := permanent(errors.New("enrich: prompt version and embedding model must be configured"))
+		return e.fail(ctx, item, cause)
+	}
+
 	// A ready item with the current versions has nothing to do. Re-enrichment
 	// is an explicit state change (a new prompt version, a manual retry), never
 	// a model call made by accident (plans/03 test 9).

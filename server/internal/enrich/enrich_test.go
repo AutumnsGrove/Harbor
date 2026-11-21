@@ -119,6 +119,10 @@ func createItem(t *testing.T, s *store.Store, in store.ItemInput) model.Item {
 func newTestEnricher(t *testing.T, s Store, f *fakeFetcher, d *fakeDecider, w *fakeWriter, em *fakeEmbedder) *Enricher {
 	t.Helper()
 	en := New(f, d, w, em, s, nil)
+	// Production sets these from the adapter's constants; tests use the
+	// pipeline's own current versions.
+	en.PromptVersion = DefaultPromptVersion
+	en.EmbeddingModel = "perplexity/pplx-embed-v1-0.6b"
 	en.Now = func() time.Time { return fixedNow }
 	return en
 }
@@ -458,5 +462,26 @@ func TestNonHTMLIsTerminal(t *testing.T) {
 	enriched, _ := s.GetItem(context.Background(), item.ID)
 	if enriched.State != model.StateFailed || enriched.NextAttemptAt != nil {
 		t.Errorf("PDF failure = state %q, next %v; want terminal until phase 6", enriched.State, enriched.NextAttemptAt)
+	}
+}
+
+// A pipeline built without the adapter's constants must fail visibly rather
+// than store a vector under a guessed model name.
+func TestAnUnconfiguredPipelineFailsLoudly(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	item := createItem(t, s, store.ItemInput{ID: "a", Note: "x"})
+	f, d, w, em := happyFakes()
+	unconfigured := New(f, d, w, em, s, nil)
+
+	if err := unconfigured.Process(ctx, item); err == nil {
+		t.Fatal("an unconfigured pipeline accepted an item")
+	}
+	after, _ := s.GetItem(ctx, item.ID)
+	if after.State != model.StateFailed || !strings.Contains(after.LastError, "configured") {
+		t.Errorf("state = %q, last_error = %q; want a visible configuration failure", after.State, after.LastError)
+	}
+	if w.calls != 0 || em.calls != 0 {
+		t.Errorf("an unconfigured pipeline made calls: write %d, embed %d", w.calls, em.calls)
 	}
 }
