@@ -9,7 +9,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -670,21 +669,13 @@ func scanItem(row rowScanner) (model.Item, error) {
 
 // --- tags -------------------------------------------------------------------
 
-// syncTags unions the incoming names into the item's tags. Tag normalisation
-// proper is phase 9; today it trims and ignores duplicates.
+// syncTags unions the save's tags into the item. It is the manual half of the
+// one tag write path (tags.go): the composer's Read later switch and a future
+// import both land here, and the enrichment stage uses the same resolver for
+// AI tags.
 func syncTags(ctx context.Context, tx *sql.Tx, itemID string, names []string) error {
-	for _, name := range normaliseTags(names) {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING`, name); err != nil {
-			return fmt.Errorf("tag %q: %w", name, err)
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO item_tags (item_id, tag_id, source)
-			 SELECT ?, id, 'manual' FROM tags WHERE name = ?
-			 ON CONFLICT(item_id, tag_id) DO NOTHING`, itemID, name); err != nil {
-			return fmt.Errorf("link tag %q: %w", name, err)
-		}
-	}
-	return nil
+	_, err := ensureTagsTx(ctx, tx, itemID, names, model.TagSourceManual)
+	return err
 }
 
 // refreshTagsText keeps the denormalised FTS column in step; design.md §8 says
@@ -710,21 +701,6 @@ func addToReadLater(ctx context.Context, tx *sql.Tx, itemID string) error {
 		return fmt.Errorf("add %s to Read later: %w", itemID, err)
 	}
 	return nil
-}
-
-func normaliseTags(in []string) []string {
-	seen := make(map[string]bool, len(in))
-	out := make([]string, 0, len(in))
-	for _, name := range in {
-		name = strings.TrimSpace(name)
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // --- FTS (design.md §7: external content, explicit writes) ------------------
