@@ -34,13 +34,15 @@ func (s *Store) FailedItems(ctx context.Context, limit int) ([]model.Item, error
 	return items, rows.Err()
 }
 
-// RetryItem puts a failed item back in the queue immediately: attempts reset,
+// RetryItem puts a *failed* item back in the queue immediately: attempts reset,
 // no backoff, and the old reason cleared so a successful pass leaves no stale
-// trace. A soft-deleted or missing item is ErrNotFound.
+// trace. An item that is queued, enriching or ready is left alone — retrying a
+// ready item would re-enrich it and overwrite a summary that already
+// succeeded. A soft-deleted or missing item is ErrNotFound.
 func (s *Store) RetryItem(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE items
 		SET state = 'queued', attempts = 0, next_attempt_at = NULL, last_error = ''
-		WHERE id = ? AND deleted_at IS NULL`, id)
+		WHERE id = ? AND deleted_at IS NULL AND state = 'failed'`, id)
 	if err != nil {
 		return fmt.Errorf("retrying %s: %w", id, err)
 	}
@@ -57,7 +59,8 @@ func (s *Store) RetryItem(ctx context.Context, id string) error {
 		if exists == 0 {
 			return ErrNotFound
 		}
-		// Already queued or ready: retrying is idempotent, not an error.
+		// Queued, enriching or ready: already on its way or already done, so
+		// retrying is a no-op rather than a re-enrichment.
 		return nil
 	}
 	return nil

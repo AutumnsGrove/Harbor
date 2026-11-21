@@ -34,9 +34,25 @@ func TestFailedItemsAndRetry(t *testing.T) {
 		t.Errorf("FailedItems still holds %v", ids(items))
 	}
 
-	// Idempotent for an item that is already fine, 404 for one that is gone.
+	// A queued item is left alone.
 	if err := s.RetryItem(ctx, "b"); err != nil {
 		t.Errorf("retrying a queued item = %v, want nil", err)
+	}
+	if after, _ := s.GetItem(ctx, "b"); after.State != "queued" || after.Attempts != 0 {
+		t.Errorf("queued item changed: %+v", after)
+	}
+
+	// A ready item must not be flipped back into the queue: it would be
+	// re-enriched and its summary overwritten.
+	mustCreate(t, s, ItemInput{ID: "ready", Note: "done"})
+	if err := s.MarkReady(ctx, "ready"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RetryItem(ctx, "ready"); err != nil {
+		t.Fatalf("retrying a ready item = %v, want nil", err)
+	}
+	if after, _ := s.GetItem(ctx, "ready"); after.State != "ready" {
+		t.Errorf("ready item state = %q, want ready", after.State)
 	}
 	if err := s.RetryItem(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("retrying a missing item = %v, want ErrNotFound", err)
