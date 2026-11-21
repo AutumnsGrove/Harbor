@@ -70,6 +70,9 @@ type ListOptions struct {
 	Limit          int
 	After          *Cursor
 	IncludeDeleted bool
+	// OnlyDeleted is the Recently deleted view: deleted rows and nothing else.
+	// IncludeDeleted (both) stays for a full export, which needs every row.
+	OnlyDeleted bool
 }
 
 // Cursor is the (saved_at, seq) pair the list pages on. seq breaks the tie when
@@ -123,6 +126,26 @@ func hasURL(in ItemInput) bool { return in.URL != nil && strings.TrimSpace(*in.U
 // writeItem is the single insert/merge implementation, so the two entry points
 // cannot drift.
 func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.Item, bool, error) {
+	var (
+		out    model.Item
+		merged bool
+	)
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, merged, err = writeItemTx(ctx, tx, in, merge)
+		return err
+	})
+	if err != nil {
+		return model.Item{}, false, err
+	}
+	return out, merged, nil
+}
+
+// writeItemTx is the insert/merge body. It takes a transaction rather than
+// opening one so ingest can record the Worker job id in the same commit: a row
+// without its processed_jobs entry would be replayed into a duplicate, and a
+// processed_jobs entry without its row would lose the save.
+func writeItemTx(ctx context.Context, tx *sql.Tx, in ItemInput, merge bool) (model.Item, bool, error) {
 	if strings.TrimSpace(in.ID) == "" {
 		return model.Item{}, false, errors.New("store: an item needs an id")
 	}
@@ -134,7 +157,7 @@ func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.
 		out    model.Item
 		merged bool
 	)
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := func() error {
 		var (
 			existing model.Item
 			found    bool
@@ -288,7 +311,7 @@ func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.
 		}
 		out = fresh
 		return nil
-	})
+	}()
 	if err != nil {
 		return model.Item{}, false, err
 	}
@@ -299,6 +322,14 @@ func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.
 // view and the merge path both need to see them (design.md §7).
 func (s *Store) GetItem(ctx context.Context, id string) (model.Item, error) {
 	return scanItemRow(s.db.QueryRowContext(ctx, `SELECT `+itemColumns+` FROM items WHERE id = ?`, id))
+}
+
+// GetItemByURL is the composer's "will this merge?" lookup. The caller passes a
+// canonical URL (canon.CanonicalURL has already run), and a soft-deleted match
+// counts: re-saving it restores the item rather than creating a second one
+// (design.md §5).
+func (s *Store) GetItemByURL(ctx context.Context, canonical string) (model.Item, error) {
+	return scanItemRow(s.db.QueryRowContext(ctx, `SELECT `+itemColumns+` FROM items WHERE url = ?`, canonical))
 }
 
 // ListItems pages the home grid: saved_at newest first, soft-deleted hidden by
@@ -316,7 +347,10 @@ func (s *Store) ListItems(ctx context.Context, opts ListOptions) ([]model.Item, 
 		where []string
 		args  []any
 	)
-	if !opts.IncludeDeleted {
+	switch {
+	case opts.OnlyDeleted:
+		where = append(where, "deleted_at IS NOT NULL")
+	case !opts.IncludeDeleted:
 		where = append(where, "deleted_at IS NULL")
 	}
 	if opts.After != nil {

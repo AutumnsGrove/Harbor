@@ -5,6 +5,7 @@
 		api,
 		isApiError,
 		type AvailableResponse,
+		type Item,
 		type UpdateStatusResponse,
 		type VersionResponse
 	} from '#lib/api';
@@ -16,6 +17,9 @@
 	let lastUpdate = $state<UpdateStatusResponse | null>(null);
 	let updateState = $state<UpdateState>('idle');
 	let problem = $state<string | null>(null);
+	let deleted = $state<Item[]>([]);
+	let deletedProblem = $state<string | null>(null);
+	let restoring = $state<string | null>(null);
 
 	function message(error: unknown): string {
 		if (isApiError(error)) {
@@ -27,7 +31,40 @@
 		return error instanceof Error ? error.message : 'Something went wrong.';
 	}
 
+	async function loadDeleted() {
+		try {
+			const answer = await api.items.list({ deleted: true, limit: 50 });
+			deleted = answer.items;
+			deletedProblem = null;
+		} catch (error) {
+			deletedProblem = message(error);
+		}
+	}
+
+	async function restore(entry: Item) {
+		restoring = entry.id;
+		try {
+			await api.items.restore(entry.id);
+			await loadDeleted();
+		} catch (error) {
+			deletedProblem = message(error);
+		} finally {
+			restoring = null;
+		}
+	}
+
+	function deletedWhen(iso: string | undefined): string {
+		if (!iso) return 'recently';
+		return new Date(iso).toLocaleString(undefined, {
+			month: 'short',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
+
 	async function load() {
+		void loadDeleted();
 		try {
 			version = await api.version();
 			lastUpdate = await api.update.status().catch(() => null);
@@ -191,10 +228,33 @@
 	</section>
 
 	<section class="panel">
+		<h2 class="h3">Recently deleted</h2>
+		{#if deletedProblem}
+			<p class="callout amb" role="status">{deletedProblem}</p>
+		{:else if deleted.length === 0}
+			<p class="note">Nothing in the bin. Deleted items stay here for 30 days, then they are purged.</p>
+		{:else}
+			<div class="rows">
+				{#each deleted as entry (entry.id)}
+					<div>
+						<div class="grow">
+							<div class="t">{entry.title || entry.url || 'Untitled note'}</div>
+							<div class="s">deleted {deletedWhen(entry.deletedAt)} · {entry.kind}</div>
+						</div>
+						<button class="btn sm" onclick={() => restore(entry)} disabled={restoring === entry.id}>
+							{restoring === entry.id ? 'Restoring…' : 'Restore'}
+						</button>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</section>
+
+	<section class="panel">
 		<h2 class="h3">Not built yet</h2>
 		<p class="note">
-			Tags, Spaces, import, Recently deleted, Sources and tokens, Status, Export and backup. Each one
-			lands with its phase; none of them is faked here.
+			Tags, Spaces, import, Sources and tokens, Search, Status, Export and backup. Each one lands
+			with its phase; none of them is faked here.
 		</p>
 	</section>
 </div>

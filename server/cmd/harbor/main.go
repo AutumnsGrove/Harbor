@@ -17,6 +17,9 @@ import (
 
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
 	"github.com/AutumnsGrove/Harbor/server/internal/httpapi"
+	"github.com/AutumnsGrove/Harbor/server/internal/queue"
+	"github.com/AutumnsGrove/Harbor/server/internal/store"
+	"github.com/AutumnsGrove/Harbor/server/internal/workerclient"
 	"github.com/AutumnsGrove/Harbor/web"
 )
 
@@ -28,6 +31,7 @@ Commands:
   serve         run the HTTP server (the container's process)
   healthcheck   exit 0 when http://127.0.0.1:$HARBOR_PORT/healthz answers 200
   snapshot      write data/backups/pre-update.db (use --pre-update)
+  replay        re-ingest the Worker's done jobs (--since 1h|<unix>|<RFC3339>)
   version       print the build stamp
   help          print this text
 `
@@ -54,6 +58,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return healthcheck(getenv)
 	case "snapshot":
 		return snapshotCommand(ctx, getenv, args[1:], stdout)
+	case "replay":
+		return replayCommand(ctx, getenv, args[1:], stdout)
 	case "version":
 		fmt.Fprintln(stdout, build.Version())
 		return nil
@@ -74,9 +80,47 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 	}
 
 	log := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// The library opens before the listener: a database that cannot be opened is
+	// a failed update, and the watcher should roll it back rather than serve an
+	// empty library. The healthcheck still answers, because it touches nothing.
+	library, err := store.OpenWith(cfg.DataDir, log)
+	if err != nil {
+		return fmt.Errorf("the library at %s is not usable: %w", cfg.DataDir, err)
+	}
+	defer func() {
+		if err := library.Close(); err != nil {
+			log.Error("closing the library", "error", err)
+		}
+	}()
+
+	// Two goroutines, two queues (design.md §5): ingest pulls the Worker, and
+	// enrichment works the item rows. Enrichment runs even with no Worker,
+	// because an in-app save enters the same queue.
+	workCtx, stopWork := context.WithCancel(context.Background())
+	defer stopWork()
+	go queue.NewEnricher(library, log).Run(workCtx)
+
+	// pending is what /api/pending shows: the saves still at the Worker. Nil is
+	// a valid state and answers an empty list.
+	var pending httpapi.PendingSource
+	switch {
+	case cfg.WorkerURL == "" && cfg.WorkerToken == "":
+		log.Warn("no Worker configured; remote saves will not be pulled", "env", build.EnvWorkerURL)
+	case cfg.WorkerURL == "" || cfg.WorkerToken == "":
+		return fmt.Errorf("%s and %s must be set together", build.EnvWorkerURL, build.EnvWorkerToken)
+	default:
+		client, err := workerclient.New(cfg.WorkerURL, cfg.WorkerToken, build.Version())
+		if err != nil {
+			return err
+		}
+		pending = client
+		go queue.NewLoop(queue.NewIngestor(client, library, log)).Run(workCtx)
+	}
+
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           httpapi.New(cfg, log, web.Assets()).Handler(),
+		Handler:           httpapi.New(cfg, log, web.Assets(), httpapi.WithStore(library), httpapi.WithPending(pending)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      120 * time.Second,

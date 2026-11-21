@@ -58,11 +58,145 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 		throw new ApiError(response.status, message);
 	}
 
+	// 204 is a success with nothing to decode (delete, and later some admin
+	// actions); `undefined as T` is the honest answer.
+	if (response.status === 204) {
+		return undefined as T;
+	}
+
 	return (await response.json()) as T;
 }
 
+/** A JSON body with the method, so every write goes through the same path. */
+function jsonRequest(method: 'POST' | 'PATCH' | 'PUT', body: unknown): RequestInit {
+	return {
+		method,
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(body)
+	};
+}
+
+/**
+ * The twelve kinds, in design.md §6 order. The item page shows the name; the
+ * enum is what the API carries.
+ */
+export type ItemKind =
+	| 'article'
+	| 'product'
+	| 'book'
+	| 'recipe'
+	| 'video'
+	| 'tweet'
+	| 'note'
+	| 'image'
+	| 'paper'
+	| 'podcast'
+	| 'place'
+	| 'movie';
+
+export type ItemSource = 'app' | 'telegram' | 'shortcut' | 'quick' | 'share' | 'import';
+export type ItemState = 'queued' | 'enriching' | 'ready' | 'failed';
+
+export type Item = {
+	id: string;
+	url: string | null;
+	urlOriginal: string;
+	title: string;
+	note: string;
+	summary: string;
+	kind: ItemKind;
+	kindSource: string;
+	source: ItemSource;
+	state: ItemState;
+	/** Filled for one item; absent in a list so the grid stays one query. */
+	tags?: string[];
+	readLater?: boolean;
+	createdAt: string;
+	savedAt: string;
+	updatedAt: string;
+	deletedAt?: string;
+};
+
+/**
+ * A save the Worker has accepted and the potato has not pulled yet. The card is
+ * greyed out, and opening it does not claim anything (design.md §5).
+ */
+export type PendingJob = {
+	id: string;
+	title: string;
+	url: string | null;
+	source: ItemSource;
+	kind: string;
+	status: string;
+	createdAt: string;
+};
+
+export type PendingResponse = {
+	jobs: PendingJob[];
+};
+
+export type ItemListResponse = {
+	items: Item[];
+	/** Opaque; pass it back to get the next page. null when there is no more. */
+	next: string | null;
+};
+
+export type SaveItemResponse = {
+	item: Item;
+	merged: boolean;
+};
+
+export type LookupResponse = {
+	exists: boolean;
+	item?: Item;
+};
+
+export type CreateItemInput = {
+	url?: string;
+	note?: string;
+	title?: string;
+	readLater?: boolean;
+	source?: 'app' | 'quick' | 'share';
+};
+
+export type UpdateItemInput = {
+	title?: string;
+	note?: string;
+	summary?: string;
+	kind?: ItemKind;
+};
+
 export const api = {
 	version: () => request<VersionResponse>('/api/version'),
+
+	items: {
+		/** Newest saved first. `deleted` asks for the Recently deleted view. */
+		list: (options: { limit?: number; cursor?: string | null; deleted?: boolean } = {}) => {
+			const query = new URLSearchParams();
+			if (options.limit) query.set('limit', String(options.limit));
+			if (options.cursor) query.set('cursor', options.cursor);
+			if (options.deleted) query.set('deleted', 'true');
+			const suffix = query.size > 0 ? `?${query}` : '';
+			return request<ItemListResponse>(`/api/items${suffix}`);
+		},
+		get: (id: string) => request<{ item: Item }>(`/api/items/${encodeURIComponent(id)}`),
+		create: (input: CreateItemInput) =>
+			request<SaveItemResponse>('/api/items', jsonRequest('POST', input)),
+		update: (id: string, input: UpdateItemInput) =>
+			request<{ item: Item }>(`/api/items/${encodeURIComponent(id)}`, jsonRequest('PATCH', input)),
+		remove: (id: string) =>
+			request<void>(`/api/items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+		restore: (id: string) =>
+			request<{ item: Item }>(`/api/items/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
+		/** The merge question lives on the server; the UI never re-implements it. */
+		lookup: (url: string) =>
+			request<LookupResponse>(`/api/items/lookup?url=${encodeURIComponent(url)}`)
+	},
+
+	pending: {
+		/** Read-only: the Worker's queued + claimed jobs that are not items yet. */
+		list: () => request<PendingResponse>('/api/pending')
+	},
 
 	update: {
 		/** Asks the watcher to resolve `latest`; it writes available.json later. */

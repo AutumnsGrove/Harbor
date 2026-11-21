@@ -1,7 +1,9 @@
 # Harbor — build plans
 
 **Status: phase 0 is done and running.** These are the plans the build follows, in order. Phase 0
-is deployed on the potato and has survived a real update and a real rollback drill; phase 1 is next.
+is deployed on the potato and has survived a real update and a real rollback drill; phase 1 is
+deployed. Phase 2 is built and green locally (store, ingest, items API, library UI) and waits on its
+potato demo.
 They do not
 replace [design.md](../design.md); they say *how and in what order* the thing described there gets
 built, and what "done" means for each step.
@@ -198,7 +200,7 @@ happened, and `make check` is green on `main`.
 | — | Spikes | ◐ S1, S2, S5, S7, S10, S11 answered (S7 → 8897); S3, S4, S6, S8, S9, S12 pending |
 | 0 | Foundations | ✅ deployed 2026-11-18, updated to `r56.4c93aa8` and rollback-drilled 2026-11-19 |
 | 1 | Worker intake | ✅ deployed 2026-11-19; exit demo run, `/presign` still needs its R2 credential |
-| 2 | Core library | ☐ |
+| 2 | Core library | ◐ store, Worker ingest, items API, pending window and the library UI are in the tree and green; the potato demo and scheduler skeleton outstanding |
 | 3 | Enrichment | ☐ |
 | 4 | Front doors | ☐ |
 | 5 | Import | ☐ |

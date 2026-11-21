@@ -12,12 +12,15 @@
 package httpapi
 
 import (
+	"context"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
+	"github.com/AutumnsGrove/Harbor/server/internal/store"
+	"github.com/AutumnsGrove/Harbor/server/internal/workerclient"
 )
 
 const (
@@ -58,15 +61,45 @@ type Server struct {
 
 	started time.Time
 	now     func() time.Time
+
+	// library is nil in phase-0 tests and in a binary built without a database.
+	// /api/status answers either way; a count it cannot read is a log line, not
+	// a failed request (design.md §3).
+	library *store.Store
+
+	// pending is nil when no Worker is configured. /api/pending then answers an
+	// empty list, which is true: there is no queue to show.
+	pending PendingSource
+}
+
+// PendingSource is the Worker's read-only pending list (design.md §5). It is an
+// interface so the handler cannot claim, read a job's content or reach R2.
+type PendingSource interface {
+	Pending(ctx context.Context) ([]workerclient.Job, error)
+}
+
+// Option adds a dependency to a Server. It is a functional option so the
+// phase-0 tests and the update endpoints keep their three-argument New.
+type Option func(*Server)
+
+// WithStore lets /api/status report the library's counts. Passing nil is the
+// same as not calling it.
+func WithStore(library *store.Store) Option {
+	return func(s *Server) { s.library = library }
+}
+
+// WithPending lets /api/pending show the saves that are still at the Worker.
+func WithPending(source PendingSource) Option {
+	return func(s *Server) { s.pending = source }
 }
 
 // New builds a Server around an embedded frontend. assets is web.Assets() in the
 // binary and an in-memory fs in tests.
-func New(cfg build.Config, log *slog.Logger, assets fs.FS) *Server {
+func New(cfg build.Config, log *slog.Logger, assets fs.FS, opts ...Option) *Server {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Server{
+	s := &Server{
 		cfg:          cfg,
 		log:          log,
 		assets:       assets,
@@ -75,6 +108,10 @@ func New(cfg build.Config, log *slog.Logger, assets fs.FS) *Server {
 		started:      time.Now(),
 		now:          time.Now,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Handler returns the whole middleware chain. Order matters and mirrors
@@ -86,6 +123,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/version", s.only(http.MethodGet, s.version))
 	mux.HandleFunc("/api/busy", s.only(http.MethodGet, s.busy))
 	mux.HandleFunc("/api/status", s.only(http.MethodGet, s.status))
+	mux.HandleFunc("/api/items", s.items)
+	mux.HandleFunc("/api/items/lookup", s.only(http.MethodGet, s.lookupItem))
+	mux.HandleFunc("/api/items/", s.itemByPath)
+	mux.HandleFunc("/api/pending", s.only(http.MethodGet, s.pendingJobs))
 	mux.HandleFunc("/api/update/check", s.only(http.MethodPost, s.updateCheck))
 	mux.HandleFunc("/api/update/available", s.only(http.MethodGet, s.updateAvailable))
 	mux.HandleFunc("/api/update/start", s.only(http.MethodPost, s.updateStart))

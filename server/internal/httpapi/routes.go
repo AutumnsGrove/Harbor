@@ -59,10 +59,23 @@ type statusResponse struct {
 	Failed        int     `json:"failed"`
 }
 
-func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, statusResponse{
+func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	response := statusResponse{
 		Status:        "ok",
 		Version:       build.Version(),
 		UptimeSeconds: s.now().Sub(s.started).Seconds(),
-	})
+	}
+	if s.library != nil {
+		counts, err := s.library.Counts(r.Context())
+		if err != nil {
+			// The endpoint still answers: it is the one a broken database must
+			// not be able to take down alongside the app.
+			s.log.Warn("status counts unavailable", "error", err)
+		} else {
+			response.Items = counts.Items
+			response.Pending = counts.Pending
+			response.Failed = counts.Failed
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
