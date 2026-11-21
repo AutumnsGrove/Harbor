@@ -1,0 +1,29 @@
+{
+  "Title": "Bakery — Places",
+  "Byline": "",
+  "SiteName": "",
+  "Language": "en",
+  "Excerpt": "Sourdough and coffee, on Mill Lane.",
+  "Published": null,
+  "CoverURL": "",
+  "Text": "Grove BakerySourdough and coffee, on Mill Lane.",
+  "Markdown": "## Grove Bakery\n\nSourdough and coffee, on Mill Lane.",
+  "OG": {},
+  "Details": {
+    "address": {
+      "addressCountry": "GB",
+      "addressLocality": "Ely",
+      "addressRegion": "Cambridgeshire",
+      "postalCode": "CB7 4AA",
+      "streetAddress": "12 Mill Lane"
+    },
+    "description": "Sourdough and coffee.",
+    "name": "Grove Bakery",
+    "openingHours": [
+      "Mo-Fr 07:00-16:00",
+      "Sa 08:00-14:00"
+    ],
+    "telephone": "+44 1353 000000",
+    "type": "Place"
+  }
+}

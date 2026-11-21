@@ -1,0 +1,31 @@
+{
+  "Title": "The quiet web",
+  "Byline": "Autumn Brown",
+  "SiteName": "Field Notes",
+  "Language": "en",
+  "Excerpt": "A small essay about small sites.",
+  "Published": "2026-10-02T08:15:00Z",
+  "CoverURL": "https://fieldnotes.example/images/quiet-web.png",
+  "Text": "The best page on the internet is the one nobody is trying to monetise. It loads in a blink, it has no cookie banner, and it was written by a person who wanted to tell you something.\n      I keep a folder of them. A list of links that still work, with inline code where it helps.\n      A quote worth keeping, set apart from the argument around it.\n      On small things\n      Small sites do not need a design system. They need a paragraph, a date, and a way back to the index.\n      One idea per pageA date on every postLinks that outlive the author\n      make check",
+  "Markdown": "The best page on the internet is the one nobody is trying to monetise. It loads in a blink, it has no cookie banner, and it was written by a person who wanted to tell you something.\n\nI keep a folder of them. A [list of links](https://fieldnotes.example/links) that still work, with `inline code` where it helps.\n\n\u003e A quote worth keeping, set apart from the argument around it.\n\n## On small things\n\nSmall sites do not need a design system. They need a paragraph, a date, and a way back to the index.\n\n- One idea per page\n- A date on every post\n- Links that outlive the author\n\n```\nmake check\n```",
+  "OG": {
+    "title": "The quiet web",
+    "description": "A small essay about small sites.",
+    "siteName": "Field Notes",
+    "type": "article",
+    "image": "/images/quiet-web.png",
+    "url": "https://fieldnotes.example/quiet-web",
+    "author": "Autumn Brown",
+    "publishedTime": "2026-10-02T08:15:00Z"
+  },
+  "Details": {
+    "author": [
+      "Autumn Brown"
+    ],
+    "image": "https://fieldnotes.example/images/quiet-web.png",
+    "name": "The quiet web",
+    "published": "2026-10-02T08:15:00Z",
+    "section": "Essays",
+    "type": "Article"
+  }
+}

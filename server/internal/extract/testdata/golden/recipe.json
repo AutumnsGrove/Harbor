@@ -1,0 +1,46 @@
+{
+  "Title": "Sourdough starter pancakes",
+  "Byline": "",
+  "SiteName": "Kitchen",
+  "Language": "en",
+  "Excerpt": "A use for the discard.",
+  "Published": "2026-09-14T00:00:00Z",
+  "CoverURL": "https://kitchen.example/pancakes.jpg",
+  "Text": "Every starter needs feeding, and every feeding leaves discard. This is what to do with it.\n      Ingredients\n      200 g starter discard1 egg120 ml milk1 tbsp sugar1/2 tsp salt1/2 tsp baking soda\n      Method\n      Whisk the starter, egg and milk.Add the dry ingredients and rest for ten minutes.Cook in a hot pan until bubbles form, then flip.",
+  "Markdown": "Every starter needs feeding, and every feeding leaves discard. This is what to do with it.\n\n## Ingredients\n\n- 200 g starter discard\n- 1 egg\n- 120 ml milk\n- 1 tbsp sugar\n- 1/2 tsp salt\n- 1/2 tsp baking soda\n\n## Method\n\n1. Whisk the starter, egg and milk.\n2. Add the dry ingredients and rest for ten minutes.\n3. Cook in a hot pan until bubbles form, then flip.",
+  "OG": {
+    "title": "Sourdough starter pancakes",
+    "description": "A use for the discard.",
+    "siteName": "Kitchen",
+    "image": "https://kitchen.example/pancakes.jpg"
+  },
+  "Details": {
+    "author": [
+      "Autumn Brown"
+    ],
+    "category": "Breakfast",
+    "cookTime": "PT15M",
+    "cuisine": "American",
+    "description": "Thin, tangy pancakes made from discard.",
+    "image": "https://kitchen.example/pancakes.jpg",
+    "ingredients": [
+      "200 g starter discard",
+      "1 egg",
+      "120 ml milk",
+      "1 tbsp sugar",
+      "1/2 tsp salt",
+      "1/2 tsp baking soda"
+    ],
+    "instructions": [
+      "Whisk the starter, egg and milk.",
+      "Add the dry ingredients and rest for ten minutes.",
+      "Cook in a hot pan until bubbles form, then flip."
+    ],
+    "name": "Sourdough starter pancakes",
+    "prepTime": "PT10M",
+    "published": "2026-09-14",
+    "totalTime": "PT25M",
+    "type": "Recipe",
+    "yield": "8 pancakes"
+  }
+}

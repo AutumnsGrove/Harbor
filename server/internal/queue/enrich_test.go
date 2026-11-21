@@ -2,8 +2,10 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/AutumnsGrove/Harbor/server/internal/model"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
 )
 
@@ -25,7 +27,7 @@ func TestEnricherDrainsTheQueueInBatches(t *testing.T) {
 		}
 	}
 
-	enricher := NewEnricher(s, nil)
+	enricher := NewEnricher(s, nil, nil)
 	enricher.batch = 2 // force more than one round trip
 
 	n, err := enricher.Pass(ctx)
@@ -57,5 +59,58 @@ func TestEnricherDrainsTheQueueInBatches(t *testing.T) {
 	}
 	if run, problem := enricher.Status(); run.IsZero() || problem != "" {
 		t.Errorf("Status = %v, %q; want a run and no error", run, problem)
+	}
+}
+
+// recordingProcessor stands in for enrich.Enricher and closes the item, so the
+// pass has a finite queue to drain.
+type recordingProcessor struct {
+	store *store.Store
+	calls []string
+	errs  map[string]error
+}
+
+func (p *recordingProcessor) Process(ctx context.Context, item model.Item) error {
+	p.calls = append(p.calls, item.ID)
+	if err := p.errs[item.ID]; err != nil {
+		// Mirror the pipeline: record the terminal failure on the row.
+		_, _ = p.store.RecordEnrichmentFailure(ctx, item.ID, err.Error(), nil)
+		return err
+	}
+	return p.store.MarkReady(ctx, item.ID)
+}
+
+func TestEnricherRunsTheProcessorAndKeepsGoingAfterAFailure(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateItem(ctx, storeInput("a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateItem(ctx, storeInput("b")); err != nil {
+		t.Fatal(err)
+	}
+	processor := &recordingProcessor{store: s, errs: map[string]error{"a": errors.New("boom")}}
+	enricher := NewEnricher(s, processor, nil)
+
+	n, err := enricher.Pass(ctx)
+	if err != nil {
+		t.Fatalf("Pass: %v", err)
+	}
+	if n != 2 || len(processor.calls) != 2 {
+		t.Fatalf("Pass = %d, calls = %v; want both items attempted", n, processor.calls)
+	}
+	if enricher.failed != 1 {
+		t.Errorf("failed = %d, want 1", enricher.failed)
+	}
+	a, _ := s.GetItem(ctx, "a")
+	if a.State != model.StateFailed {
+		t.Errorf("item a state = %q, want failed", a.State)
+	}
+	b, _ := s.GetItem(ctx, "b")
+	if b.State != model.StateReady {
+		t.Errorf("item b state = %q, want ready", b.State)
+	}
+	if queued, _ := s.QueuedItems(ctx, 10); len(queued) != 0 {
+		t.Errorf("queue still holds %d items", len(queued))
 	}
 }

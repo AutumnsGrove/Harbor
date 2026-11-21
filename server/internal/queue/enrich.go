@@ -17,28 +17,35 @@ type EnrichStore interface {
 	MarkReady(ctx context.Context, id string) error
 }
 
-// Enricher is the enrichment stage before there is enrichment: it drains the
-// queued items in priority order and marks them ready. That is a real state
-// change, not a stub in the UI, and it means `/api/status`'s pending count
-// returns to zero (design.md §5, plans/02).
+// Processor does the work for one item. enrich.Enricher implements it; the
+// phase-2 shell passes nil, which just marks items ready.
+type Processor interface {
+	Process(ctx context.Context, item model.Item) error
+}
+
+// Enricher drains the queued items in priority order. With a Processor it runs
+// the real pipeline; without one it is phase 2's shell, which flips items to
+// ready so the state column and the pending count are honest (design.md §5).
 type Enricher struct {
-	store   EnrichStore
-	log     *slog.Logger
-	cadence time.Duration
-	batch   int
+	store     EnrichStore
+	processor Processor
+	log       *slog.Logger
+	cadence   time.Duration
+	batch     int
+	failed    int
 
 	mu      sync.Mutex
 	lastRun time.Time
 	lastErr string
 }
 
-// NewEnricher builds the production stage: every five seconds, fifty items at
-// a time.
-func NewEnricher(s EnrichStore, log *slog.Logger) *Enricher {
+// NewEnricher builds the stage: every five seconds, fifty items at a time. A
+// nil processor is the phase-2 shell.
+func NewEnricher(s EnrichStore, processor Processor, log *slog.Logger) *Enricher {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Enricher{store: s, log: log, cadence: 5 * time.Second, batch: 50}
+	return &Enricher{store: s, processor: processor, log: log, cadence: 5 * time.Second, batch: 50}
 }
 
 // Status is the loop's health in one sentence: when it last ran and what went
@@ -64,7 +71,7 @@ func (e *Enricher) Run(ctx context.Context) {
 			}
 			e.log.Error("enrichment pass failed", "error", err)
 		} else if n > 0 {
-			e.log.Info("items marked ready", "count", n)
+			e.log.Info("enrichment pass finished", "items", n, "failed", e.failed)
 		}
 		select {
 		case <-ctx.Done():
@@ -92,7 +99,15 @@ func (e *Enricher) Pass(ctx context.Context) (int, error) {
 			if err := ctx.Err(); err != nil {
 				return total, err
 			}
-			if err := e.store.MarkReady(ctx, item.ID); err != nil {
+			if e.processor != nil {
+				// A failed item has already recorded its retry on the row, so
+				// the next QueuedItems call will not return it; the batch keeps
+				// going regardless (plans/03 test 14).
+				if err := e.processor.Process(ctx, item); err != nil {
+					e.failed++
+					e.log.Error("enrichment item failed", "item", item.ID, "error", err)
+				}
+			} else if err := e.store.MarkReady(ctx, item.ID); err != nil {
 				e.record(err)
 				return total, err
 			}
