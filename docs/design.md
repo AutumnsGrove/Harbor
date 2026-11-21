@@ -561,11 +561,12 @@ Failures: retry **3× with backoff over ~an hour** — tracked on the item (`att
 error kept. The UI shows a dismissible **"needs attention"** strip with one-tap retry; failures are
 never silent. A bad URL must never wedge the queue.
 
-**Cost reality check:** a ~2,000-token page in plus one Jev decision (`typesafe/jev-1.14`), a
-DeepSeek-Flash-class chat call (`deepseek/deepseek-v4.1-flash-1017`), and a 1024-dim
-`pplx-embed-v1-0.6b` vector still lands well under **$0.001/save** — under a dollar a year at
-realistic volume. The expensive subscription tier wasn't paying for inference; it was paying for
-the UI and the gesture.
+**Cost reality check (measured 2026-11-21):** four live saves — a six-ingredient recipe page, two
+article pages of ~1,500–2,000 tokens, and one typed note — cost **$0.000788 in total, about
+$0.0002/save**, at the models above. Per save it ranged from $0.00012 (recipe) to $0.00030 (a note
+whose summary ran long). That is well under the **$0.001/save** this section budgeted, and under a
+dollar a year at realistic volume. The expensive subscription tier wasn't paying for inference; it
+was paying for the UI and the gesture.
 
 ---
 
