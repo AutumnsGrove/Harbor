@@ -13,7 +13,8 @@
 > interface in [design/mockup/](design/mockup/README.md), the build sequence (tests first) in
 > [docs/plans/](docs/plans/README.md), and the operator page for updates in
 > [docs/update.md](docs/update.md). Spikes S5, S7, S10 and S11 have been run; S7 changed the port to
-> 8897.
+> 8897. Phase 2 is built and green locally — the store, the Worker ingest, the items API and the
+> library shell — but its potato demo and the pending cards are still outstanding.
 >
 > ```bash
 > make check          # fmt, vet, race, svelte-check, vitest, watcher suite, packaging rules

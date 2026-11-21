@@ -1,6 +1,6 @@
 # Phase 2 — The core library: schema, poll loop, composer
 
-**Status:** planned · **Design refs:** [§4](../design.md#4-architecture),
+**Status:** in progress — server side and UI landed 2026-11-21, not deployed · **Design refs:** [§4](../design.md#4-architecture),
 [§5](../design.md#5-save-path), [§7](../design.md#7-data-model-sketch--open-in-details),
 [§11](../design.md#11-operations)
 **Depends on:** phase 1 · **Gate:** none · **Est:** 1 evening + part of a weekend
@@ -139,37 +139,37 @@ transaction and takes a `VACUUM INTO` snapshot first when the DB is non-empty.
 
 ## Tasks
 
-- [ ] `store` open: WAL, `busy_timeout`, `foreign_keys=ON`, `synchronous=NORMAL`, integrity check on
+- [x] `store` open: WAL, `busy_timeout`, `foreign_keys=ON`, `synchronous=NORMAL`, integrity check on
       start (log, don't fail).
-- [ ] Write `0001_init.sql` as exactly design §7 — items (with `seq`, three clocks, queue columns),
+- [x] Write `0001_init.sql` as exactly design §7 — items (with `seq`, three clocks, queue columns),
       tags, tag_aliases, item_tags, media, highlights, spaces (+ seeded `read-later`), space_items,
       space_suggestions, archives, items_fts, item_embeddings, processed_jobs, import_runs,
       task_runs, schema_migrations — with `PRAGMA foreign_keys=ON` and a cascade test per child.
-- [ ] `store` query layer with named functions; no SQL outside the package.
-- [ ] `canon` + `merge` with tests green before any handler exists.
-- [ ] `workerclient` with typed structs, `contracts/` validation, timeouts, and a `User-Agent` that
+- [x] `store` query layer with named functions; no SQL outside the package.
+- [x] `canon` + `merge` with tests green before any handler exists.
+- [x] `workerclient` with typed structs, `contracts/` validation, timeouts, and a `User-Agent` that
       identifies the version.
-- [ ] `queue` ingest stage: 30 s cadence with jitter, immediate refresh channel (used by the UI),
+- [x] `queue` ingest stage: 30 s cadence with jitter, immediate refresh channel (used by the UI),
       drains the queue in batches, ingests one job at a time, sends `done` only after the item
       commits, context-aware shutdown, structured log line per job. The enrichment stage is a
       separate loop that picks `state='queued'` items by `priority DESC, next_attempt_at`; in this
       phase it only flips them to `ready`.
 - [ ] `scheduler` skeleton: a registry of named tasks whose last run is persisted in `task_runs`, so
       a reboot never skips a day (later phases register their tasks into it).
-- [ ] `harbor replay --since <time>` using the Worker's replay route.
+- [x] `harbor replay --since <time>` using the Worker's replay route.
 - [ ] Pending window: `GET /jobs/pending` (queued + claimed, read-only) renders as greyed cards at
       the top of the home grid, with the source icon. They clear on the next refresh when they become
       items.
-- [ ] `POST /api/items` (in-app save) writing locally, then handing the item to the enrichment queue.
-- [ ] Home: masonry grid ported from the mockup (1 / 2–4 columns), card component with cover
+- [x] `POST /api/items` (in-app save) writing locally, then handing the item to the enrichment queue.
+- [x] Home: masonry grid ported from the mockup (1 / 2–4 columns), card component with cover
       placeholder, kind badge, tags (empty for now), hover details on desktop.
-- [ ] Item page: media block (empty), title, note (plain textarea this phase), tags, source, archive
+- [x] Item page: media block (empty), title, note (plain textarea this phase), tags, source, archive
       link placeholder, related placeholder. Every field editable via `PATCH /api/items/:id`.
-- [ ] Composer: URL + Markdown note + Read later switch, merge warning on an existing URL (the UI
+- [x] Composer: URL + Markdown note + Read later switch, merge warning on an existing URL (the UI
       asks the server). The image picker is **hidden until phase 6** (decided below).
-- [ ] Soft delete + "Recently deleted" read path in Settings (restore lands in phase 9; this phase
+- [x] Soft delete + "Recently deleted" read path in Settings (restore lands in phase 9; this phase
       only needs the plumbing to be correct).
-- [ ] First-run empty state: Import or paste a first link (Import is a stub until phase 5).
+- [x] First-run empty state: Import or paste a first link (Import is a stub until phase 5).
 
 ## Exit criteria
 
@@ -208,7 +208,45 @@ Demo:
 
 ## Build-time decisions to record
 
-- `www.` policy in canonicalisation (recommend: distinct).
-- Duplicate-note handling on merge (recommend: no-op if identical trimmed text).
+- `www.` policy in canonicalisation: **distinct**, implemented in `canon` and asserted by its table
+  tests. Collapsing it would merge genuinely different sites.
+- Duplicate-note handling on merge: appending the identical trimmed text is a **no-op**, implemented
+  by `noteAlreadyPresent`. Merging the same save twice is the common case (a re-claim, a replay), and
+  a duplicated note is the one visible defect it would leave.
 - Settled: a URL-less note is written as `note` at insert time (the column default stays `article`
   for URL items). Phase 3 skips classification for notes.
+
+## What landed (2026-11-21)
+
+The server side is complete and the shell has its first real screens. What is in the tree:
+
+- `store` (0001 schema, item/FTS pair, merge, soft delete, `processed_jobs`, counts, the queue read
+  path), `model`, `canon`, `workerclient`, `queue` (ingest + the enrichment shell), `harbor replay`.
+- `POST/GET /api/items`, `GET/PATCH/DELETE /api/items/:id`, `POST /api/items/:id/restore`,
+  `GET /api/items/lookup` for the merge warning, and real counts in `/api/status`.
+- Home (masonry feed, first run), the composer with the server's merge answer, the item page, and
+  Recently deleted in Settings.
+
+Decisions the plan left open, now made:
+
+- **Claim kinds are `link,note`.** The Worker's `kinds` filter is why ingest never leases an upload
+  it cannot process; uploading saves keep queueing at the Worker until phase 6.
+- **The enrichment shell is its own loop**, five seconds, and marks queued items ready in
+  `priority DESC, due, oldest` order. It flips a real state, so the pending count is honest; phase 3
+  replaces the body of the pass, not its shape.
+- **`/api/status` stays counts-only.** The phase-0 test pins the key set, so ingest/enrichment health
+  goes to the log until phase 12b adds a deliberate field.
+- **The list cursor is opaque** (base64 of `savedAt|seq`) and a 204 delete has no body; the web client
+  handles both.
+- **`harbor replay --since 0` is refused.** Zero more likely means the epoch than "now"; replaying
+  nothing silently is worse than asking.
+- **The item page shows no queued badge.** An item is ready within a tick after a save, so the only
+  state worth surfacing is `failed` (which arrives with phase 3).
+
+Still open in this phase:
+
+- The pending window: `GET /jobs/pending` is cliented but not exposed by the Go server or drawn as
+  greyed cards. It is the remaining exit-demo step that is not just "deploy and look".
+- The scheduler skeleton (`task_runs` registry). Nothing in phase 2 registers a task, so this can
+  land with the first phase that needs it; the column and table already exist.
+- The potato demo itself: curl a save, watch it appear, re-save, edit, delete, replay, kill mid-poll.
