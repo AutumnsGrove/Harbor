@@ -52,6 +52,11 @@ type itemDTO struct {
 	Tags      []string `json:"tags,omitempty"`
 	ReadLater bool     `json:"readLater,omitempty"`
 
+	// Details is details_json parsed: the schema.org fields the per-kind layout
+	// renders (recipe ingredients, product offers, place address…). One item
+	// only; a list stays lean, and an unenriched row has nothing to send.
+	Details map[string]any `json:"details,omitempty"`
+
 	CreatedAt time.Time  `json:"createdAt"`
 	SavedAt   time.Time  `json:"savedAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
@@ -384,7 +389,32 @@ func (s *Server) detail(r *http.Request, item model.Item) itemDTO {
 	} else {
 		s.log.Warn("tags for an item are unavailable", "error", err, "id", item.ID)
 	}
+	if details, err := parseDetails(item.DetailsJSON); err != nil {
+		// The layout is a bonus on top of a real row; a broken column is a log
+		// line, not a 500 that hides the item.
+		s.log.Warn("details for an item are unreadable", "error", err, "id", item.ID)
+	} else {
+		dto.Details = details
+	}
 	return dto
+}
+
+// parseDetails turns details_json into the object the item page renders. The
+// column is written by enrichment and defaults to "{}"; anything that is not
+// a JSON object (including the empty default) means "no details", not an error.
+func parseDetails(raw string) (map[string]any, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
+		return nil, nil
+	}
+	var details map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &details); err != nil {
+		return nil, fmt.Errorf("details_json: %w", err)
+	}
+	if len(details) == 0 {
+		return nil, nil
+	}
+	return details, nil
 }
 
 // --- /api/attention --------------------------------------------------------

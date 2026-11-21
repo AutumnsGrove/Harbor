@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AutumnsGrove/Harbor/server/internal/model"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
 )
 
@@ -330,6 +331,79 @@ func TestUpdateItemPersistsAnEdit(t *testing.T) {
 	}
 	if rec := itemsRequest(h, http.MethodPatch, "/api/items/"+saved.Item.ID, map[string]any{}); rec.Code != http.StatusBadRequest {
 		t.Errorf("PATCH with nothing = %d, want 400", rec.Code)
+	}
+}
+
+// plans/03 — the per-kind layout reads details_json. One item carries the
+// parsed object; the list does not, because the grid never renders a recipe.
+func TestItemDetailsBackThePerKindLayout(t *testing.T) {
+	h, library := itemsHandler(t)
+	saved := saveItem(t, h, map[string]any{"url": "https://example.com/recipe"})
+
+	details := `{"type":"Recipe","ingredients":["2 eggs","1 cup flour"],` +
+		`"instructions":["Beat","Fry"],"totalTime":"PT25M","yield":"12 pancakes"}`
+	if _, err := library.ApplyEnrichment(context.Background(), saved.Item.ID, store.Enrichment{
+		Kind:          model.KindRecipe,
+		Summary:       "A recipe.",
+		DetailsJSON:   details,
+		PromptVersion: "tag.v1",
+	}); err != nil {
+		t.Fatalf("ApplyEnrichment: %v", err)
+	}
+
+	rec := itemsRequest(h, http.MethodGet, "/api/items/"+saved.Item.ID, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET item = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Item struct {
+			Kind    string         `json:"kind"`
+			Details map[string]any `json:"details"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("item response is not JSON: %v", err)
+	}
+	if body.Item.Kind != "recipe" {
+		t.Errorf("kind = %q, want recipe", body.Item.Kind)
+	}
+	if body.Item.Details["type"] != "Recipe" {
+		t.Errorf("details.type = %v, want Recipe", body.Item.Details["type"])
+	}
+	if got, ok := body.Item.Details["ingredients"].([]any); !ok || len(got) != 2 {
+		t.Errorf("details.ingredients = %v, want two items", body.Item.Details["ingredients"])
+	}
+	if body.Item.Details["totalTime"] != "PT25M" || body.Item.Details["yield"] != "12 pancakes" {
+		t.Errorf("details lost the recipe fields: %v", body.Item.Details)
+	}
+
+	// The home grid stays one lean query: no details in the list.
+	list := itemsRequest(h, http.MethodGet, "/api/items", nil)
+	if list.Code != http.StatusOK {
+		t.Fatalf("GET items = %d (body %s)", list.Code, list.Body.String())
+	}
+	if strings.Contains(list.Body.String(), "ingredients") {
+		t.Errorf("the item list carries details: %s", list.Body.String())
+	}
+}
+
+// A row whose details_json is not an object is still an item worth opening.
+func TestUnreadableDetailsDoNotHideTheItem(t *testing.T) {
+	h, library := itemsHandler(t)
+	saved := saveItem(t, h, map[string]any{"url": "https://example.com/broken"})
+	if _, err := library.ApplyEnrichment(context.Background(), saved.Item.ID, store.Enrichment{
+		Kind:        model.KindArticle,
+		DetailsJSON: `{"type": `,
+	}); err != nil {
+		t.Fatalf("ApplyEnrichment: %v", err)
+	}
+
+	rec := itemsRequest(h, http.MethodGet, "/api/items/"+saved.Item.ID, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET item = %d (body %s), want 200", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"details"`) {
+		t.Errorf("unreadable details were sent: %s", rec.Body.String())
 	}
 }
 
