@@ -1,0 +1,33 @@
+{
+  "Title": "Field Notebook",
+  "Byline": "",
+  "SiteName": "Shop",
+  "Language": "en",
+  "Excerpt": "A5, 192 pages, dot grid, lies flat. Made for the bag you actually carry.",
+  "Published": null,
+  "CoverURL": "https://shop.example/p/notebook.jpg",
+  "Text": "A5, 192 pages, dot grid, lies flat. Made for the bag you actually carry.\n      Paper stock is 100 gsm, warm white, and forgiving of fountain ink.",
+  "Markdown": "A5, 192 pages, dot grid, lies flat. Made for the bag you actually carry.\n\nPaper stock is 100 gsm, warm white, and forgiving of fountain ink.",
+  "OG": {
+    "title": "Field Notebook",
+    "siteName": "Shop",
+    "image": "https://shop.example/p/notebook.jpg"
+  },
+  "Details": {
+    "brand": "Grove Press",
+    "description": "A5, 192 pages, dot grid, lies flat.",
+    "image": "https://shop.example/p/notebook.jpg",
+    "name": "Field Notebook",
+    "offers": {
+      "availability": "InStock",
+      "currency": "USD",
+      "price": "18.00",
+      "url": "https://shop.example/p/notebook"
+    },
+    "rating": {
+      "count": 128,
+      "value": 4.7
+    },
+    "type": "Product"
+  }
+}

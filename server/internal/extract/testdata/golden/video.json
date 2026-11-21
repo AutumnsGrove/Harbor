@@ -1,0 +1,25 @@
+{
+  "Title": "Building a static site",
+  "Byline": "",
+  "SiteName": "",
+  "Language": "en",
+  "Excerpt": "A walk through the build, from an empty directory to a deployed image.",
+  "Published": null,
+  "CoverURL": "https://video.example/thumb.jpg",
+  "Text": "A walk through the build, from an empty directory to a deployed image.",
+  "Markdown": "A walk through the build, from an empty directory to a deployed image.",
+  "OG": {
+    "title": "Building a static site",
+    "type": "video.other",
+    "image": "https://video.example/thumb.jpg"
+  },
+  "Details": {
+    "description": "A walk through the build.",
+    "duration": "PT12M34S",
+    "embedUrl": "https://video.example/embed/123",
+    "name": "Building a static site",
+    "thumbnailUrl": "https://video.example/thumb.jpg",
+    "type": "VideoObject",
+    "uploadDate": "2026-08-01T10:00:00Z"
+  }
+}

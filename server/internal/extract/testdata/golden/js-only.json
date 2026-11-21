@@ -1,0 +1,17 @@
+{
+  "Title": "A page that needs JavaScript",
+  "Byline": "",
+  "SiteName": "App",
+  "Language": "en",
+  "Excerpt": "The content is rendered in the browser.",
+  "Published": null,
+  "CoverURL": "",
+  "Text": "",
+  "Markdown": "",
+  "OG": {
+    "title": "A page that needs JavaScript",
+    "description": "The content is rendered in the browser.",
+    "siteName": "App"
+  },
+  "Details": {}
+}

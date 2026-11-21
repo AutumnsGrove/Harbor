@@ -1,0 +1,23 @@
+{
+  "Title": "Graph page — Kitchen",
+  "Byline": "",
+  "SiteName": "",
+  "Language": "en",
+  "Excerpt": "Stir, cover, refrigerate overnight.",
+  "Published": null,
+  "CoverURL": "",
+  "Text": "Overnight oatsStir, cover, refrigerate overnight.",
+  "Markdown": "## Overnight oats\n\nStir, cover, refrigerate overnight.",
+  "OG": {},
+  "Details": {
+    "ingredients": [
+      "50 g oats",
+      "100 ml milk"
+    ],
+    "instructions": [
+      "Stir, cover, refrigerate overnight."
+    ],
+    "name": "Overnight oats",
+    "type": "Recipe"
+  }
+}
