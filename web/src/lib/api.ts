@@ -97,6 +97,61 @@ export type ItemKind =
 export type ItemSource = 'app' | 'telegram' | 'shortcut' | 'quick' | 'share' | 'import';
 export type ItemState = 'queued' | 'enriching' | 'ready' | 'failed';
 
+/**
+ * details_json, parsed: curated schema.org fields from extract/jsonld.go. Every
+ * field is optional because a page without JSON-LD, or an item enrichment has
+ * not reached yet, has none — the layout hides a row rather than show a blank.
+ */
+export type ItemDetails = {
+	type?: string;
+	name?: string;
+	description?: string;
+	url?: string;
+	image?: string;
+	author?: string[];
+	published?: string;
+	updated?: string;
+	/* Recipe */
+	ingredients?: string[];
+	instructions?: string[];
+	prepTime?: string;
+	cookTime?: string;
+	totalTime?: string;
+	yield?: string;
+	cuisine?: string;
+	category?: string;
+	/* Product */
+	brand?: string;
+	offers?: { price?: string; currency?: string; availability?: string; url?: string };
+	rating?: { value?: number; best?: number; count?: number };
+	/* Place */
+	address?: {
+		streetAddress?: string;
+		addressLocality?: string;
+		addressRegion?: string;
+		postalCode?: string;
+		addressCountry?: string;
+	};
+	telephone?: string;
+	openingHours?: string[];
+	/* VideoObject */
+	duration?: string;
+	embedUrl?: string;
+	thumbnailUrl?: string;
+	uploadDate?: string;
+	/* ScholarlyArticle */
+	abstract?: string;
+	/* Article family */
+	section?: string;
+	/* Book */
+	isbn?: string;
+	pages?: number;
+	publisher?: string;
+	genre?: string[];
+	/* Movie */
+	director?: string[];
+};
+
 export type Item = {
 	id: string;
 	url: string | null;
@@ -113,6 +168,8 @@ export type Item = {
 	lastError?: string;
 	/** Filled for one item; absent in a list so the grid stays one query. */
 	tags?: string[];
+	/** details_json, filled for one item; the per-kind layout is built on it. */
+	details?: ItemDetails;
 	readLater?: boolean;
 	createdAt: string;
 	savedAt: string;
