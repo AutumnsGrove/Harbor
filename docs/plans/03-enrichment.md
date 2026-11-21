@@ -1,6 +1,6 @@
 # Phase 3 — Enrichment: the library organises itself
 
-**Status:** in progress — fetch, extract, the tag/write path and the pipeline landed 2026-11-21; Nova adapters and the UI still to come · **Design refs:** [§6](../design.md#6-enrichment-pipeline),
+**Status:** in progress — fetch, extract, the tag/write path, the pipeline and the Nova adapters landed 2026-11-21; the UI and scored set still to come · **Design refs:** [§6](../design.md#6-enrichment-pipeline),
 [§8](../design.md#8-search) (FTS only), [C1–C5](../open-questions.md),
 [§9](../design.md#9-ui-sveltekit-embedded) (attention strip, kind badges)
 **Depends on:** phase 2 · **Gate:** [S5](spikes.md#s5--nova-embed-returns-what-designmd-says)
@@ -141,10 +141,10 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
 - [x] Fixture corpus in `server/internal/extract/testdata/pages/`: article, paywalled teaser,
       JS-only page (expect poor extraction — record it), non-Latin page, huge page, malformed HTML,
       PDF link. Golden output committed; `-update` regenerates.
-- [ ] Nova wiring: `decide` for kind, `provider/openrouter` + `deepseek/deepseek-v4.1-flash-1017` for
+- [x] Nova wiring: `decide` for kind, `provider/openrouter` + `deepseek/deepseek-v4.1-flash-1017` for
       tags/summary/title, `embed` for the vector. One shared HTTP client, per-call timeouts, token
       caps (8k in), and a usage log line with model + tokens + cost estimate.
-- [ ] Prompt files as embedded text with a version constant; the prompt includes the current canonical
+- [x] Prompt files as embedded text with a version constant; the prompt includes the current canonical
       tag vocabulary (phase 9 depends on this habit being in place now).
 - [x] Write path: item row updated in one transaction with FTS and embedding; `enriched_at` set.
 - [x] `kind_source`: AI default, `manual` once a user edits it, and a manual kind is never overwritten
@@ -192,11 +192,18 @@ Decisions made here:
   an oversized body, a non-HTML content type and a wrong-sized vector are terminal immediately.
 - **PDFs are terminal until phase 6.** The item stays, the reason is `last_error`, and the attention
   strip (still to land) will show it.
-- **The enrichment shell is still the default** in `serve`: the Nova adapters are not wired, so a
-  queued item is marked ready without model work until they are.
+- **Nova adapters** (`enrich/nova`) implement the three pipeline interfaces: `decide` with one
+  choice question over the twelve kinds plus `paywalled`/`video` nouls; one strict JSON-schema chat
+  call for title/summary/tags; `embed` through a role with `Dims: 1024`. Prompt files are embedded
+  and named by version (`prompts/tag.v1.md` is `DefaultPromptVersion`), so the stored prompt version
+  and the file cannot drift. Model ids are constants, not config: changing one is a code change with
+  a new prompt version.
+- **Wiring**: with `OPENROUTER_API_KEY` set, `serve` builds the real pipeline; without it the
+  phase-2 shell stays and the log says enrichment is only marking items ready. A missing key never
+  blocks a save.
 
-Still open: Nova adapters and prompts, the attention strip, per-kind layouts, the scored fixture
-set, and the cost measurement.
+Still open: the attention strip, per-kind layouts, the scored fixture set, and the cost
+measurement. The Nova calls themselves need a live key for the first real run.
 
 ## Exit criteria
 
