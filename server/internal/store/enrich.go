@@ -16,17 +16,19 @@ import (
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
 )
 
-// QueuedItems is one enrichment batch: the highest priority first, then the
-// earliest due, then oldest saved so a backlog drains in order. A NULL
-// next_attempt_at is due now.
+// QueuedItems is one enrichment batch: due work only, the highest priority
+// first, then the earliest due, then oldest saved so a backlog drains in order.
+// A NULL next_attempt_at is due now; a failed item waiting out its backoff is
+// not returned until its turn.
 func (s *Store) QueuedItems(ctx context.Context, limit int) ([]model.Item, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+itemColumns+` FROM items
 		WHERE state = 'queued' AND deleted_at IS NULL
+		  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 		ORDER BY priority DESC, next_attempt_at IS NULL DESC, next_attempt_at ASC, saved_at ASC, seq ASC
-		LIMIT ?`, limit)
+		LIMIT ?`, stamp(time.Now().UTC()), limit)
 	if err != nil {
 		return nil, fmt.Errorf("queued items: %w", err)
 	}
@@ -65,6 +67,13 @@ type Enrichment struct {
 
 	// Tags are the AI tags. Manual tags survive a re-enrichment.
 	Tags []string
+
+	// Embedding is written in the same transaction as the row when set. A pass
+	// that has no vector (an embedding failure) still enriches; the retry task
+	// fills the vector later.
+	Embedding      []float32
+	EmbeddingModel string
+	EmbeddingHash  string
 }
 
 // ApplyEnrichment writes one successful pass and marks the item ready. A manual
@@ -119,6 +128,11 @@ func (s *Store) ApplyEnrichment(ctx context.Context, id string, e Enrichment) (m
 		if err := refreshTagsText(ctx, tx, item.Seq); err != nil {
 			return err
 		}
+		if len(e.Embedding) > 0 {
+			if err := saveEmbeddingTx(ctx, tx, id, e.EmbeddingModel, e.Embedding, e.EmbeddingHash); err != nil {
+				return err
+			}
+		}
 		fresh, err := getItemTx(ctx, tx, id)
 		if err != nil {
 			return err
@@ -153,7 +167,22 @@ func (s *Store) SaveEmbedding(ctx context.Context, itemID, modelName string, vec
 	if contentHash == "" {
 		return errors.New("store: an embedding needs a content hash")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO item_embeddings
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		return saveEmbeddingTx(ctx, tx, itemID, modelName, vec, contentHash)
+	})
+}
+
+func saveEmbeddingTx(ctx context.Context, tx *sql.Tx, itemID, modelName string, vec []float32, contentHash string) error {
+	if modelName == "" {
+		return errors.New("store: an embedding needs a model name")
+	}
+	if len(vec) == 0 {
+		return errors.New("store: an embedding needs at least one dimension")
+	}
+	if contentHash == "" {
+		return errors.New("store: an embedding needs a content hash")
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO item_embeddings
 		(item_id, model, dims, content_hash, vec, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(item_id) DO UPDATE SET
@@ -199,6 +228,29 @@ func encodeVector(vec []float32) []byte {
 		binary.LittleEndian.PutUint32(blob[i*4:], math.Float32bits(value))
 	}
 	return blob
+}
+
+// RecordEnrichmentFailure advances the retry columns after a failed pass. A
+// next attempt of nil parks the item as failed; otherwise it stays queued and
+// is invisible to QueuedItems until the delay elapses (design.md §6).
+func (s *Store) RecordEnrichmentFailure(ctx context.Context, id, message string, next *time.Time) (model.Item, error) {
+	state := model.StateQueued
+	if next == nil {
+		state = model.StateFailed
+	}
+	if len(message) > 1_000 {
+		message = message[:1_000]
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE items
+		SET attempts = attempts + 1,
+		    next_attempt_at = ?,
+		    last_error = ?,
+		    state = ?
+		WHERE id = ?`,
+		nullableStamp(next), message, string(state), id); err != nil {
+		return model.Item{}, fmt.Errorf("recording failure for %s: %w", id, err)
+	}
+	return s.GetItem(ctx, id)
 }
 
 // MarkReady closes the enrichment stage for an item. It is idempotent: marking

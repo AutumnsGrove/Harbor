@@ -188,3 +188,22 @@ func TestTaggingASoftDeletedItemDoesNotMakeItSearchable(t *testing.T) {
 		t.Errorf("tags = %v, %v; want the write to persist", tags, err)
 	}
 }
+
+func TestTagVocabularyIsOrderedByUseAndSkipsDeletedItems(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	mustCreate(t, s, ItemInput{ID: "a", Note: "x", Tags: []string{"rust"}})
+	mustCreate(t, s, ItemInput{ID: "b", Note: "x", Tags: []string{"rust", "go"}})
+	mustCreate(t, s, ItemInput{ID: "c", Note: "x", Tags: []string{"cobol"}})
+	if err := s.SoftDeleteItem(ctx, "c"); err != nil {
+		t.Fatal(err)
+	}
+
+	vocab, err := s.TagVocabulary(ctx, 10)
+	if err != nil {
+		t.Fatalf("TagVocabulary: %v", err)
+	}
+	if len(vocab) != 2 || vocab[0] != "rust" || vocab[1] != "go" {
+		t.Errorf("vocab = %v, want rust then go", vocab)
+	}
+}

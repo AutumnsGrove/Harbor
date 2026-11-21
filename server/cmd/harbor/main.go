@@ -99,7 +99,7 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 	// because an in-app save enters the same queue.
 	workCtx, stopWork := context.WithCancel(context.Background())
 	defer stopWork()
-	go queue.NewEnricher(library, log).Run(workCtx)
+	go queue.NewEnricher(library, nil, log).Run(workCtx)
 
 	// pending is what /api/pending shows: the saves still at the Worker. Nil is
 	// a valid state and answers an empty list.

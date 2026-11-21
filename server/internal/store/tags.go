@@ -189,3 +189,33 @@ func resolveTagTx(ctx context.Context, tx *sql.Tx, name string) (int64, string, 
 	}
 	return 0, "", fmt.Errorf("tag %q: the alias chain is longer than %d", name, maxAliasDepth)
 }
+
+// TagVocabulary is the most-used canonical tags, which the enrichment prompt
+// carries so the model reuses a spelling instead of inventing a near-duplicate
+// (plans/03 "Prompt files"). Aliases are not included: the model should see
+// canon, not history.
+func (s *Store) TagVocabulary(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.name FROM tags t
+		JOIN item_tags it ON it.tag_id = t.id
+		JOIN items i ON i.id = it.item_id AND i.deleted_at IS NULL
+		GROUP BY t.id
+		ORDER BY count(*) DESC, t.name ASC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("tag vocabulary: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}

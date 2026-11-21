@@ -22,7 +22,7 @@ func TestQueuedItemsOrdersByPriorityThenDue(t *testing.T) {
 
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE items SET next_attempt_at = ? WHERE id = 'blocked'`,
-		stamp(base.Add(24*time.Hour))); err != nil {
+		stamp(base.Add(-time.Hour))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -38,6 +38,48 @@ func TestQueuedItemsOrdersByPriorityThenDue(t *testing.T) {
 		if items[i].ID != id {
 			t.Errorf("position %d = %q, want %q (full order %v)", i, items[i].ID, id, ids(items))
 		}
+	}
+}
+
+func TestQueuedItemsSkipsWorkThatIsNotDueYet(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	mustCreate(t, s, ItemInput{ID: "due", Note: "now"})
+	mustCreate(t, s, ItemInput{ID: "later", Note: "after the backoff"})
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE items SET next_attempt_at = ? WHERE id = 'later'`,
+		stamp(time.Now().UTC().Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.QueuedItems(ctx, 10)
+	if err != nil {
+		t.Fatalf("QueuedItems: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "due" {
+		t.Errorf("QueuedItems = %v, want only the due item", ids(items))
+	}
+}
+
+func TestRecordEnrichmentFailureAdvancesTheRetryColumns(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	mustCreate(t, s, ItemInput{ID: "a", Note: "x"})
+
+	next := time.Now().UTC().Add(10 * time.Minute)
+	item, err := s.RecordEnrichmentFailure(ctx, "a", "fetch failed", &next)
+	if err != nil {
+		t.Fatalf("RecordEnrichmentFailure: %v", err)
+	}
+	if item.Attempts != 1 || item.State != model.StateQueued || item.LastError != "fetch failed" || item.NextAttemptAt == nil {
+		t.Errorf("after the first failure = %+v", item)
+	}
+
+	item, err = s.RecordEnrichmentFailure(ctx, "a", "gave up", nil)
+	if err != nil {
+		t.Fatalf("RecordEnrichmentFailure: %v", err)
+	}
+	if item.Attempts != 2 || item.State != model.StateFailed || item.NextAttemptAt != nil {
+		t.Errorf("after the terminal failure = %+v", item)
 	}
 }
 
