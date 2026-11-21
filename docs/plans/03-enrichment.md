@@ -156,7 +156,7 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
       generic layout plus article, video, recipe and product first; the other kinds follow as their
       data exists (see the cut list in plans/README). Price history/trends are deferred. Empty states
       are part of the work, not an afterthought.
-- [ ] Attention strip: failed items from `store` (not from logs), one-tap retry, dismissible for the
+- [x] Attention strip: failed items from `store` (not from logs), one-tap retry, dismissible for the
       session, amber per the colour rules.
 - [ ] Scored fixture set: ~40 real saves with human kind + tag sets; `make enrich-score` prints
       accuracy and per-kind confusion.
@@ -201,9 +201,11 @@ Decisions made here:
 - **Wiring**: with `OPENROUTER_API_KEY` set, `serve` builds the real pipeline; without it the
   phase-2 shell stays and the log says enrichment is only marking items ready. A missing key never
   blocks a save.
+- **Attention strip**: `store.FailedItems` reads the failed rows (not the logs, so a restart keeps
+  them); `POST /api/items/:id/retry` resets attempts, clears the reason and requeues. Home shows an
+  amber strip with up to three retryable failures, dismissible for the session.
 
-Still open: the attention strip, per-kind layouts, the scored fixture set, and the cost
-measurement. The Nova calls themselves need a live key for the first real run.
+Still open: per-kind layouts, the scored fixture set, and the cost measurement. The Nova calls themselves need a live key for the first real run.
 
 ## Exit criteria
 

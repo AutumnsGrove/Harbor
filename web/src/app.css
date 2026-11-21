@@ -964,3 +964,43 @@ input.switch:checked::after {
 	color: var(--amb);
 	font-size: var(--t-s);
 }
+
+/* needs attention: enrichment failures, amber because they need a person */
+.attention {
+	display: grid;
+	gap: 10px;
+	margin-bottom: 22px;
+	padding: 14px 16px;
+	border-radius: var(--r-m);
+	background: var(--amb-soft);
+	color: var(--amb);
+	font-size: var(--t-s);
+}
+
+.attention-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.attention-head .dim {
+	color: var(--mute);
+}
+
+.attention-head .btn {
+	margin-left: auto;
+}
+
+.attention-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding-top: 10px;
+	border-top: 1px solid rgba(242, 184, 102, 0.18);
+	color: var(--ink);
+}
+
+.attention-row .dim {
+	color: var(--mute);
+}

@@ -20,6 +20,9 @@
 	let pending = $state<PendingJob[]>([]);
 	let pendingProblem = $state<string | null>(null);
 	let lastPending = new Set<string>();
+	let failed = $state<Item[]>([]);
+	let attentionDismissed = $state(false);
+	let retrying = $state<string | null>(null);
 
 	let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -66,6 +69,29 @@
 		}
 	}
 
+	async function loadAttention() {
+		try {
+			const answer = await api.attention.list();
+			failed = answer.items;
+		} catch {
+			// The library itself is fine; the strip is an optional warning.
+		}
+	}
+
+	async function retry(item: Item) {
+		retrying = item.id;
+		try {
+			await api.items.retry(item.id);
+			failed = failed.filter((entry) => entry.id !== item.id);
+			say('Retrying. It will leave the queue in a minute.');
+			void loadPending();
+		} catch (error) {
+			problem = message(error);
+		} finally {
+			retrying = null;
+		}
+	}
+
 	function saved(item: Item, merged: boolean) {
 		composing = false;
 		say(merged ? `Merged into “${item.title || item.url}”` : 'Saved.');
@@ -109,8 +135,12 @@
 	onMount(() => {
 		void load();
 		void loadPending();
+		void loadAttention();
 		const timer = setInterval(() => {
-			if (document.visibilityState === 'visible') void loadPending();
+			if (document.visibilityState === 'visible') {
+				void loadPending();
+				void loadAttention();
+			}
 		}, 30_000);
 		return () => clearInterval(timer);
 	});
@@ -179,6 +209,32 @@
 			<Icon name="alert" size={16} />
 			<span>{problem}</span>
 			<button class="btn sm ghost" onclick={load}>Retry</button>
+		</div>
+	{/if}
+
+	{#if failed.length > 0 && !attentionDismissed}
+		<div class="attention" role="status">
+			<div class="attention-head">
+				<Icon name="alert" size={15} />
+				<strong
+					>{failed.length} save{failed.length === 1 ? '' : 's'} couldn't be read.</strong
+				>
+				<span class="dim">The save is safe; the enrichment is not.</span>
+				<button class="btn sm ghost" onclick={() => (attentionDismissed = true)}>
+					Not now
+				</button>
+			</div>
+			{#each failed.slice(0, 3) as entry (entry.id)}
+				<div class="attention-row">
+					<span class="grow">
+						{entry.title || entry.url || 'Untitled note'}
+						{#if entry.lastError}<span class="dim"> · {entry.lastError}</span>{/if}
+					</span>
+					<button class="btn sm" onclick={() => retry(entry)} disabled={retrying === entry.id}>
+						{retrying === entry.id ? 'Retrying…' : 'Retry'}
+					</button>
+				</div>
+			{/each}
 		</div>
 	{/if}
 
