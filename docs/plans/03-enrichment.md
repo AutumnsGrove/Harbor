@@ -1,6 +1,6 @@
 # Phase 3 — Enrichment: the library organises itself
 
-**Status:** planned · **Design refs:** [§6](../design.md#6-enrichment-pipeline),
+**Status:** in progress — fetch, extract, the tag/write path and the pipeline landed 2026-11-21; Nova adapters and the UI still to come · **Design refs:** [§6](../design.md#6-enrichment-pipeline),
 [§8](../design.md#8-search) (FTS only), [C1–C5](../open-questions.md),
 [§9](../design.md#9-ui-sveltekit-embedded) (attention strip, kind badges)
 **Depends on:** phase 2 · **Gate:** [S5](spikes.md#s5--nova-embed-returns-what-designmd-says)
@@ -137,8 +137,8 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
 
 ## Tasks
 
-- [ ] `fetch` + `extract` behind one interface so tests can substitute a fixture body for a URL.
-- [ ] Fixture corpus in `server/internal/extract/testdata/pages/`: article, paywalled teaser,
+- [x] `fetch` + `extract` behind one interface so tests can substitute a fixture body for a URL.
+- [x] Fixture corpus in `server/internal/extract/testdata/pages/`: article, paywalled teaser,
       JS-only page (expect poor extraction — record it), non-Latin page, huge page, malformed HTML,
       PDF link. Golden output committed; `-update` regenerates.
 - [ ] Nova wiring: `decide` for kind, `provider/openrouter` + `deepseek/deepseek-v4.1-flash-1017` for
@@ -146,8 +146,8 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
       caps (8k in), and a usage log line with model + tokens + cost estimate.
 - [ ] Prompt files as embedded text with a version constant; the prompt includes the current canonical
       tag vocabulary (phase 9 depends on this habit being in place now).
-- [ ] Write path: item row updated in one transaction with FTS and embedding; `enriched_at` set.
-- [ ] `kind_source`: AI default, `manual` once a user edits it, and a manual kind is never overwritten
+- [x] Write path: item row updated in one transaction with FTS and embedding; `enriched_at` set.
+- [x] `kind_source`: AI default, `manual` once a user edits it, and a manual kind is never overwritten
       by re-enrichment.
 - [ ] Per-kind item layouts, ported from `design/mockup` — each is a small switch over which
       `details_json` fields to show (recipe: ingredients/method; video: chapters/transcript
@@ -162,6 +162,41 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
       accuracy and per-kind confusion.
 - [ ] Measured cost: log and record the actual $/save from the first 100 real saves; put the number in
       design.md §6's cost paragraph.
+
+## What landed (2026-11-21)
+
+- **`fetch`**: 5 MB cap, 20 s timeout, five redirects, no proxy or cookies, and the SSRF policy
+  checked on the URL *and* in the dialer on the resolved address (loopback, RFC1918, link-local,
+  CGNAT, ULA/tailnet, NAT64, documentation ranges, ports other than 80/443, `*.local`, `*.ts.net`).
+  `fetch.HTTPError.Permanent()` is what the retry policy reads.
+- **`extract`**: one parse shared by go-readability and the Markdown converter, OG/Twitter
+  fallbacks, curated schema.org details (Place subtypes fold into Place), output capped and forced
+  to valid UTF-8. Ten golden fixtures plus `FuzzHTMLExtract`; fuzzing found a lone 0xE3 byte passing
+  through the HTML parser, and that seed is committed.
+- **Tags**: one write path for saves, import and AI — normalise, resolve aliases (depth 8,
+  cycle-safe), reuse canon, replace per source, keep `tags_text` and FTS in the transaction. Manual
+  tags survive AI re-enrichment.
+- **Write**: `ApplyEnrichment` writes the row, AI tags, FTS and the 1024-dim vector in one
+  transaction; a manual kind and a typed title are never overwritten.
+- **Pipeline**: interfaces for fetch/decide/write/embed, a real store, and fakes with recorded
+  answers. Notes skip fetch and decide; a manual kind skips decide; an unknown kind becomes
+  `article`.
+
+Decisions made here:
+
+- **Embedding input** is `title + summary + the first 2,000 characters of the body`; the hash of
+  exactly that string is stored so re-embedding can be skipped later.
+- **A summary is required**; more than 8 tags is a shape failure (retry, not truncation). 0 tags is
+  allowed.
+- **Two retries, then park**: 15 min then 45 min, three attempts in total; a 404, a blocked address,
+  an oversized body, a non-HTML content type and a wrong-sized vector are terminal immediately.
+- **PDFs are terminal until phase 6.** The item stays, the reason is `last_error`, and the attention
+  strip (still to land) will show it.
+- **The enrichment shell is still the default** in `serve`: the Nova adapters are not wired, so a
+  queued item is marked ready without model work until they are.
+
+Still open: Nova adapters and prompts, the attention strip, per-kind layouts, the scored fixture
+set, and the cost measurement.
 
 ## Exit criteria
 
