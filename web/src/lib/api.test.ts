@@ -43,6 +43,38 @@ describe('the API client', () => {
 		await expect(api.version()).resolves.toEqual({ version: 'r412.1a2b3c4', deployment: 'docker' });
 	});
 
+	it('sends the composer\'s save as JSON and returns the merged flag', async () => {
+		const fetch = vi.fn(async () =>
+			respond({ item: { id: 'i1', title: 'Example' }, merged: true }, { status: 201 })
+		);
+		vi.stubGlobal('fetch', fetch);
+
+		const saved = await api.items.create({ url: 'https://example.com', note: 'later' });
+
+		expect(saved.merged).toBe(true);
+		const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(path).toBe('/api/items');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(String(init.body))).toEqual({ url: 'https://example.com', note: 'later' });
+		expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
+	});
+
+	it('treats 204 as a successful delete', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+
+		await expect(api.items.remove('i1')).resolves.toBeUndefined();
+	});
+
+	it('pages the library with an encoded cursor', async () => {
+		const fetch = vi.fn(async () => respond({ items: [], next: null }));
+		vi.stubGlobal('fetch', fetch);
+
+		await api.items.list({ limit: 20, cursor: 'abc+/=', deleted: true });
+
+		const [path] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(path).toBe('/api/items?limit=20&cursor=abc%2B%2F%3D&deleted=true');
+	});
+
 	it('posts to the update endpoints without a body', async () => {
 		const fetch = vi.fn(async () => respond({ status: 'checking' }, { status: 202 }));
 		vi.stubGlobal('fetch', fetch);
