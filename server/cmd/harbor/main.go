@@ -94,10 +94,12 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 		}
 	}()
 
-	// The ingest loop is outbound only (design.md §4). Without a Worker it is
-	// skipped, so `make dev` works on a laptop and in-app saves still land.
-	ingestCtx, stopIngest := context.WithCancel(context.Background())
-	defer stopIngest()
+	// Two goroutines, two queues (design.md §5): ingest pulls the Worker, and
+	// enrichment works the item rows. Enrichment runs even with no Worker,
+	// because an in-app save enters the same queue.
+	workCtx, stopWork := context.WithCancel(context.Background())
+	defer stopWork()
+	go queue.NewEnricher(library, log).Run(workCtx)
 	switch {
 	case cfg.WorkerURL == "" && cfg.WorkerToken == "":
 		log.Warn("no Worker configured; remote saves will not be pulled", "env", build.EnvWorkerURL)
@@ -108,7 +110,7 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 		if err != nil {
 			return err
 		}
-		go queue.NewLoop(queue.NewIngestor(client, library, log)).Run(ingestCtx)
+		go queue.NewLoop(queue.NewIngestor(client, library, log)).Run(workCtx)
 	}
 
 	server := &http.Server{
