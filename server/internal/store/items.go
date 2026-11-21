@@ -123,6 +123,26 @@ func hasURL(in ItemInput) bool { return in.URL != nil && strings.TrimSpace(*in.U
 // writeItem is the single insert/merge implementation, so the two entry points
 // cannot drift.
 func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.Item, bool, error) {
+	var (
+		out    model.Item
+		merged bool
+	)
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		out, merged, err = writeItemTx(ctx, tx, in, merge)
+		return err
+	})
+	if err != nil {
+		return model.Item{}, false, err
+	}
+	return out, merged, nil
+}
+
+// writeItemTx is the insert/merge body. It takes a transaction rather than
+// opening one so ingest can record the Worker job id in the same commit: a row
+// without its processed_jobs entry would be replayed into a duplicate, and a
+// processed_jobs entry without its row would lose the save.
+func writeItemTx(ctx context.Context, tx *sql.Tx, in ItemInput, merge bool) (model.Item, bool, error) {
 	if strings.TrimSpace(in.ID) == "" {
 		return model.Item{}, false, errors.New("store: an item needs an id")
 	}
@@ -134,7 +154,7 @@ func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.
 		out    model.Item
 		merged bool
 	)
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := func() error {
 		var (
 			existing model.Item
 			found    bool
@@ -288,7 +308,7 @@ func (s *Store) writeItem(ctx context.Context, in ItemInput, merge bool) (model.
 		}
 		out = fresh
 		return nil
-	})
+	}()
 	if err != nil {
 		return model.Item{}, false, err
 	}
