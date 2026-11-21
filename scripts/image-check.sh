@@ -6,7 +6,7 @@
 # It asserts the things a distroless image can still get wrong:
 #   - it runs as uid 1000, not root;
 #   - there is no Node toolchain inside it (the frontend is embedded);
-#   - /healthz answers from a real container with no database;
+#   - /healthz answers from a real container whose data volume uid 1000 owns;
 #   - the container's own HEALTHCHECK reports healthy.
 set -euo pipefail
 
@@ -42,6 +42,10 @@ fi
 
 # ── it actually serves ─────────────────────────────────────────────────────
 mkdir -p "$workdir/data" "$workdir/update-signal"
+# The container runs as uid 1000 and the store proves it can write to its data
+# dir before it listens, so a volume owned by the runner's uid would fail boot.
+# Production gets this from deploy/install.sh, which chowns the data dir.
+chmod 0777 "$workdir/data" "$workdir/update-signal"
 docker run -d --name "$container" \
 	--read-only \
 	--tmpfs /tmp \
