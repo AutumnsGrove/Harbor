@@ -70,6 +70,9 @@ type ListOptions struct {
 	Limit          int
 	After          *Cursor
 	IncludeDeleted bool
+	// OnlyDeleted is the Recently deleted view: deleted rows and nothing else.
+	// IncludeDeleted (both) stays for a full export, which needs every row.
+	OnlyDeleted bool
 }
 
 // Cursor is the (saved_at, seq) pair the list pages on. seq breaks the tie when
@@ -321,6 +324,14 @@ func (s *Store) GetItem(ctx context.Context, id string) (model.Item, error) {
 	return scanItemRow(s.db.QueryRowContext(ctx, `SELECT `+itemColumns+` FROM items WHERE id = ?`, id))
 }
 
+// GetItemByURL is the composer's "will this merge?" lookup. The caller passes a
+// canonical URL (canon.CanonicalURL has already run), and a soft-deleted match
+// counts: re-saving it restores the item rather than creating a second one
+// (design.md §5).
+func (s *Store) GetItemByURL(ctx context.Context, canonical string) (model.Item, error) {
+	return scanItemRow(s.db.QueryRowContext(ctx, `SELECT `+itemColumns+` FROM items WHERE url = ?`, canonical))
+}
+
 // ListItems pages the home grid: saved_at newest first, soft-deleted hidden by
 // default, one row lookahead not needed because the cursor is total.
 func (s *Store) ListItems(ctx context.Context, opts ListOptions) ([]model.Item, error) {
@@ -336,7 +347,10 @@ func (s *Store) ListItems(ctx context.Context, opts ListOptions) ([]model.Item, 
 		where []string
 		args  []any
 	)
-	if !opts.IncludeDeleted {
+	switch {
+	case opts.OnlyDeleted:
+		where = append(where, "deleted_at IS NOT NULL")
+	case !opts.IncludeDeleted:
 		where = append(where, "deleted_at IS NULL")
 	}
 	if opts.After != nil {
