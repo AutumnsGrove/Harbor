@@ -113,6 +113,7 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 			novaClient, novaClient, novaClient, library, log,
 		)
 		pipeline.PromptVersion = enrichnova.PromptVersion
+		pipeline.EmbeddingModel = enrichnova.EmbedModel
 		processor = pipeline
 	} else {
 		log.Warn("OPENROUTER_API_KEY is not set; enrichment will only mark items ready", "env", build.EnvOpenRouterAPIKey)

@@ -32,7 +32,11 @@ const (
 	classifyModel = "typesafe/jev-1.14"
 	chatModel     = "deepseek/deepseek-v4.1-flash-1017"
 	embedRole     = "index"
-	embedModel    = "perplexity/pplx-embed-v1-0.6b"
+
+	// EmbedModel is exported because the pipeline records it in
+	// item_embeddings.model. There is one constant, and the role below and the
+	// stored model name both come from it.
+	EmbedModel = "perplexity/pplx-embed-v1-0.6b"
 
 	// PromptVersion names the file in prompts/ and is written to
 	// items.prompt_version.
@@ -94,7 +98,7 @@ func New(cfg Config) *Client {
 		embedder: novaembed.NewRoles(novaembed.RolesConfig{
 			Embedder: embedor.New(embedor.Config{APIKey: cfg.APIKey, HTTPClient: httpClient}),
 			Roles: map[string]novaembed.Role{
-				embedRole: {Model: embedModel, Dims: enrich.EmbeddingDims, Timeout: timeout},
+				embedRole: {Model: EmbedModel, Dims: enrich.EmbeddingDims, Timeout: timeout},
 			},
 		}),
 		log:     log,
@@ -103,7 +107,9 @@ func New(cfg Config) *Client {
 }
 
 // Decide classifies one page. The model never sees "unknown": article is the
-// catch-all and the pipeline coerces an invented kind.
+// catch-all. The wire client validates the choice against the criteria, so an
+// invented kind fails the call; the pipeline's coercion is a second guard for a
+// different Decider.
 func (c *Client) Decide(ctx context.Context, input enrich.ClassifyInput) (enrich.Classification, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -199,7 +205,7 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	if len(resp.Vectors) != 1 {
 		return nil, fmt.Errorf("nova embed: got %d vectors for one input", len(resp.Vectors))
 	}
-	c.logUsage("embed", embedModel, resp.Model, resp.Usage)
+	c.logUsage("embed", EmbedModel, resp.Model, resp.Usage)
 	return resp.Vectors[0], nil
 }
 

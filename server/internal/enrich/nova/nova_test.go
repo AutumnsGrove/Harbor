@@ -69,6 +69,12 @@ func TestTheVersionedPromptsAreEmbedded(t *testing.T) {
 	}
 }
 
+func TestTheEmbeddingModelIsOneConstant(t *testing.T) {
+	if !strings.Contains(EmbedModel, "/") {
+		t.Errorf("EmbedModel = %q, want a routed model id", EmbedModel)
+	}
+}
+
 func TestWriteStateLabelsThePayloadAsUntrusted(t *testing.T) {
 	state := writeState(enrich.ContentInput{
 		Kind: model.KindArticle, URL: "https://example.com/a", Title: "T",
