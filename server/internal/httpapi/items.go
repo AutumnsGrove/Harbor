@@ -45,6 +45,8 @@ type itemDTO struct {
 	KindSource  model.KindSource `json:"kindSource"`
 	Source      model.Source     `json:"source"`
 	State       model.State      `json:"state"`
+	Attempts    int              `json:"attempts,omitempty"`
+	LastError   string           `json:"lastError,omitempty"`
 
 	// Filled for one item, left empty in a list so the grid is one query.
 	Tags      []string `json:"tags,omitempty"`
@@ -87,6 +89,8 @@ func toDTO(item model.Item) itemDTO {
 		KindSource:  item.KindSource,
 		Source:      item.Source,
 		State:       item.State,
+		Attempts:    item.Attempts,
+		LastError:   item.LastError,
 		CreatedAt:   item.CreatedAt,
 		SavedAt:     item.SavedAt,
 		UpdatedAt:   item.UpdatedAt,
@@ -280,13 +284,17 @@ func (s *Server) itemByPath(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Allow", "GET, PATCH, DELETE")
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
-	case "restore":
+	case "restore", "retry":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		s.restoreItem(w, r, id)
+		if action == "restore" {
+			s.restoreItem(w, r, id)
+			return
+		}
+		s.retryItem(w, r, id)
 	default:
 		writeError(w, http.StatusNotFound, "not found")
 	}
@@ -377,6 +385,52 @@ func (s *Server) detail(r *http.Request, item model.Item) itemDTO {
 		s.log.Warn("tags for an item are unavailable", "error", err, "id", item.ID)
 	}
 	return dto
+}
+
+// --- /api/attention --------------------------------------------------------
+
+type attentionResponse struct {
+	Items []itemDTO `json:"items"`
+}
+
+// attention lists enrichment failures from the item rows, not from the log, so
+// the strip survives a restart (design.md §6).
+func (s *Server) attention(w http.ResponseWriter, r *http.Request) {
+	if !s.requireLibrary(w) {
+		return
+	}
+	items, err := s.library.FailedItems(r.Context(), 50)
+	if err != nil {
+		s.log.Error("listing failed items", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not read the attention list")
+		return
+	}
+	response := attentionResponse{Items: make([]itemDTO, 0, len(items))}
+	for _, item := range items {
+		response.Items = append(response.Items, toDTO(item))
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// retryItem puts a failed item back in the queue. It is the one-tap retry in
+// the attention strip; the enrichment loop picks it up on its next pass.
+func (s *Server) retryItem(w http.ResponseWriter, r *http.Request, id string) {
+	err := s.library.RetryItem(r.Context(), id)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "no such item")
+	case err != nil:
+		s.log.Error("retrying an item", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "could not retry the item")
+	default:
+		item, err := s.library.GetItem(r.Context(), id)
+		if err != nil {
+			s.log.Error("reading a retried item", "error", err, "id", id)
+			writeError(w, http.StatusInternalServerError, "the item was retried but could not be read")
+			return
+		}
+		writeJSON(w, http.StatusOK, itemResponse{Item: s.detail(r, item)})
+	}
 }
 
 // --- helpers ---------------------------------------------------------------

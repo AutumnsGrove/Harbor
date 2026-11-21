@@ -108,6 +108,9 @@ export type Item = {
 	kindSource: string;
 	source: ItemSource;
 	state: ItemState;
+	/** Present when the item is failing enrichment. */
+	attempts?: number;
+	lastError?: string;
 	/** Filled for one item; absent in a list so the grid stays one query. */
 	tags?: string[];
 	readLater?: boolean;
@@ -188,6 +191,9 @@ export const api = {
 			request<void>(`/api/items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 		restore: (id: string) =>
 			request<{ item: Item }>(`/api/items/${encodeURIComponent(id)}/restore`, { method: 'POST' }),
+		/** Puts a failed item back in the enrichment queue. */
+		retry: (id: string) =>
+			request<{ item: Item }>(`/api/items/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
 		/** The merge question lives on the server; the UI never re-implements it. */
 		lookup: (url: string) =>
 			request<LookupResponse>(`/api/items/lookup?url=${encodeURIComponent(url)}`)
@@ -196,6 +202,11 @@ export const api = {
 	pending: {
 		/** Read-only: the Worker's queued + claimed jobs that are not items yet. */
 		list: () => request<PendingResponse>('/api/pending')
+	},
+
+	attention: {
+		/** Enrichment failures, read from the item rows so a restart keeps them. */
+		list: () => request<{ items: Item[] }>('/api/attention')
 	},
 
 	update: {
