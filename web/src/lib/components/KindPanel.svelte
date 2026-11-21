@@ -122,7 +122,7 @@
 			</div>
 		{/if}
 
-		{#if offerUrl}
+		{#if shape === 'product' && offerUrl}
 			<a class="item-source" href={offerUrl} target="_blank" rel="noreferrer">
 				<Icon name="external-link" size={13} />
 				<span>Open the offer</span>

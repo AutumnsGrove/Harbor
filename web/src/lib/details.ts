@@ -92,25 +92,53 @@ export function dateLabel(raw: string | null | undefined): string {
 }
 
 /**
- * priceLabel formats the currency the page declared. It falls back to
- * "12.50 EUR" when the code is not a currency Intl knows, rather than dropping
- * a price someone may want to read.
+ * priceLabel formats the currency the page declared. The amount is read only
+ * when it is unambiguous (see plainAmount); otherwise the page's own text is
+ * shown with the code beside it, because a wrong formatted number is worse than
+ * an unformatted one.
  */
 export function priceLabel(offers: ItemDetails['offers']): string {
 	const price = (offers?.price ?? '').trim();
 	if (price === '') return '';
 	const currency = (offers?.currency ?? '').trim().toUpperCase();
-	if (/^[A-Z]{3}$/.test(currency)) {
-		const amount = Number(price.replace(/[^0-9.]/g, ''));
-		if (Number.isFinite(amount) && amount > 0) {
-			try {
-				return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
-			} catch {
-				// Not a currency Intl knows; the plain form below is still true.
-			}
+	const amount = plainAmount(price);
+	if (amount !== null && amount > 0 && /^[A-Z]{3}$/.test(currency)) {
+		try {
+			return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
+		} catch {
+			// Not a currency Intl knows; the plain form below is still true.
 		}
 	}
 	return currency === '' ? price : `${price} ${currency}`;
+}
+
+/**
+ * plainAmount reads the text JSON-LD actually ships, where the extractor keeps
+ * the price exactly as it found it. A decimal comma ("12,50") and a comma
+ * grouping thousands ("1,299") look alike, and stripping the punctuation turns
+ * one into 1250 and the other into 1.30. So only shapes whose meaning is
+ * unambiguous are read; anything else returns null.
+ */
+function plainAmount(raw: string): number | null {
+	const text = raw.replace(/\s/g, '');
+	if (/^\d+$/.test(text)) return Number(text);
+
+	// 12.50 or 12,50: one separator, one or two trailing digits, nothing else.
+	const decimal = /^(\d+)[.,](\d{1,2})$/.exec(text);
+	if (decimal) return Number(`${decimal[1]}.${decimal[2]}`);
+
+	// 1,299 or 1.299: thousands groups and no decimal part.
+	if (/^\d{1,3}(?:[,.]\d{3})+$/.test(text)) return Number(text.replace(/[,.]/g, ''));
+
+	// 1,299.00: comma groups, dot decimal.
+	const groupedDot = /^(\d{1,3}(?:,\d{3})+)\.(\d{1,2})$/.exec(text);
+	if (groupedDot) return Number(`${groupedDot[1]?.replace(/,/g, '')}.${groupedDot[2]}`);
+
+	// 1.299,00: dot groups, comma decimal.
+	const groupedComma = /^(\d{1,3}(?:\.\d{3})+),(\d{1,2})$/.exec(text);
+	if (groupedComma) return Number(`${groupedComma[1]?.replace(/\./g, '')}.${groupedComma[2]}`);
+
+	return null;
 }
 
 const availability: Record<string, string> = {
@@ -262,18 +290,26 @@ export function kindFacts(kind: ItemKind, details: ItemDetails | undefined): Det
 }
 
 /**
- * hasPanel says whether the layout has anything to show. The generic article
- * rows count only when one of them carries a value, so an unenriched item does
- * not grow an empty "Article" section.
+ * hasPanel says whether the layout has anything to show. It must mirror
+ * KindPanel's render conditions exactly — a predicate that is more generous
+ * leaves an eyebrow over an empty section, and one that is stingier hides a
+ * panel that had content. An unenriched item has nothing and renders nothing.
  */
 export function hasPanel(kind: ItemKind, details: ItemDetails | undefined): boolean {
 	const d = details ?? {};
 	const shape = panelKind(kind, d.type);
 	if (kindFacts(kind, d).length > 0) return true;
-	if ((d.description ?? '').trim() !== '' || (d.abstract ?? '').trim() !== '') return true;
+	if ((d.abstract ?? '').trim() !== '') return true;
 	if ((d.ingredients ?? []).length > 0 || (d.instructions ?? []).length > 0) return true;
 	if ((d.openingHours ?? []).length > 0) return true;
 	if (addressLines(d.address).length > 0) return true;
-	if (priceLabel(d.offers) !== '') return true;
-	return shape === 'video' && (d.embedUrl ?? '') !== '';
+	if (shape === 'product') {
+		// The panel's price row and offer link only exist for a product.
+		if (priceLabel(d.offers) !== '') return true;
+		if (availabilityLabel(d.offers?.availability) !== '') return true;
+		if ((d.offers?.url ?? '').trim() !== '') return true;
+	}
+	// Watch the original: the same fallback the panel uses.
+	if (shape === 'video' && (d.embedUrl ?? d.url ?? '').trim() !== '') return true;
+	return false;
 }

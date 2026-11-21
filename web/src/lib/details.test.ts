@@ -45,15 +45,26 @@ describe('humanDuration', () => {
 });
 
 describe('priceLabel', () => {
+	const formatted = (amount: number, currency: string) =>
+		new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
+
 	it('formats a declared currency', () => {
-		const expected = new Intl.NumberFormat(undefined, {
-			style: 'currency',
-			currency: 'USD'
-		}).format(12.5);
-		expect(priceLabel({ price: '12.50', currency: 'USD' })).toBe(expected);
+		expect(priceLabel({ price: '12.50', currency: 'USD' })).toBe(formatted(12.5, 'USD'));
 	});
 
-	it('keeps a price when the currency is unusable', () => {
+	it('reads a decimal comma instead of inventing thousands', () => {
+		// JSON-LD keeps the price as text, so 12,50 is twelve fifty, not 1250.
+		expect(priceLabel({ price: '12,50', currency: 'EUR' })).toBe(formatted(12.5, 'EUR'));
+		expect(priceLabel({ price: '1.299,00', currency: 'EUR' })).toBe(formatted(1299, 'EUR'));
+	});
+
+	it('reads grouping separators', () => {
+		expect(priceLabel({ price: '1,299.00', currency: 'USD' })).toBe(formatted(1299, 'USD'));
+		expect(priceLabel({ price: '1,299', currency: 'USD' })).toBe(formatted(1299, 'USD'));
+	});
+
+	it('keeps a price it cannot read, and the currency', () => {
+		expect(priceLabel({ price: 'about 20', currency: 'USD' })).toBe('about 20 USD');
 		expect(priceLabel({ price: '12.50', currency: 'XYZQ' })).toBe('12.50 XYZQ');
 		expect(priceLabel({ price: '12.50' })).toBe('12.50');
 	});
@@ -212,10 +223,33 @@ describe('hasPanel', () => {
 		expect(hasPanel('note', {})).toBe(false);
 	});
 
+	it('is false when the only thing on the page is prose the panel never shows', () => {
+		expect(
+			hasPanel('recipe', {
+				type: 'Recipe',
+				name: 'Pancakes',
+				description: 'Fluffy.'
+			})
+		).toBe(false);
+	});
+
 	it('is true when the page carries something to show', () => {
 		expect(hasPanel('article', { author: ['Jo'] })).toBe(true);
 		expect(hasPanel('recipe', { ingredients: ['2 eggs'] })).toBe(true);
 		expect(hasPanel('place', { address: { addressLocality: 'Lisbon' } })).toBe(true);
 		expect(hasPanel('product', { offers: { price: '9.00', currency: 'USD' } })).toBe(true);
+		expect(hasPanel('product', { offers: { availability: 'OutOfStock' } })).toBe(true);
+	});
+
+	it('counts a product offer only for a product panel', () => {
+		// A book filed deliberately stays a book: its panel has no price row.
+		expect(hasPanel('book', { type: 'Product', offers: { price: '9.00', currency: 'USD' } })).toBe(
+			false
+		);
+	});
+
+	it('counts the same video link the panel renders', () => {
+		expect(hasPanel('video', { type: 'VideoObject', url: 'https://example.com/t' })).toBe(true);
+		expect(hasPanel('video', { type: 'VideoObject', embedUrl: 'https://example.com/e' })).toBe(true);
 	});
 });
