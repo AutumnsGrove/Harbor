@@ -1,0 +1,93 @@
+# 2026/11/22 18:40:43.008412 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw rows: 3
+# 2026/11/22 18:40:43.008415 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw page: 1
+# 2026/11/22 18:40:43.008416 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw utm: false
+# 2026/11/22 18:40:43.008417 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw fragment: false
+# 2026/11/22 18:40:43.008417 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw note: ""
+# 2026/11/22 18:40:43.008419 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw highlights: ""
+# 2026/11/22 18:40:43.008420 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw title: ""
+# 2026/11/22 18:40:43.008421 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw folder: ""
+# 2026/11/22 18:40:43.008421 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw tags: ""
+# 2026/11/22 18:40:43.008422 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw created: "2019-01-02T03:04:05Z"
+# 2026/11/22 18:40:43.008423 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw favorite: "true"
+# 2026/11/22 18:40:43.008424 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw page: 1
+# 2026/11/22 18:40:43.008425 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw utm: false
+# 2026/11/22 18:40:43.008425 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw fragment: false
+# 2026/11/22 18:40:43.008425 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw note: ""
+# 2026/11/22 18:40:43.008426 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw highlights: ""
+# 2026/11/22 18:40:43.008426 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw title: ""
+# 2026/11/22 18:40:43.008427 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw folder: ""
+# 2026/11/22 18:40:43.008427 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw tags: ""
+# 2026/11/22 18:40:43.008428 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw created: "2019-01-02T03:04:05Z"
+# 2026/11/22 18:40:43.008428 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw favorite: "true"
+# 2026/11/22 18:40:43.008429 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw page: 1
+# 2026/11/22 18:40:43.008430 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw utm: false
+# 2026/11/22 18:40:43.008430 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw fragment: false
+# 2026/11/22 18:40:43.008430 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw note: ""
+# 2026/11/22 18:40:43.008431 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw highlights: "Highlight:one"
+# 2026/11/22 18:40:43.008431 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw title: ""
+# 2026/11/22 18:40:43.008432 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw folder: ""
+# 2026/11/22 18:40:43.008432 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw tags: ""
+# 2026/11/22 18:40:43.008432 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw created: "2019-01-02T03:04:05Z"
+# 2026/11/22 18:40:43.008433 [TestPropertyImportTwiceIsOneLibrary] [rapid] draw favorite: "true"
+# 2026/11/22 18:40:43.011249 [TestPropertyImportTwiceIsOneLibrary] a second import changed the library
+# first report: {Total:3 Imported:1 Merged:2 Skipped:0 Failed:0 SpacesToCreate:0 SpacesCreated:0 Favourites:3 Highlights:1 UnknownColumns:[] FileWarnings:[] Errors:[]}
+# second report: {Total:3 Imported:0 Merged:3 Skipped:0 Failed:0 SpacesToCreate:0 SpacesCreated:0 Favourites:3 Highlights:1 UnknownColumns:[] FileWarnings:[] Errors:[]}
+# 
+v0.4.8#4298305338023019529
+0x0
+0x38e38e38e38e4
+0x2
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
