@@ -4,9 +4,9 @@ The refinement agenda, worked through on 2026-11-03. Almost everything is now se
 answers are folded into [design.md](design.md) and recorded here with the reasoning that produced
 them.
 
-**Still open:** hybrid ranking weights and the remaining spikes in section G (S1–S4, S6, S8, S9,
-S12). S5, S7, S10 and S11 were verified on 2026-11-18; S7 changed the port to 8897. Everything else
-is decided.
+**Still open:** hybrid ranking weights and the remaining spikes in section G (S1–S4, S6, S8, S12).
+S5, S7, S10 and S11 were verified on 2026-11-18 (S7 changed the port to 8897), and S9 on 2026-11-22
+(highlights are prose; favourites are imported). Everything else is decided.
 
 Format: ~~question~~ → **decision** → why the alternatives lost.
 
@@ -227,9 +227,12 @@ Polaris opening `harbor.db` directly.
 8. **Video transcript source** — prove caption fetching from the potato's residential IP for a few
    real videos, including a no-caption case and a non-English track. Decide whether a bundled
    yt-dlp is needed or the caption endpoint alone is enough.
-9. **Real Raindrop export** — export the actual library once, commit a sanitised sample, and confirm
-   the CSV columns (`id`, `favorite`, folder separators, the highlights field format) before the
-   importer's tests are written. Gates phase 5.
+9. **Real Raindrop export** — **verified 2026-11-22 (pass; highlights corrected)**: the columns are
+   `id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite`, folders are flat, and
+   `highlights` is prose (`Highlight:`-prefixed blocks separated by a blank line) rather than
+   structured rows — so one `highlights` row per block. `favorite` is imported into a seeded
+   **Favourites** Space. See [plans/spikes.md](plans/spikes.md#s9--a-real-raindrop-export). Gates
+   phase 5.
 10. **Tailscale serve + Docker identity** — **verified 2026-11-18 (pass)**: a forged
     `Tailscale-User-Login` is overwritten, the Docker peer is the bridge gateway (`172.17.0.1`),
     and host-local callers carry no identity header. Gates the phase 0 identity-lock design.

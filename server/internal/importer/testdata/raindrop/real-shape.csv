@@ -1,0 +1,53 @@
+id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite
+1000000001,How a parser survives a hostile CSV,,"A plain sentence about parsing, with no surprises.",https://example.com/articles/hostile-csv,Articles,"parsing, testing",2024-11-02T09:14:31.512Z,https://img.example.com/1000000001.jpg,,false
+1000000002,"Notes are Markdown, mostly","first line
+
+second paragraph after a blank line
+- a list item with, a comma
+","The excerpt has a paragraph break.
+
+And a second paragraph with “curly quotes” and an em — dash.",https://example.com/blog/markdown-notes,Software,"AI Costs, ai, Writing, 3D, 3d",2025-01-17T23:05:02.000Z,https://img.example.com/1000000002.png,,true
+1000000003,"He said ""parse it twice"", then shipped it","quoted ""inner"" text, plus a comma, plus a colon: all in one note",,https://example.com/posts/parse-twice,Articles,"quotes, edge cases",2023-06-30T00:00:00.000Z,,,false
+1000000004,A shop item with a noisy URL,,Short excerpt.,http://example.com/shop/item?id=42&utm_source=newsletter&utm_medium=email#reviews,Read Later,shopping,2019-03-04T11:00:00.000Z,http://img.example.com/1000000004.jpg,,true
+1000000005,"A record surplus, explained",,Trade figures defied the tariff schedule.,https://example.com/news/growth-goal,Articles,"economy, trade",2026-01-12T08:02:44.971Z,https://img.example.com/1000000005.jpg,"Highlight:A fabricated quotation about a trade surplus, long enough to look like a real highlight. It names a made-up figure and ends with a full stop.",false
+1000000006,Short takes on making things,,,https://example.com/essays/make-things,Inspiration,"essays, craft",2025-09-21T15:30:00.125Z,https://img.example.com/1000000006.jpg,"Highlight:A fabricated first block. It is prose, it has a full stop, and the second block follows a blank line.
+
+Highlight:Second paragraph.
+
+Third paragraph.
+
+Fourth paragraph.
+
+Fifth.",false
+1000000007,A model runs a small shop,A note that starts with a capital and has no trailing space.,Fabricated research about a fabricated shop.,https://example.com/research/project-vend,AI,"AI, agents, research, automation",2025-04-01T00:00:00.000Z,https://img.example.com/1000000007.jpg,"Highlight:A fabricated quotation long enough to wrap in a reader, ending in a full stop.
+
+Highlight:tiny
+
+Highlight:A quotation that carries its own line break
+right through the middle of a sentence.
+
+Highlight:Another fabricated quotation, this one a whole sentence that ends properly.",false
+1000000008,"Café naïf studies, 日本語の記事, and 🎈 emoji",naïve résumé — “curly” ‘single’ éèêë üöä,Un extrait avec des accents: àâçéèêë îïôöùûü.,https://example.com/unicode/café,Reference,"unicode, café, 日本語",2022-02-22T22:22:22.222Z,https://img.example.com/1000000008.jpg,,false
+1000000009,,only a note and a URL,,https://example.com/minimal,Misc,,2021-12-01T07:45:10.010Z,,,false
+1000000010,The same article saved twice,second note for the same URL,,https://example.com/articles/hostile-csv,Reference,"reference, parsing",2025-05-05T05:05:05.505Z,,,false
+1000000011,Tag cell with slack,note,excerpt,https://example.com/tags/slack,Unsorted,"alpha,  beta , gamma,",2024-04-04T04:04:04.004Z,,,false
+1000000012,A video with a truncated excerpt,,"A fabricated description, long enough to be cut off by the exporter the way the real ones are. It rambles through a couple of clauses about nothing in particular and stops mid-word e...",https://example.com/watch?v=1000000012,Videos,"video, history",2023-11-11T11:11:11.111Z,https://img.example.com/1000000012.jpg,,false
+1000000013,A concert page with scraped junk,,,https://example.com/music/tiny-desk,Music,"music, live",2026-02-14T18:20:00.000Z,https://img.example.com/1000000013.jpg,"Highlight:A fabricated page label
+  
+    
+  
+  
+  
+    
+  
+
+
+
+
+
+      
+  Menu",false
+1000000014,☀️ A newsletter title with an emoji,,"Ten links, one essay.",https://example.com/newsletter/sunday,Blogs,"newsletter, reading",2018-01-07T13:00:00.000Z,https://img.example.com/1000000014.jpg,,false
+1000000015,Where the note carries everything,"This note is long enough to need more than one line, and it contains a comma, a semicolon; and a ""quoted"" word. It also contains a blank
+
+line in the middle. The imported note has to survive all of that without the CSV reader folding it.",,https://example.com/notes/long,Technology,"technology, notes, markdown",2020-08-08T08:08:08.008Z,,,false

@@ -426,10 +426,15 @@ and merges** into it instead of creating a second one. The pre-canonicalisation 
 `Settings → Import` (and a CLI for big files) accepts **Raindrop CSV** and **Netscape HTML**:
 
 - CSV: title, note, excerpt, URL, tags, created date, cover, and highlights are preserved
-  (Raindrop's own `id` becomes `import_ref`; `favorite` is reported, not imported — the exact column
-  set is confirmed against a real export in spike S9); Raindrop collections become **manual
-  Spaces**. Imported items get `saved_at = created_at`, so they sit at their historical position
-  instead of flooding "recent".
+  (Raindrop's own `id` becomes `import_ref`); Raindrop collections become **manual
+  Spaces**, and a `favorite` row joins a seeded manual Space named **Favourites**. The exact column
+  set is confirmed against a real export in spike S9: `id,title,note,excerpt,url,folder,tags,created,
+  cover,highlights,favorite`, one flat folder per row. `highlights` is **prose**, not structured
+  rows — a cell is one or more `Highlight:`-prefixed blocks separated by a blank line, with no
+  colour and no separate annotation — so each block becomes one `highlights` row whose quote is the
+  block text, anchored as `imported`, and rejoining an item's rows reproduces the cell. Imported
+  items get `saved_at = created_at`, so they sit at their historical position instead of flooding
+  "recent".
 - HTML: URL, title, and folder; folders become manual Spaces.
 - Import is idempotent by canonical URL and merges like a re-save, so running it twice is safe.
 - Imported items enter the normal enrichment queue — no special pipeline.
@@ -1165,8 +1170,8 @@ the first real import. Details, the milestone, and the cut list are in
 - Hybrid ranking weights (keyword vs semantic) — tune once there is real search data.
 - The remaining implementation spikes: Worker streaming upload (S1), D1 claim semantics (S2),
   brute-force vector cache (S3), Browser Rendering on the free plan (S4), PDF extraction (S6), video
-  transcripts (S8), a real Raindrop export (S9), and image decode memory/EXIF (S12). S5, S7, S10 and
-  S11 were answered on 2026-11-18 (S7 changed the port to 8897); see
+  transcripts (S8), and image decode memory/EXIF (S12). S5, S7, S10 and S11 were answered on
+  2026-11-18 (S7 changed the port to 8897) and S9 on 2026-11-22; see
   [plans/spikes.md](plans/spikes.md). Nova's `embed` prerequisite is no longer a blocker.
 
 ### How it is built (settled 2026-11-03)
