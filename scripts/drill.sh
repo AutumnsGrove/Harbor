@@ -25,6 +25,21 @@ BIN="$WORK/harbor"
 SERVE_PID=""
 FAILURES=0
 
+# The drill promises it cannot reach the network and cannot touch a real Harbor.
+# Both promises are about the environment it inherits, so the credentials are
+# cleared here rather than trusted to be absent: with HARBOR_WORKER_URL set, the
+# drill's server would claim real jobs from the live Worker, write them into a
+# throwaway database and mark them done; with OPENROUTER_API_KEY set, its
+# example.com saves would become real fetches and model calls.
+for credential in HARBOR_WORKER_URL HARBOR_WORKER_TOKEN OPENROUTER_API_KEY \
+	HARBOR_ALLOWED_LOGIN HARBOR_ALLOWED_HOSTS HARBOR_UPDATE_DIR; do
+	if [ -n "${!credential:-}" ]; then
+		printf 'clearing %s for the drill\n' "$credential"
+		unset "$credential"
+	fi
+done
+export HARBOR_UPDATE_DIR="$WORK/update-signal"
+
 cleanup() {
 	if [ -n "$SERVE_PID" ]; then kill "$SERVE_PID" 2>/dev/null; wait "$SERVE_PID" 2>/dev/null; fi
 	if [ "$KEEP" = "1" ]; then
@@ -33,7 +48,10 @@ cleanup() {
 		rm -rf "$WORK"
 	fi
 }
-trap cleanup EXIT
+# EXIT alone is not enough: a script killed by a signal (SIGPIPE from a closed
+# pipe, a Ctrl-C) would leave its server running and the next drill would find the
+# port busy. Every way out cleans up.
+trap cleanup EXIT INT TERM HUP PIPE
 
 step() { printf '\n== %s\n' "$*"; }
 ok() { printf '  ok   %s\n' "$*"; }
@@ -54,12 +72,44 @@ timed() {
 	printf '  %-22s %6ss\n' "$label" "$(since "$end" "$start")"
 }
 
+# Readiness is "our child answers", not "this port answers": anything already
+# listening would satisfy the latter and the seed step would write into it.
+port_answers() {
+	curl -sf --max-time 1 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1
+}
+
+# A TCP connect, not an HTTP GET: a listener that answers 404 is still a listener.
+port_listening() {
+	python3 -c '
+import socket, sys
+sock = socket.socket()
+sock.settimeout(0.5)
+sys.exit(0 if sock.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0 else 1)
+' "$PORT"
+}
+
 start_server() {
+	if port_listening; then
+		no "port $PORT is already in use; re-run with PORT=<free port>"
+		return 1
+	fi
 	HARBOR_DATA_DIR="$DATA" HARBOR_PORT="$PORT" HARBOR_DEPLOYMENT=dev HARBOR_DEV_NO_AUTH=1 \
 		"$BIN" serve >"$WORK/serve.log" 2>&1 &
 	SERVE_PID=$!
 	for _ in $(seq 1 100); do
-		if curl -sf "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then return 0; fi
+		if ! kill -0 "$SERVE_PID" 2>/dev/null; then
+			if port_listening; then
+				no "port $PORT is in use by another process; re-run with PORT=<free port>"
+			else
+				no "the server exited during startup"
+				sed -n 1,20p "$WORK/serve.log"
+			fi
+			return 1
+		fi
+		if port_answers; then
+			# The port answers and our child is alive: it is ours.
+			return 0
+		fi
 		sleep 0.1
 	done
 	no "the server did not start"
@@ -73,6 +123,11 @@ stop_server() {
 		wait "$SERVE_PID" 2>/dev/null
 		SERVE_PID=""
 	fi
+	# Let the socket go, so two drills in a row do not look like a busy port.
+	for _ in $(seq 1 20); do
+		port_listening || return 0
+		sleep 0.1
+	done
 }
 
 items_via_api() {
