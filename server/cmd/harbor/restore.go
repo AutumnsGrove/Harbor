@@ -186,9 +186,14 @@ func snapshotCurrent(ctx context.Context, take snapshotter, backupsDir, dbPath, 
 		return "", false
 	}
 	// The snapshot holds whatever the journals held, because VACUUM INTO reads
-	// the recovered database. Leaving them would let SQLite replay an old journal
-	// into the new file.
-	removeJournals(dbPath)
+	// the recovered database. Leaving one would let SQLite replay an old journal
+	// into the new file, so a journal that cannot be removed is not a usable
+	// preservation: drop the snapshot and fall back, which moves the journals
+	// with the database (and fails loudly if that cannot work either).
+	if err := removeJournals(dbPath); err != nil {
+		_ = os.Remove(dest)
+		return "", false
+	}
 	return dest, true
 }
 
@@ -220,10 +225,13 @@ func journalsOf(dbPath string) []string {
 	return []string{dbPath + "-journal", dbPath + "-wal", dbPath + "-shm"}
 }
 
-func removeJournals(dbPath string) {
+func removeJournals(dbPath string) error {
 	for _, journal := range journalsOf(dbPath) {
-		_ = os.Remove(journal)
+		if err := os.Remove(journal); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("restore: removing %s: %w", journal, err)
+		}
 	}
+	return nil
 }
 
 // replayPoint is the moment the backup was taken: everything the Worker queued

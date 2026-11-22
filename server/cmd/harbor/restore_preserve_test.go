@@ -85,6 +85,41 @@ func TestPreserveCurrentSnapshotsWhenTheSnapshotWorks(t *testing.T) {
 	}
 }
 
+func TestPreserveCurrentFallsBackWhenAJournalCannotBeRemoved(t *testing.T) {
+	// A journal that cannot be removed would be replayed into the restored
+	// database, so the snapshot is not a usable preservation. Falling back moves
+	// the journals with the database instead of overwriting them.
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, store.DBFile)
+	if err := os.WriteFile(dbPath, []byte("SQLite format 3\x00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A non-empty directory where the journal should be: os.Remove fails.
+	journal := dbPath + "-wal"
+	if err := os.MkdirAll(filepath.Join(journal, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backupsDir := filepath.Join(dataDir, "backups")
+
+	preserved, err := preserveCurrent(context.Background(),
+		func(_ context.Context, dest string) error { return os.WriteFile(dest, []byte("snapshot"), 0o644) },
+		backupsDir, dbPath, preserveNow)
+	if err != nil {
+		t.Fatalf("preserveCurrent: %v", err)
+	}
+	if !strings.HasSuffix(preserved, ".corrupt") {
+		t.Errorf("preserved = %q, want the moved-aside directory", preserved)
+	}
+	if _, err := os.Stat(filepath.Join(preserved, store.DBFile+"-wal", "inside")); err != nil {
+		t.Errorf("the journal was not moved with the database: %v", err)
+	}
+	// The snapshot that could not be completed must not be left behind looking
+	// like a pre-restore copy.
+	if _, err := os.Stat(filepath.Join(backupsDir, "pre-restore-20261122T180000Z.db")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the abandoned snapshot was left in %s", backupsDir)
+	}
+}
+
 func TestPreserveCurrentMovesOrphanJournalsAside(t *testing.T) {
 	// No database, but a journal: those bytes can still be the only copy of a
 	// transaction, so they are kept rather than left to be replayed.
