@@ -121,10 +121,15 @@ S9 is answered, so the mapping table above is measured rather than remembered. W
 - **Store writes** — the Favourites Space (migration `0002`), `EnsureManualSpace`, `AddItemToSpace`,
   `ReplaceImportedHighlights` (idempotent, and never touches the owner's own highlights),
   `HighlightsForItem`, and the read-only `FindManualSpace` a dry run needs.
+- **Driver** — canonicalise → merge → tags through the shared write path → the folder as a manual
+  Space → Favourites → highlights → `priority=-1`, with a dry run that writes nothing, a report whose
+  counters add up, and per-row failures that never stop the run. A source that cannot express
+  highlights (the HTML one) never clears the ones a CSV import wrote.
+- **CLI** — `harbor import FILE` with `--dry-run`, `--no-enrich`, `--limit` and `--report`, detecting
+  CSV or HTML from the file's contents; `docs/import.md` is the operator's page for it.
 
-Still to build, in this order: the driver (`import.go`: canonicalise → merge → tags → Space →
-highlights → `priority=-1`), `import_runs` checkpoint/resume, the CLI (`--dry-run`, `--no-enrich`,
-`--limit`, `--report`), Settings → Import, first-run wiring, `docs/import.md`.
+Still to build: `import_runs` checkpoint/resume (a cancelled run is safe to repeat, but it restarts
+from the top), Settings → Import, first-run wiring, and the real-export dry run itself.
 
 The exit demo has not been run, nothing has been imported into the potato, and this phase is **not**
 ticked in [README.md](README.md).
