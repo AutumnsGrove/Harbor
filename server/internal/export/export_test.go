@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -396,35 +398,165 @@ func TestExportRefusesADirectoryWithFilesInIt(t *testing.T) {
 	}
 }
 
-func TestGoldenJSON(t *testing.T) {
+func TestGoldenExport(t *testing.T) {
+	// Every format, every file: the goldens are the contract, so the whole tree
+	// is compared, not only library.json.
 	dir := filepath.Join(t.TempDir(), "export")
-	if _, err := JSON(context.Background(), fakeReader{library: fixtureLibrary()}, options(dir)); err != nil {
-		t.Fatalf("JSON: %v", err)
+	opts := options(dir)
+	if _, err := Write(context.Background(), fakeReader{library: fixtureLibrary()}, opts); err != nil {
+		t.Fatalf("Write: %v", err)
 	}
 	golden := filepath.Join("testdata", "golden")
-	if *update {
-		if err := os.MkdirAll(golden, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, name := range []string{"library.json", "manifest.json"} {
-		got, err := os.ReadFile(filepath.Join(dir, name))
+
+	compare := func(path, rel string) error {
+		got, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
-		wantPath := filepath.Join(golden, name)
+		wantPath := filepath.Join(golden, rel)
 		if *update {
-			if err := os.WriteFile(wantPath, got, 0o644); err != nil {
-				t.Fatal(err)
+			if err := os.MkdirAll(filepath.Dir(wantPath), 0o755); err != nil {
+				return err
 			}
-			continue
+			return os.WriteFile(wantPath, got, 0o644)
 		}
 		want, err := os.ReadFile(wantPath)
 		if err != nil {
-			t.Fatalf("%s: %v (run `go test ./server/internal/export -update` and review the diff)", wantPath, err)
+			return fmt.Errorf("%s: %v (run `go test ./server/internal/export -update` and review the diff)", rel, err)
 		}
 		if string(got) != string(want) {
-			t.Errorf("%s does not match the golden export; review it and rerun with -update", name)
+			return fmt.Errorf("%s does not match the golden export; review it and rerun with -update", rel)
+		}
+		return nil
+	}
+
+	seen := map[string]bool{}
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		seen[rel] = true
+		return compare(path, rel)
+	})
+	if err != nil {
+		t.Error(err)
+	}
+
+	if !*update {
+		// A golden with no file behind it is a stale contract.
+		_ = filepath.WalkDir(golden, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			rel, _ := filepath.Rel(golden, path)
+			if !seen[rel] {
+				t.Errorf("golden %s is stale: the export no longer writes it", rel)
+			}
+			return nil
+		})
+	}
+}
+
+func TestMarkdownWritesOneFilePerItem(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "export")
+	if _, err := Write(context.Background(), fakeReader{library: fixtureLibrary()}, options(dir)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "markdown", "0001-sourdough-pancakes.md"))
+	if err != nil {
+		t.Fatalf("the first item's markdown: %v", err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		`title: "Sourdough pancakes"`,
+		`kind: "recipe"`,
+		`tags: ["baking","breakfast"]`,
+		`"id":"0190-space"`,
+		"# Sourdough pancakes",
+		"> Thin pancakes from starter discard. Good for a slow morning.",
+		"## Note\n\nTry with the rye starter.",
+		"## Content",
+		"## Highlights\n\n> Rest, then cook.",
+		"Fifteen minutes, not five.",
+		"![pancakes.jpg](../media/",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, text)
 		}
 	}
 }
+
+func TestSlug(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"Sourdough pancakes", "sourdough-pancakes"},
+		{"  Spaced   out  ", "spaced-out"},
+		{"C++ & Go: a comparison", "c-go-a-comparison"},
+		{"", "untitled"},
+		{"...", "untitled"},
+		{"日本語", "untitled"},
+		{strings.Repeat("long ", 40), "long-long-long-long-long-long-long-long-long-long-long-long"},
+	} {
+		if got := slug(tc.in); got != tc.want {
+			t.Errorf("slug(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNetscapeWritesFoldersDatesAndEscapes(t *testing.T) {
+	library := fixtureLibrary()
+	library.Items[1].Title = `Fish & "chips" <night>`
+	library.Items[1].URL = stringPtr("https://kitchen.example/fish?a=1&b=2")
+	dir := filepath.Join(t.TempDir(), "export")
+	if _, err := Write(context.Background(), fakeReader{library: library}, options(dir)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "bookmarks.html"))
+	if err != nil {
+		t.Fatalf("bookmarks.html: %v", err)
+	}
+	text := string(body)
+
+	if !strings.Contains(text, "<H3>Read later</H3>") {
+		t.Errorf("the manual Space is not a folder:\n%s", text)
+	}
+	if !strings.Contains(text, `HREF="https://kitchen.example/fish?a=1&amp;b=2"`) {
+		t.Errorf("the URL is not escaped:\n%s", text)
+	}
+	if !strings.Contains(text, `TAGS="baking,breakfast"`) {
+		t.Errorf("tags are not carried:\n%s", text)
+	}
+	if !strings.Contains(text, "Fish &amp; &#34;chips&#34;") && !strings.Contains(text, "Fish &amp; &quot;chips&quot;") {
+		t.Errorf("the title is not escaped:\n%s", text)
+	}
+	// ADD_DATE is unix seconds: the three clocks are what a browser sorts on.
+	if want := fmt.Sprintf(`ADD_DATE="%d"`, fixedNow.Add(-72*time.Hour).Unix()); !strings.Contains(text, want) {
+		t.Errorf("ADD_DATE is not the saved_at stamp (%s):\n%s", want, text)
+	}
+}
+
+func TestNetscapeSkipsNotesAndDeletedItems(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "export")
+	if _, err := Write(context.Background(), fakeReader{library: fixtureLibrary()}, options(dir)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "bookmarks.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, "A thought") {
+		t.Error("a note has no bookmark and must not be in bookmarks.html")
+	}
+	if strings.Contains(text, "Deleted but still mine") {
+		t.Error("a soft-deleted item must not be handed to a browser")
+	}
+	if strings.Count(text, "<DT><A HREF") != 1 {
+		t.Errorf("want exactly the one live URL item:\n%s", text)
+	}
+}
+
+func stringPtr(s string) *string { return &s }

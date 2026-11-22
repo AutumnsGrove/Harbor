@@ -39,6 +39,7 @@ type Reader interface {
 // Options is one export run.
 type Options struct {
 	Dir           string // the directory to create; it must be new or empty
+	Formats       []Format
 	IncludeMedia  bool   // copy media blobs into media/<sha256>
 	MediaDir      string // where Media.LocalPath files live (data/media)
 	AppVersion    string
@@ -69,9 +70,46 @@ func (r Result) Has(path string) bool {
 	return false
 }
 
-// JSON writes library.json and manifest.json. It refuses a directory that has
-// anything in it: an export is a new copy, never a merge into an old one.
+// Format is one of the things an export writes. All of them are always written
+// together into a fresh directory: the readable formats and the restorable one
+// describe the same library, and an export that had only some of them would be
+// a half answer.
+type Format string
+
+const (
+	FormatJSON     Format = "json"     // library.json, the restorable copy
+	FormatMarkdown Format = "markdown" // markdown/NNNN-slug.md, one per item
+	FormatNetscape Format = "netscape" // bookmarks.html, the importable one
+	FormatAll      Format = "all"
+)
+
+func (o Options) wants(format Format) bool {
+	if len(o.Formats) == 0 {
+		return true
+	}
+	for _, candidate := range o.Formats {
+		if candidate == FormatAll || candidate == format {
+			return true
+		}
+	}
+	return false
+}
+
+// Write writes every format the options ask for, plus manifest.json.
+func Write(ctx context.Context, reader Reader, opts Options) (Result, error) {
+	return writeFormats(ctx, reader, opts)
+}
+
+// JSON writes library.json and manifest.json only. It is the restorable copy on
+// its own, which is what most of the tests want.
 func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
+	opts.Formats = []Format{FormatJSON}
+	return writeFormats(ctx, reader, opts)
+}
+
+// writeFormats refuses a directory that has anything in it: an export is a new
+// copy, never a merge into an old one.
+func writeFormats(ctx context.Context, reader Reader, opts Options) (Result, error) {
 	library, err := reader.ExportLibrary(ctx)
 	if err != nil {
 		return Result{}, err
@@ -114,22 +152,45 @@ func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
 	exportedAt := at.UTC().Format(time.RFC3339)
 	counts := countOf(library)
 
-	doc := libraryFile{
-		ExportVersion: ExportVersion,
-		AppVersion:    opts.AppVersion,
-		SchemaVersion: opts.SchemaVersion,
-		ExportedAt:    exportedAt,
-		Counts:        counts,
-		Spaces:        spaceEntries(library),
-		Items:         itemEntries(library),
-	}
-	raw, err := marshal(doc)
-	if err != nil {
-		return Result{}, err
-	}
+	entries := itemEntries(library)
 	result := Result{}
-	if err := result.write(staging, "library.json", raw); err != nil {
-		return Result{}, err
+
+	if opts.wants(FormatJSON) {
+		raw, err := marshal(libraryFile{
+			ExportVersion: ExportVersion,
+			AppVersion:    opts.AppVersion,
+			SchemaVersion: opts.SchemaVersion,
+			ExportedAt:    exportedAt,
+			Counts:        counts,
+			Spaces:        spaceEntries(library),
+			Items:         entries,
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		if err := result.write(staging, "library.json", raw); err != nil {
+			return Result{}, err
+		}
+	}
+
+	if opts.wants(FormatMarkdown) {
+		files := markdownFiles(entries)
+		names := make([]string, 0, len(files))
+		for name := range files {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if err := result.write(staging, name, files[name]); err != nil {
+				return Result{}, err
+			}
+		}
+	}
+
+	if opts.wants(FormatNetscape) {
+		if err := result.write(staging, "bookmarks.html", netscapeFile(library, entries)); err != nil {
+			return Result{}, err
+		}
 	}
 
 	if opts.IncludeMedia {

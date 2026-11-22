@@ -5,9 +5,13 @@
 restore reads them.
 
 ```bash
-harbor export --out ./harbor-export-20261122                  # library.json + manifest.json
+harbor export --out ./harbor-export-20261122                  # every format
 harbor export --out ./harbor-export-20261122 --include-media   # plus media/<sha256>
+harbor export --out ./harbor-export-20261122 --format json     # the restorable copy only
 ```
+
+`--format` takes `all` (default), `json`, `markdown`, `netscape`, or a comma-separated list. `md` and
+`html` are accepted as aliases.
 
 **Guarantees**, in the order they matter:
 
@@ -35,10 +39,16 @@ harbor export --out ./harbor-export-20261122 --include-media   # plus media/<sha
 
 ```
 DIR/
-  library.json     every item, its tags, Spaces, highlights, media rows
-  manifest.json    counts, per-file bytes and sha256, app and schema version
-  media/<sha256>   originals by content address, when --include-media
+  library.json              every item, its tags, Spaces, highlights, media rows
+  markdown/0001-slug.md     one file per item, readable in any editor
+  bookmarks.html            Netscape: importable into any browser or tool
+  manifest.json             counts, per-file bytes and sha256, app and schema version
+  media/<sha256>            originals by content address, when --include-media
 ```
+
+The numeric prefix is the item's position in the export, so two items with the same title never
+collide and no slug has to be invented twice. A title with no ASCII letters or digits (or none at all)
+becomes `untitled`.
 
 `manifest.json`:
 
@@ -83,8 +93,32 @@ Empty arrays are written as `[]`, never `null`, so a consumer does not need to d
   `go test ./server/internal/export -update` and **read the diff** before committing it — a golden
   that changes without a matching code change is a bug, not an update.
 
+## Markdown
+
+One file per item:
+
+- **Front-matter** between `---` lines. Keys: `title`, `url` (absent for a note), `url_original`,
+  `kind`, `kind_source`, `source`, `created_at`, `saved_at`, `updated_at`, `deleted_at` (only when
+  soft-deleted), `tags`, `spaces`. Values are **JSON scalars**, which are also valid YAML scalars —
+  one escaping rule for quotes, colons, newlines and unicode, rather than a hand-rolled YAML writer
+  that gets them wrong.
+- **Body**: the title as `#`, the summary as a blockquote, `## Note`, `## Content` (the reader's
+  Markdown, falling back to extracted text), `## Transcript` when there is one, `## Highlights` with
+  each quote as a blockquote and its annotation as the paragraph beneath, and `## Media` with
+  relative `../media/<sha256>` references so the tree opens as a folder.
+
+## bookmarks.html
+
+Netscape's format, which every browser imports and phase 5's importer reads. It carries **live items
+with a URL only**: a note has no bookmark, and a soft-deleted item is not something to hand a browser.
+`library.json` is the complete copy; this file is the readable one.
+
+- `<DT><A HREF ADD_DATE TAGS>` per item; `ADD_DATE` is `saved_at` in unix seconds.
+- Folders come from the item's **first manual Space**; everything else sits at the top level.
+- Titles, URLs, tags and folder names are HTML-escaped.
+
 ## Not here yet
 
-Markdown (`markdown/0001-slug.md`) and `bookmarks.html` (Netscape) are the next slice: they are the
-formats that make the export *readable* rather than restorable, and the importer in phase 5 reads the
-Netscape one, so the round-trip test lands with it.
+The export → import round-trip (`plans/12` test 2) needs the importer phase 5 builds, so it lands
+there, reading this Netscape file and `library.json`. Until then the contract is held by the golden
+tree and the manifest.
