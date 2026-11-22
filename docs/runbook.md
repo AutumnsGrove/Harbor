@@ -96,26 +96,51 @@ harbor replay --since <the RFC 3339 time the restore printed>
 
 ## Restore drill (run it before you need it)
 
-On a machine that is not the potato, so the real library is never at risk:
+Two drills, and they are different things.
+
+### 1. The procedure, repeatable: `make drill`
+
+`scripts/drill.sh` builds a library through the API, backs it up, **moves the whole data directory
+away**, restores from the backup, and checks the library came back — then exports what it restored and
+checks the export agrees. Everything happens in a temp directory with a dev data dir, so it cannot
+touch a real Harbor, and nothing needs the network.
 
 ```bash
-mkdir -p /tmp/drill && cd /tmp/drill
-cp ~/Harbor/data/backups/harbor-<newest>.db.zst .
-mkdir data
-HARBOR_DATA_DIR=/tmp/drill/data HARBOR_DEPLOYMENT=dev HARBOR_DEV_NO_AUTH=1 \
-  harbor restore ./harbor-<newest>.db.zst --yes
-HARBOR_DATA_DIR=/tmp/drill/data HARBOR_DEPLOYMENT=dev HARBOR_DEV_NO_AUTH=1 harbor serve
+make drill                 # 300 items
+COUNT=2000 make drill      # a bigger library
+KEEP=1 make drill          # leave the temp directory behind to look at
 ```
 
-Then check, in the browser and with `harbor export`: item count, tags, Spaces, one image, one PDF,
-one highlight with its note, and search for a phrase you know is in an article body.
+Measured on this MacBook Air, 2026-11-22:
 
-Record the wall-clock time here each time it is run. **The first drill has not been run yet** — the
-phase-12 exit criterion is this drill, not the code that makes it possible.
+| Items | Database | Backup (zstd) | Backup | Restore | Export | Notes |
+|---|---|---|---|---|---|---|
+| 300 | 1.5 MB | 36 KB | 0.06 s | 0.06 s | 0.06 s | whole drill, build included: ~5 s |
+| 2000 | 10 MB | — | 0.16 s | 0.12 s | 0.42 s | 2000 markdown files |
+
+### 2. The real library, on a clean box (not yet run)
+
+The phase-12 exit criterion is this one: the actual `harbor.db` from the potato, restored somewhere
+that is not the potato. `make drill` proves the procedure and the code; it cannot prove the potato's
+backup, because that backup has never been taken.
+
+```bash
+# on the Mac, with a copy of the newest backup from the potato
+mkdir -p /tmp/drill2/data
+cp <newest>.db.zst /tmp/drill2/
+HARBOR_DATA_DIR=/tmp/drill2/data HARBOR_DEPLOYMENT=dev HARBOR_DEV_NO_AUTH=1 \
+  harbor restore /tmp/drill2/<newest>.db.zst --yes
+HARBOR_DATA_DIR=/tmp/drill2/data HARBOR_DEPLOYMENT=dev HARBOR_DEV_NO_AUTH=1 harbor serve
+```
+
+Then check in the browser and with `harbor export`: item count, tags, Spaces, one image, one PDF, a
+highlight with its note, and a search for a phrase you know is in an article body — the last two only
+once phases 6, 8 and 10 have landed.
 
 | Date | Backup | Box | Time to a working library | Notes |
 |---|---|---|---|---|
-| — | — | — | — | not yet run |
+| 2026-11-22 | fixture, 300 & 2000 items | this MacBook Air | 0.06 s / 0.12 s restore | `make drill`, procedure only |
+| — | potato's `harbor.db` | — | — | **not yet run** |
 
 ---
 

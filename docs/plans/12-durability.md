@@ -171,7 +171,12 @@ Rules that make it a real export rather than a data dump:
 - [~] `docs/runbook.md` with the drills, written so a tired person at 2 a.m. can follow it. Written
       2026-11-22 with deploy, update, rollback, backup, restore, disaster recovery and the drill
       procedure; **the drill timings table is empty**, because the drill has not been run.
-- [ ] **Run the drill for real**, on a clean directory, and paste the timings into the runbook.
+- [~] **Run the drill for real**, on a clean directory, and paste the timings into the runbook.
+      `scripts/drill.sh` (`make drill`) runs the whole procedure — library, backup, data directory
+      destroyed, restore, export — in a temp directory and is timed; 300 and 2000 items pass, restore
+      0.06 s and 0.12 s. 2026-11-22. **Still outstanding: the same drill with the potato's real
+      `harbor.db` on a machine that is not the potato**, which is the exit criterion the code cannot
+      satisfy on its own.
 
 **Status and guardrails**
 
