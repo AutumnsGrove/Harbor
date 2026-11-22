@@ -140,7 +140,21 @@ once phases 6, 8 and 10 have landed.
 | Date | Backup | Box | Time to a working library | Notes |
 |---|---|---|---|---|
 | 2026-11-22 | fixture, 300 & 2000 items | this MacBook Air | 0.06 s / 0.12 s restore | `make drill`, procedure only |
-| — | potato's `harbor.db` | — | — | **not yet run** |
+| 2026-11-22 | the potato's `pre-update.db` (real schema, real box) | this MacBook Air | 0.05 s backup, 0.05 s restore | see below |
+
+The second row is the real one, with two things it is honest to record:
+
+- **The backup came from `data/backups/pre-update.db`, not a nightly `.zst`**, because no
+  `harbor-<UTC>.db.zst` exists on the potato yet: the nightly timer merged on 2026-11-22 and the box has
+  not taken the update that ships it. It is still the potato's real database, taken by the update
+  watcher, and it restored on a machine that is not the potato.
+- **The potato's library is empty** — 0 items, one Space, because nothing has been saved to Harbor yet.
+  To have something to lose, 40 saves were added locally to that copy through the API (one then
+  soft-deleted) before the backup. Everything after that was real: 39 live items and 1 in Recently
+  deleted came back, `harbor export` agreed with the file, and the whole round trip was 0.1 s.
+
+The first genuinely real drill — the potato's own library, with the owner's own saves in it — still
+needs saves to exist. That is the last thing this table is waiting for.
 
 ---
 
@@ -173,6 +187,27 @@ restore the `pre-update.db` snapshot the update took, then pull the previous dig
 | The potato **and** the backups | Only what you exported | `harbor export --out … --include-media` is the copy that needs nothing else |
 
 That last row is why the export exists. Keep one somewhere that is neither the potato nor R2.
+
+## The copy on the MacBook Air
+
+`deploy/harbor-rsync.sh` runs on the machine that **receives** the copy and pulls over ssh; the
+distroless image has no rsync, so nothing is pushed from inside the container. Run it from cron or a
+launchd job:
+
+```bash
+./deploy/harbor-rsync.sh                        # ~/Backups/Harbor, backups only
+./deploy/harbor-rsync.sh --media --prune        # media too, and mirror deletions
+./deploy/harbor-rsync.sh --dry-run
+```
+
+- **An unreachable potato exits 0** with a note. A laptop that is asleep is not an error, and a job
+  that cries every time it is offline trains people to ignore it.
+- **A failed copy exits 1** and says so in `<dest>/.last-rsync.json`. The file answers two questions:
+  what happened last night (`outcome`, `detail`, `at`), and when the last *good* copy happened
+  (`last_ok_at`, `last_ok_host`, `last_ok_files`, `last_ok_bytes`). A bad night does not overwrite
+  the second, so "copied an hour ago, one bad night since" never reads like "not copied in months".
+- **`--prune` is opt-in.** By default the destination only ever grows, so a wrong `--from` cannot
+  delete the copies you were keeping.
 
 ---
 
