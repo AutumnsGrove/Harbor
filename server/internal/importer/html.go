@@ -62,6 +62,7 @@ type HTMLReader struct {
 	warns     []string
 	sawMarkup bool
 	truncated bool
+	overDepth int // opens past maxFolderDepth, not on the stack but still closed
 }
 
 // NewHTMLReader prepares a reader. It never rejects a document here: whether
@@ -131,6 +132,12 @@ func (hr *HTMLReader) Next() (Row, error) {
 				}
 				if len(hr.folders) < maxFolderDepth {
 					hr.folders = append(hr.folders, hr.pending)
+				} else {
+					// Past the cap the level is not stored, but its </DL> still
+					// has to be consumed here: closing it against the stack
+					// would pop an outer folder and file later bookmarks under
+					// the wrong path.
+					hr.overDepth++
 				}
 				hr.pending = ""
 			case "dt":
@@ -162,8 +169,11 @@ func (hr *HTMLReader) Next() (Row, error) {
 			name, _ := hr.tok.TagName()
 			switch string(name) {
 			case "dl":
-				if n := len(hr.folders); n > 0 {
-					hr.folders = hr.folders[:n-1]
+				switch {
+				case hr.overDepth > 0:
+					hr.overDepth--
+				case len(hr.folders) > 0:
+					hr.folders = hr.folders[:len(hr.folders)-1]
 				}
 			case "h3":
 				hr.pending = strings.TrimSpace(hr.title.String())

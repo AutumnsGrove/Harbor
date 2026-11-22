@@ -3,6 +3,7 @@ package importer
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -316,6 +317,29 @@ func TestNetscapeDeepNestingIsLinear(t *testing.T) {
 	}
 	if got := strings.Count(rows[0].Folder, "/") + 1; got != maxFolderDepth {
 		t.Errorf("folder depth = %d, want it capped at %d", got, maxFolderDepth)
+	}
+}
+
+// Past the depth cap the skipped levels still have to close: otherwise a
+// closing </DL> pops an outer folder and later bookmarks are filed under the
+// wrong path — silently, which is worse than a capped one.
+func TestNetscapeDepthCapKeepsTheStackBalanced(t *testing.T) {
+	var b strings.Builder
+	const extra = 6
+	for i := 0; i < maxFolderDepth+extra; i++ {
+		fmt.Fprintf(&b, "<DT><H3>f%d</H3><DL><p>", i)
+	}
+	b.WriteString(strings.Repeat("</DL><p>", maxFolderDepth))
+	b.WriteString("<DT><A HREF=\"https://example.com/shallow\">Shallow</A>")
+
+	rows, _, _ := readHTMLToEOF(t, b.String())
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	// 64 levels stored, 6 past the cap; closing 64 times consumes the six
+	// skipped ones and the deepest six stored levels, leaving f0…f5.
+	if want := "f0/f1/f2/f3/f4/f5"; rows[0].Folder != want {
+		t.Errorf("folder = %.80q, want %q", rows[0].Folder, want)
 	}
 }
 
