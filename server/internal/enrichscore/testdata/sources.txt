@@ -14,7 +14,7 @@
 # set covers ten of the twelve.
 #
 # The spread is the point: five languages, long-form and link-heavy fronts, repos
-# and papers and shops, three video hosts, member-walled reporting (404 Media),
+# and papers and shops, two video hosts, member-walled reporting (404 Media),
 # and the Guardian's registration wall standing in for a paywalled teaser — the
 # sites that actually paywall (FT, WSJ, NYT, The Economist) answer 403 to a plain
 # fetch, so production cannot save them either.

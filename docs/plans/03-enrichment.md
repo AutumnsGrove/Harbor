@@ -290,7 +290,7 @@ is `MaxTokens: 800` on the write call, not the page length.
 ## The scored set, and its first run (2026-11-22)
 
 `server/internal/enrichscore/testdata/saves/` — 41 captures from 41 sources (`sources.txt`), ten of
-the twelve kinds, five languages, three video hosts, repos and papers and shops, and the walls that
+the twelve kinds, five languages, two video hosts, repos and papers and shops, and the walls that
 actually answer a plain fetch: 404 Media's member wall and the Guardian's registration wall stand in
 for the paywalled teaser the demo names, because FT, WSJ, NYT and The Economist all **403** a fetch
 without JavaScript — production cannot save them either.
@@ -309,9 +309,11 @@ without JavaScript — production cannot save them either.
 
 What the captures taught, kept as cases because production would really store them: a YouTube watch
 page yields ~20,000 characters of `ytInitialPlayerResponse` JavaScript as its "article text", Vimeo
-returns a Cloudflare challenge, and `www.thestrand.com` extracts nothing at all. The model still got
-`video`, `video` and `place` right from the title and OG metadata — which is the phase's own risk
-note, measured instead of assumed.
+returns a Cloudflare challenge, and `www.thestrand.com` extracts nothing at all — no text, no excerpt,
+no site name, and a title that is only the URL's host. Both videos were still filed as `video`, from
+title and OG metadata. The Strand was filed as `place` from **the host in the URL alone**: one case,
+and it is the one the phase's risk note is about — a bad capture still yields a usable item, but the
+model is guessing.
 
 Labels are the agent's reading of each captured page, one line each in `labels.json` and correctable
 in a single edit. The exit demo's *"count what the human agrees with"* is still the owner's to run on
