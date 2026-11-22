@@ -13,7 +13,7 @@ BIN     := bin/harbor
 VERSION ?= r$(shell git rev-list --count HEAD 2>/dev/null || echo 0).$(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X $(MODULE)/server/internal/build.version=$(VERSION)
 
-.PHONY: version web build dev test fuzz fmt-check vet web-check worker-check watcher-check packaging docker docker-run docker-check deploy check clean
+.PHONY: version web build dev test fuzz fmt-check vet web-check worker-check watcher-check packaging docker docker-run docker-check deploy check clean enrich-score enrich-record
 
 version:
 	@echo $(VERSION)
@@ -30,6 +30,18 @@ build: web
 
 test:
 	$(GO) test -race ./...
+
+# The scored set is a paid, networked measurement, so it is never part of
+# `check`: real saves with a human label, scored against the live prompt and
+# model (plans/03, "Exit criteria"). -record refreshes the captures and leaves
+# labels.json alone.
+SCORED_SET := server/internal/enrichscore/testdata/saves
+
+enrich-score:
+	$(GO) run ./server/cmd/enrichscore -dir $(SCORED_SET)
+
+enrich-record:
+	$(GO) run ./server/cmd/enrichscore -dir $(SCORED_SET) -record server/internal/enrichscore/testdata/sources.txt
 
 # Local run: the identity lock is off (no Tailscale header on a laptop), and the
 # dev defaults put data/ and update-signal/ beside the source. Run `make web`
