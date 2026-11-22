@@ -324,8 +324,8 @@ func Load(dir string) ([]Case, error) {
 		if c.URL == "" {
 			return nil, fmt.Errorf("enrichscore: %s has no url", name)
 		}
-		if strings.TrimSpace(c.Text) == "" {
-			return nil, fmt.Errorf("enrichscore: %s captured no page text; re-record it", name)
+		if strings.TrimSpace(c.Text) == "" && strings.TrimSpace(c.Title) == "" {
+			return nil, fmt.Errorf("enrichscore: %s captured no page text and no title; re-record it", name)
 		}
 		if l, ok := labels[id]; ok {
 			// A blank kind is a case the owner has not labelled yet; -record

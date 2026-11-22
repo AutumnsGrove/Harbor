@@ -198,14 +198,11 @@ func capture(ctx context.Context, fetcher enrich.Fetcher, source Source) (*extra
 	if base == nil {
 		base = &url.URL{}
 	}
-	result, err := extract.HTML(fetched.Body, base)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(result.Text) == "" {
-		return nil, fmt.Errorf("extracted no page text")
-	}
-	return result, nil
+	// A page with no readable article is still a real case: production keeps
+	// the item, classifies it from the title and OG metadata, and the exit demo
+	// counts what the owner thinks of that. Only a capture with nothing at all
+	// is useless.
+	return extract.HTML(fetched.Body, base)
 }
 
 // limit cuts at a UTF-8 boundary; a fixture is not allowed to hold invalid

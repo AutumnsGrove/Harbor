@@ -285,12 +285,28 @@ func TestLoadRejectsALabelWithNoCase(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsACaseWithNoText(t *testing.T) {
+func TestLoadRejectsACaseWithNothingCaptured(t *testing.T) {
 	dir := writeSet(t, map[string]string{
 		"empty.json": `{"url": "https://example.test/empty", "text": "  "}`,
 	})
 	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Fatalf("Load = %v, want a complaint about the empty capture", err)
+	}
+}
+
+func TestLoadAcceptsATitleOnlyCapture(t *testing.T) {
+	// A JS-only page yields no readable article, but production still saves the
+	// item and classifies it from the title and OG metadata, so it is a real
+	// case and the model is asked about it (plans/03, risks).
+	dir := writeSet(t, map[string]string{
+		"shop.json": `{"url": "https://shop.example/x", "title": "The Strand Book Store", "excerpt": "18 miles of books."}`,
+	})
+	cases, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cases) != 1 || cases[0].Title == "" {
+		t.Fatalf("cases = %+v", cases)
 	}
 }
 
@@ -320,8 +336,8 @@ func TestLoadOfTheCommittedSet(t *testing.T) {
 		if !strings.HasPrefix(c.URL, "http") {
 			t.Errorf("%s: url = %q", c.ID, c.URL)
 		}
-		if strings.TrimSpace(c.Text) == "" {
-			t.Errorf("%s: no page text", c.ID)
+		if strings.TrimSpace(c.Text) == "" && strings.TrimSpace(c.Title) == "" {
+			t.Errorf("%s: no page text and no title", c.ID)
 		}
 		if c.Kind != "" && !c.Kind.Valid() {
 			t.Errorf("%s: kind = %q", c.ID, c.Kind)
