@@ -229,7 +229,7 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		}
 		defer page.Close()
 
-		if !isHTML(page.ContentType) {
+		if !IsHTML(page.ContentType) {
 			return permanent(fmt.Errorf("content type %q is not HTML", page.ContentType))
 		}
 		base := page.URL
@@ -336,35 +336,34 @@ func (e *Enricher) fail(ctx context.Context, item model.Item, cause error) error
 }
 
 func (e *Enricher) classifyInput(item model.Item, extracted *extract.Result) ClassifyInput {
-	input := ClassifyInput{IsNote: !hasURL(item), Title: item.Title}
-	if hasURL(item) {
-		input.URL = *item.URL
-	}
-	if extracted != nil {
-		input.Title = firstNonEmpty(extracted.Title, item.Title)
-		input.SiteName = extracted.SiteName
-		input.Excerpt = extracted.Excerpt
-		input.Text = truncate(extracted.Text, classifyTextLimit)
-	} else {
-		input.Text = truncate(item.Note, classifyTextLimit)
-	}
+	page := pageText(item, extracted)
+	input := ClassifyFor(page)
+	input.IsNote = !hasURL(item)
 	return input
 }
 
 func (e *Enricher) contentInput(item model.Item, extracted *extract.Result, kind model.Kind, vocabulary []string) ContentInput {
-	input := ContentInput{Kind: kind, IsNote: !hasURL(item), Vocabulary: vocabulary, Title: item.Title}
+	input := ContentFor(pageText(item, extracted), kind)
+	input.IsNote = !hasURL(item)
+	input.Vocabulary = vocabulary
+	return input
+}
+
+// pageText is the extracted page, or the note's text when there is no page.
+func pageText(item model.Item, extracted *extract.Result) PageText {
+	page := PageText{Title: item.Title}
 	if hasURL(item) {
-		input.URL = *item.URL
+		page.URL = *item.URL
 	}
 	if extracted != nil {
-		input.Title = firstNonEmpty(extracted.Title, item.Title)
-		input.SiteName = extracted.SiteName
-		input.Excerpt = extracted.Excerpt
-		input.Text = truncate(extracted.Text, chatTextLimit)
-	} else {
-		input.Text = truncate(item.Note, chatTextLimit)
+		page.Title = firstNonEmpty(extracted.Title, item.Title)
+		page.SiteName = extracted.SiteName
+		page.Excerpt = extracted.Excerpt
+		page.Text = extracted.Text
+		return page
 	}
-	return input
+	page.Text = item.Note
+	return page
 }
 
 func extractedText(item model.Item, extracted *extract.Result) string {
@@ -448,7 +447,11 @@ func classifyFetchError(err error) error {
 	return err
 }
 
-func isHTML(contentType string) bool {
+// IsHTML reports whether a fetched content type is one the pipeline can
+// extract. It is exported because the scored set captures pages with the same
+// rule: a capture the pipeline would have refused before extraction is not a
+// save, and must never become a scored case.
+func IsHTML(contentType string) bool {
 	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
 	switch mediaType {
 	case "text/html", "application/xhtml+xml", "application/xml", "text/xml", "text/plain":
