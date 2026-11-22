@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT/.env"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
-UNITS=(harbor-update.service harbor-update.path harbor-tick.service harbor-tick.timer harbor-firewall.service)
+UNITS=(harbor-update.service harbor-update.path harbor-tick.service harbor-tick.timer harbor-firewall.service harbor-backup.service harbor-backup.timer)
 
 log() { printf 'install: %s\n' "$*"; }
 die() {
@@ -99,6 +99,7 @@ systemctl daemon-reload
 systemctl enable harbor-firewall.service >/dev/null
 systemctl enable --now harbor-update.path >/dev/null
 systemctl enable --now harbor-tick.timer >/dev/null
+systemctl enable --now harbor-backup.timer >/dev/null
 log "enabled update path, tick timer and firewall unit"
 
 # ── 5. first run ────────────────────────────────────────────────────────────

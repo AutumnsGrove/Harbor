@@ -2,6 +2,7 @@ package workerclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,36 @@ import (
 // maxBackupAttempts matches the retry patience of a nightly job: three tries over
 // about a minute, then the failure is reported rather than swallowed.
 const maxBackupAttempts = 3
+
+// Uploads get their own patience. The client's DefaultTimeout bounds a queue
+// call, but it also covers writing a request body — and a 100 MB snapshot over a
+// home uplink takes minutes, not thirty seconds. A slow-but-working upload must
+// not be turned into three timed-out attempts every night.
+const (
+	minUploadTimeout = 5 * time.Minute
+	// uploadFloorBytesPerSecond is a deliberately pessimistic link: a backup that
+	// is still moving at 50 KiB/s is still worth waiting for.
+	uploadFloorBytesPerSecond = 50 * 1024
+)
+
+// uploadTimeout scales with the body, with a floor for small files and the
+// client's own bound above it.
+func uploadTimeout(size int64) time.Duration {
+	seconds := size / uploadFloorBytesPerSecond
+	scaled := time.Duration(seconds) * time.Second
+	if scaled < minUploadTimeout {
+		return minUploadTimeout
+	}
+	return scaled
+}
+
+// BackupSummary is one snapshot on the Worker: the listing the retention
+// reconciliation needs.
+type BackupSummary struct {
+	Name     string `json:"name"`
+	Bytes    int64  `json:"bytes"`
+	Uploaded int64  `json:"uploaded"`
+}
 
 // PutBackup uploads one compressed snapshot. body must be seekable: a retry
 // re-reads it rather than buffering a database in memory.
@@ -59,6 +90,8 @@ func (c *Client) PutBackup(ctx context.Context, name string, body io.ReadSeeker,
 }
 
 func (c *Client) putBackupOnce(ctx context.Context, path string, body io.Reader, size int64, sha256 string, schema int) error {
+	// A separate client: same transport and proxies, patience scaled to the body.
+	uploader := &http.Client{Transport: c.http.Transport, Timeout: uploadTimeout(size)}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.base+path, body)
 	if err != nil {
 		return fmt.Errorf("workerclient: %w", err)
@@ -71,7 +104,7 @@ func (c *Client) putBackupOnce(ctx context.Context, path string, body io.Reader,
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.http.Do(req)
+	resp, err := uploader.Do(req)
 	if err != nil {
 		return fmt.Errorf("workerclient: %s: %w", path, err)
 	}
@@ -84,6 +117,23 @@ func (c *Client) putBackupOnce(ctx context.Context, path string, body io.Reader,
 		return apiError(resp, data)
 	}
 	return nil
+}
+
+// ListBackups reports what the Worker holds. Reconciliation uses it: the remote
+// side is derived from what is local *now*, not from the names this run happened
+// to prune, so a night with no --upload cannot leak an R2 copy forever.
+func (c *Client) ListBackups(ctx context.Context) ([]BackupSummary, error) {
+	data, err := c.do(ctx, http.MethodGet, "/backups", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		Backups []BackupSummary `json:"backups"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return nil, fmt.Errorf("workerclient: decode /backups: %w", err)
+	}
+	return body.Backups, nil
 }
 
 // DeleteBackup removes one snapshot from R2. Retention calls it after pruning the

@@ -1,0 +1,13 @@
+[Unit]
+Description=Harbor nightly backup at 03:10 UTC
+
+[Timer]
+# Off the hour, like the Worker's orphan sweep: a backup that fires with everyone
+# else's is a slower backup.
+OnCalendar=*-*-* 03:10:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=harbor-backup.service
+
+[Install]
+WantedBy=timers.target

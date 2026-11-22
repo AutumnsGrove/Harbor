@@ -159,12 +159,30 @@ func uploadBackup(ctx context.Context, cfg build.Config, result backup.Result, s
 	}
 	fmt.Fprintf(stdout, "  uploaded %s through the Worker\n", newest.Name)
 
-	for _, pruned := range result.Deleted {
-		if err := client.DeleteBackup(ctx, pruned.Name); err != nil {
-			// The local copy is already gone and the remote one is not: report it
-			// rather than pretend the two sides agree.
-			return fmt.Errorf("backup: removing %s from R2: %w", pruned.Name, err)
+	// Reconcile from the remote listing, not from what this run pruned: a night
+	// without --upload, or one where the upload failed after the local prune,
+	// would otherwise forget the names and leave R2 growing forever. The Worker
+	// holds a listing route for exactly this.
+	remote, err := client.ListBackups(ctx)
+	if err != nil {
+		return fmt.Errorf("backup: listing the remote backups: %w", err)
+	}
+	local := map[string]bool{}
+	for _, entry := range result.Kept {
+		local[entry.Name] = true
+	}
+	removed := 0
+	for _, entry := range remote {
+		if local[entry.Name] {
+			continue
 		}
+		if err := client.DeleteBackup(ctx, entry.Name); err != nil {
+			return fmt.Errorf("backup: removing %s from R2: %w", entry.Name, err)
+		}
+		removed++
+	}
+	if removed > 0 {
+		fmt.Fprintf(stdout, "  removed %d old backup(s) from R2\n", removed)
 	}
 	return nil
 }

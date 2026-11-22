@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // The backup upload is the potato's only outbound write that is not a queue
@@ -140,6 +141,40 @@ func TestPutBackupDoesNotRetryARejectedBody(t *testing.T) {
 	}
 	if len(server.requests) != 1 {
 		t.Errorf("attempts = %d, want one: a rejected body is not retried", len(server.requests))
+	}
+}
+
+func TestUploadTimeoutScalesWithTheBody(t *testing.T) {
+	// A 30 s bound covers writing the request body too, so a snapshot over a home
+	// uplink would time out three times and never upload.
+	if got := uploadTimeout(100 * 1024); got != minUploadTimeout {
+		t.Errorf("small upload timeout = %v, want the %v floor", got, minUploadTimeout)
+	}
+	// 100 MB at the pessimistic floor is ~34 minutes.
+	if got := uploadTimeout(100 << 20); got < 30*time.Minute {
+		t.Errorf("100 MB timeout = %v, want it scaled to minutes at 50 KiB/s", got)
+	}
+	if got := uploadTimeout(100 << 20); got <= minUploadTimeout {
+		t.Errorf("100 MB timeout = %v, want more than the floor", got)
+	}
+}
+
+func TestListBackups(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/backups" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"backups":[{"name":"harbor-20261122T180000Z.db.zst","bytes":10,"uploaded":1764000000}]}`))
+	}))
+	defer ts.Close()
+
+	backups, err := newTestClient(t, ts.URL).ListBackups(context.Background())
+	if err != nil {
+		t.Fatalf("ListBackups: %v", err)
+	}
+	if len(backups) != 1 || backups[0].Name != "harbor-20261122T180000Z.db.zst" || backups[0].Bytes != 10 {
+		t.Errorf("backups = %+v", backups)
 	}
 }
 

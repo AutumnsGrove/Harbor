@@ -22,6 +22,10 @@ pnpm deploy             # wrangler deploy
 ```bash
 wrangler d1 create harbor                    # once; put the id in wrangler.toml
 wrangler r2 bucket create harbor-intake      # once; private
+# two buckets: intake (media and files) and backups (snapshots)
+wrangler r2 bucket create harbor-intake
+wrangler r2 bucket create harbor-backups
+
 wrangler d1 migrations apply harbor --remote
 
 # door tokens: run this per door, keep the printed token, apply the printed SQL

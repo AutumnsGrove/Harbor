@@ -150,15 +150,24 @@ func TestBackupUploadsThroughTheWorker(t *testing.T) {
 		body    []byte
 	)
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/backups" {
+			// A stale remote copy from a night this run did not prune: the
+			// reconciliation must remove it rather than trust its own delete list.
+			_, _ = w.Write([]byte(`{"backups":[{"name":"harbor-20200101T000000Z.db.zst","bytes":5,"uploaded":1}]}`))
+			return
+		}
 		data, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		methods = append(methods, r.Method)
 		paths = append(paths, r.URL.Path)
-		sha = r.Header.Get("X-Harbor-Sha256")
-		length = r.ContentLength
-		body = data
+		if r.Method == http.MethodPut {
+			// Only the upload carries the bytes; the DELETE after it has none.
+			sha = r.Header.Get("X-Harbor-Sha256")
+			length = r.ContentLength
+			body = data
+		}
 		mu.Unlock()
-		w.Header().Set("content-type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("{}"))
 	}))
@@ -186,17 +195,20 @@ func TestBackupUploadsThroughTheWorker(t *testing.T) {
 	if err := run(context.Background(), []string{"backup", "--upload"}, env, &stdout); err != nil {
 		t.Fatalf("harbor backup --upload: %v\n%s", err, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "uploaded") {
+	if !strings.Contains(stdout.String(), "uploaded") || !strings.Contains(stdout.String(), "removed 1 old backup") {
 		t.Errorf("stdout = %q", stdout.String())
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(methods) != 1 || methods[0] != http.MethodPut {
+	if len(methods) != 2 || methods[0] != http.MethodPut || methods[1] != http.MethodDelete {
 		t.Fatalf("requests = %v", methods)
 	}
 	if !strings.HasPrefix(paths[0], "/backups/harbor-") || !strings.HasSuffix(paths[0], ".db.zst") {
 		t.Errorf("path = %q", paths[0])
+	}
+	if paths[1] != "/backups/harbor-20200101T000000Z.db.zst" {
+		t.Errorf("deleted %q, want the stale remote copy", paths[1])
 	}
 	if length <= 0 || int64(len(body)) != length {
 		t.Errorf("uploaded %d bytes with content-length %d", len(body), length)
