@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<DL><p><DT><A HREF=\"javascript:alert(1)\">x</A><DT><A HREF=\"https://example.com/c?utm_source=x#frag\">C</A>")
