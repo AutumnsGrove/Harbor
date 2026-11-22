@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
 )
@@ -152,9 +153,10 @@ func TestBackupUploadsThroughTheWorker(t *testing.T) {
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("content-type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/backups" {
-			// A stale remote copy from a night this run did not prune: the
-			// reconciliation must remove it rather than trust its own delete list.
-			_, _ = w.Write([]byte(`{"backups":[{"name":"harbor-20200101T000000Z.db.zst","bytes":5,"uploaded":1}]}`))
+			// A remote copy the local disk has never seen. The upload must NOT
+			// delete it: the off-box copies exist because the potato can be lost,
+			// so their fate cannot depend on what is on this disk.
+			_, _ = w.Write([]byte(`{"backups":[{"name":"harbor-20261101T000000Z.db.zst","bytes":5,"uploaded":1}]}`))
 			return
 		}
 		data, _ := io.ReadAll(r.Body)
@@ -195,20 +197,17 @@ func TestBackupUploadsThroughTheWorker(t *testing.T) {
 	if err := run(context.Background(), []string{"backup", "--upload"}, env, &stdout); err != nil {
 		t.Fatalf("harbor backup --upload: %v\n%s", err, stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "uploaded") || !strings.Contains(stdout.String(), "removed 1 old backup") {
+	if !strings.Contains(stdout.String(), "uploaded") {
 		t.Errorf("stdout = %q", stdout.String())
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(methods) != 2 || methods[0] != http.MethodPut || methods[1] != http.MethodDelete {
-		t.Fatalf("requests = %v", methods)
+	if len(methods) != 1 || methods[0] != http.MethodPut {
+		t.Fatalf("requests = %v, want the upload and no deletion", methods)
 	}
 	if !strings.HasPrefix(paths[0], "/backups/harbor-") || !strings.HasSuffix(paths[0], ".db.zst") {
 		t.Errorf("path = %q", paths[0])
-	}
-	if paths[1] != "/backups/harbor-20200101T000000Z.db.zst" {
-		t.Errorf("deleted %q, want the stale remote copy", paths[1])
 	}
 	if length <= 0 || int64(len(body)) != length {
 		t.Errorf("uploaded %d bytes with content-length %d", len(body), length)
@@ -216,6 +215,83 @@ func TestBackupUploadsThroughTheWorker(t *testing.T) {
 	sum := sha256.Sum256(body)
 	if sha != hex.EncodeToString(sum[:]) {
 		t.Errorf("uploaded sha = %q, want the digest of the bytes", sha)
+	}
+}
+
+func TestBackupPrunesR2ToItsOwnWindow(t *testing.T) {
+	// R2 keeps thirty regardless of --keep and regardless of how many backups the
+	// local disk holds, because design §11 says three on the SD card and thirty
+	// off the box.
+	var (
+		mu      sync.Mutex
+		deleted []string
+	)
+	var listing strings.Builder
+	listing.WriteString(`{"backups":[`)
+	start := time.Date(2026, 10, 1, 3, 0, 0, 0, time.UTC)
+	for day := 0; day < 32; day++ {
+		if day > 0 {
+			listing.WriteString(",")
+		}
+		name := "harbor-" + start.AddDate(0, 0, day).Format("20060102T150405Z") + ".db.zst"
+		fmt.Fprintf(&listing, `{"name":%q,"bytes":5,"uploaded":1}`, name)
+	}
+	listing.WriteString(`]}`)
+
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/backups":
+			_, _ = w.Write([]byte(listing.String()))
+		case r.Method == http.MethodDelete:
+			mu.Lock()
+			deleted = append(deleted, r.URL.Path)
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"deleted":true}`))
+		default:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer worker.Close()
+
+	dataDir := t.TempDir()
+	env := func(name string) string {
+		switch name {
+		case build.EnvDataDir:
+			return dataDir
+		case build.EnvDeployment:
+			return "dev"
+		case build.EnvDevNoAuth:
+			return "1"
+		case build.EnvWorkerURL:
+			return worker.URL
+		case build.EnvWorkerToken:
+			return "potato-token"
+		default:
+			return ""
+		}
+	}
+
+	var stdout bytes.Buffer
+	// --keep 3 must not shrink R2: it is the SD card's window, not the off-box one.
+	if err := run(context.Background(), []string{"backup", "--upload", "--keep", "3"}, env, &stdout); err != nil {
+		t.Fatalf("harbor backup --upload: %v\n%s", err, stdout.String())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	// The two oldest of the 32 go; the newest 30 stay, which is the whole window.
+	if len(deleted) != 2 {
+		t.Fatalf("deleted %v, want the two oldest", deleted)
+	}
+	for _, path := range deleted {
+		if path != "/backups/harbor-20261001T030000Z.db.zst" && path != "/backups/harbor-20261002T030000Z.db.zst" {
+			t.Errorf("deleted %q, want only the two oldest", path)
+		}
+	}
+	if !strings.Contains(stdout.String(), "keeping 30") {
+		t.Errorf("stdout does not say what it kept: %q", stdout.String())
 	}
 }
 

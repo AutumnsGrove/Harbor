@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/backup"
@@ -158,37 +159,60 @@ func uploadBackup(ctx context.Context, cfg build.Config, result backup.Result, s
 		return err
 	}
 	fmt.Fprintf(stdout, "  uploaded %s through the Worker\n", newest.Name)
+	return pruneRemote(ctx, client, stdout)
+}
 
-	// Reconcile from the remote listing, not from what this run pruned: a night
-	// without --upload, or one where the upload failed after the local prune,
-	// would otherwise forget the names and leave R2 growing forever. The Worker
-	// holds a listing route for exactly this.
+// remoteKeep is R2's own window, and it is deliberately not --keep: design §11
+// says three on the SD card and thirty off the box. The off-box copies exist
+// because the potato can be lost, so their retention cannot be a function of what
+// happens to be on the potato.
+const remoteKeep = 30
+
+// pruneRemote keeps the newest remoteKeep snapshots in R2 and deletes the rest.
+//
+// It works from the remote listing and nothing else. An earlier version deleted
+// every remote name the local directory did not have, which meant a replacement
+// potato — an empty data directory, the exact case these copies exist for —
+// uploaded one fresh snapshot and then deleted the whole history. A remote copy's
+// fate must not depend on the local disk being healthy.
+func pruneRemote(ctx context.Context, client *workerclient.Client, stdout io.Writer) error {
 	remote, err := client.ListBackups(ctx)
 	if err != nil {
 		return fmt.Errorf("backup: listing the remote backups: %w", err)
 	}
-	local := map[string]bool{}
-	for _, entry := range result.Kept {
-		local[entry.Name] = true
+	type dated struct {
+		name string
+		at   time.Time
 	}
-	removed := 0
+	datedEntries := make([]dated, 0, len(remote))
+	unknown := 0
 	for _, entry := range remote {
-		if local[entry.Name] {
+		at, ok := backup.DateOf(entry.Name)
+		if !ok {
+			// A name this code cannot date is not something to delete on a guess.
+			unknown++
 			continue
 		}
-		if err := client.DeleteBackup(ctx, entry.Name); err != nil {
-			return fmt.Errorf("backup: removing %s from R2: %w", entry.Name, err)
+		datedEntries = append(datedEntries, dated{name: entry.Name, at: at})
+	}
+	if unknown > 0 {
+		fmt.Fprintf(stdout, "  %d remote backup(s) have names this build cannot date; left alone\n", unknown)
+	}
+	sort.Slice(datedEntries, func(i, j int) bool { return datedEntries[i].at.After(datedEntries[j].at) })
+
+	removed := 0
+	for _, entry := range datedEntries[min(remoteKeep, len(datedEntries)):] {
+		if err := client.DeleteBackup(ctx, entry.name); err != nil {
+			return fmt.Errorf("backup: removing %s from R2: %w", entry.name, err)
 		}
 		removed++
 	}
 	if removed > 0 {
-		fmt.Fprintf(stdout, "  removed %d old backup(s) from R2\n", removed)
+		fmt.Fprintf(stdout, "  removed %d old backup(s) from R2 (keeping %d)\n", removed, remoteKeep)
 	}
 	return nil
 }
 
-// putSnapshot streams one file: seekable so the client can retry, hashed first so
-// the Worker records what it actually holds.
 func putSnapshot(ctx context.Context, client *workerclient.Client, entry backup.Entry, schema int) error {
 	file, err := os.Open(entry.Path)
 	if err != nil {
