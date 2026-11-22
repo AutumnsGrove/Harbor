@@ -323,7 +323,7 @@ against reality and not against the design doc's recollection?
 
 **Method:** export the live library as CSV and as HTML. Sanitise to a ~50-row sample (replace real
 URLs with `example.com/<n>`, keep structure, quoting, collection paths, multi-line notes, highlights,
-non-ASCII). Commit the sample as `server/internal/import/testdata/raindrop/real-shape.csv` (and the
+non-ASCII). Commit the sample as `server/internal/importer/testdata/raindrop/real-shape.csv` (and the
 HTML twin) in the phase 5 branch.
 
 **Pass:** the column list is written down exactly (is there an `id`? a `favorite`? how are nested
@@ -376,8 +376,9 @@ alone turns multi-paragraph quotes into fragments (`Be human.` becomes its own b
 very short (`Highlight:unusual`). There is no way to tell a quote from the user's own annotation, so
 nothing is guessed: **one `highlights` row per block**, the quote is the block text minus the
 `Highlight:` prefix, `note` stays empty, and `anchor_json` says `{"source":"imported","index":n}`.
-Rejoining an item's rows in index order with `\n\nHighlight:` reproduces the original cell exactly,
-so the import is lossless.
+Rejoining an item's rows in index order with `\n\nHighlight:` reproduces the original cell up to the
+surrounding whitespace of each block, so the import is lossless where it matters: no passage is
+dropped, merged or reordered.
 
 **Favourites are now imported.** With the count known (6), Autumn asked for favourites to be a real
 thing rather than a dry-run statistic: they land in a seeded manual Space named **Favourites**
@@ -388,7 +389,7 @@ migration. The item-level star toggle and the Space's UI arrive with phase 9's S
 Netscape HTML and phase 5's round-trip test uses that writer, so the HTML importer is written
 against the documented format plus that writer rather than a second Raindrop file.
 
-**Fixture.** `server/internal/import/testdata/raindrop/real-shape.csv` carries these shapes (15 rows:
+**Fixture.** `server/internal/importer/testdata/raindrop/real-shape.csv` carries these shapes (15 rows:
 multi-line notes, doubled quotes, a noisy URL with `utm_`/fragment, `http` cover, 1/2/4-block
 highlight cells, a block with internal newlines, a 9-character block, scraped-junk text, unicode and
 emoji, an empty title, a duplicate URL, slack in the tag cell). It is **hand-built to the observed

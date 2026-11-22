@@ -28,12 +28,13 @@ Out: mymind (dropped), automatic watching of an export directory, other bookmark
 ## Deliverables
 
 ```
-server/internal/import/
+server/internal/importer/   (`import` is a Go keyword, so the package cannot be named that)
   csv.go           Raindrop CSV reader (header-tolerant, quoted fields, BOM, CRLF)
   html.go          Netscape bookmark HTML (nested <DL>, folders, ADD_DATE, ICON)
   import.go        the driver: parse → canonicalise → merge → space assignment → enqueue
   progress.go      counters + resume checkpoint (imported URL set is the idempotence key)
-  testdata/raindrop/*.csv     fixtures in the real shapes (real-shape.csv is hand-built, S9), plus synthetic edge cases: BOM, CRLF, no header, broken rows
+  testdata/raindrop/*.csv     fixtures in the real shapes (real-shape.csv is hand-built, S9), plus
+                              synthetic edge cases: BOM, CRLF, no header, broken rows
   testdata/netscape/*.html    nested folders, duplicates, no dates
 server/cmd/harbor/import.go    CLI flags: --dry-run, --no-enrich, --limit, --report
 server/internal/httpapi/import.go   start/status/cancel, streams progress
