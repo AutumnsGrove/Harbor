@@ -34,7 +34,8 @@ Commands:
   serve         run the HTTP server (the container's process)
   healthcheck   exit 0 when http://127.0.0.1:$HARBOR_PORT/healthz answers 200
   snapshot      write data/backups/pre-update.db (use --pre-update)
-  export        write the library out as JSON (--out DIR [--include-media])
+  export        write the library out as files (--out DIR [--format ...] [--include-media])
+  backup        snapshot, compress and keep the database (--list, --verify)
   replay        re-ingest the Worker's done jobs (--since 1h|<unix>|<RFC3339>)
   version       print the build stamp
   help          print this text
@@ -64,6 +65,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return snapshotCommand(ctx, getenv, args[1:], stdout)
 	case "export":
 		return exportCommand(ctx, getenv, args[1:], stdout)
+	case "backup":
+		return backupCommand(ctx, getenv, args[1:], stdout)
 	case "replay":
 		return replayCommand(ctx, getenv, args[1:], stdout)
 	case "version":
