@@ -301,11 +301,10 @@ func TestNetscapeDDEndsTheAnchor(t *testing.T) {
 	}
 }
 
-// Folder paths are built when a folder opens, not per bookmark: a document with
-// thousands of unclosed <DL>s must not cost depth × bookmarks.
+// Nesting is bounded: a document with thousands of unclosed <DL>s costs neither
+// quadratic memory nor a quadratic path build, and its bookmarks still land.
 func TestNetscapeDeepNestingIsLinear(t *testing.T) {
 	var b strings.Builder
-	b.WriteString("<DL><p>")
 	const depth = 2000
 	for i := 0; i < depth; i++ {
 		b.WriteString("<DT><H3>f</H3><DL><p>")
@@ -315,8 +314,26 @@ func TestNetscapeDeepNestingIsLinear(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
-	if want := strings.TrimPrefix(strings.Repeat("/f", depth), "/"); rows[0].Folder != want {
-		t.Errorf("folder = %.40q…, want the %d-deep path", rows[0].Folder, depth)
+	if got := strings.Count(rows[0].Folder, "/") + 1; got != maxFolderDepth {
+		t.Errorf("folder depth = %d, want it capped at %d", got, maxFolderDepth)
+	}
+}
+
+// A cut-off anchor with no open folder must still be a truncation: the row the
+// EOF pass queues is returned first, so the flag has to be latched rather than
+// derived from state finishAnchor() clears.
+func TestNetscapeTruncatedLooseAnchor(t *testing.T) {
+	for _, src := range []string{
+		"<A HREF=\"https://example.com/a\">cut off",
+		"<DL><p><DT><A HREF=\"https://example.com/a\">cut off</DL><p>",
+	} {
+		rows, _, err := readHTMLToEOF(t, src)
+		if len(rows) != 1 || rows[0].URL != "https://example.com/a" {
+			t.Fatalf("%q: rows = %+v, want the cut-off anchor's URL", src, rows)
+		}
+		if !errors.Is(err, ErrTruncatedHTML) {
+			t.Errorf("%q: err = %v, want ErrTruncatedHTML", src, err)
+		}
 	}
 }
 

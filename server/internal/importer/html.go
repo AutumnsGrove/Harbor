@@ -24,10 +24,10 @@ var ErrTruncatedHTML = errors.New("importer: the bookmark file ended before its 
 // an empty library.
 var ErrNotNetscapeHTML = errors.New("importer: not a Netscape bookmark file")
 
-type folderFrame struct {
-	name string
-	path string // the names down to and including this one, joined with "/"
-}
+// maxFolderDepth bounds nesting. Real exports are two or three levels deep
+// (spike S9: Raindrop's folders are flat), so this only ever bites a crafted
+// file, and it keeps both the stack and the per-bookmark join bounded.
+const maxFolderDepth = 64
 
 // HTMLReader streams a Netscape bookmark document — the format browsers write
 // and phase 12a's export writes.
@@ -38,12 +38,11 @@ type folderFrame struct {
 type HTMLReader struct {
 	tok *html.Tokenizer
 
-	// folders is the open <DL> stack, innermost last, with each frame's joined
-	// path kept alongside its name: a bookmark's folder is the non-empty names
-	// joined with "/" (nested Space UI does not exist yet, plans/05 test 4), and
-	// building that string per bookmark would be quadratic in a document with
-	// deep or unclosed nesting.
-	folders []folderFrame
+	// folders is the open <DL> stack, innermost last. Only names are kept:
+	// storing a joined path per frame costs O(depth^2) memory on a file with
+	// deep nesting, which is a hostile-input hole. The path is joined when a
+	// bookmark is filed instead, and maxFolderDepth keeps that join bounded.
+	folders []string
 
 	// pending is the name of the <H3> that the next <DL> opens.
 	pending string
@@ -62,6 +61,7 @@ type HTMLReader struct {
 	skipped   int
 	warns     []string
 	sawMarkup bool
+	truncated bool
 }
 
 // NewHTMLReader prepares a reader. It never rejects a document here: whether
@@ -98,7 +98,11 @@ func (hr *HTMLReader) Next() (Row, error) {
 				return Row{}, fmt.Errorf("importer: reading bookmark HTML: %w", err)
 			}
 			// A download cut off mid-anchor still has a URL worth keeping.
-			truncated := hr.cur != nil || len(hr.folders) > 0
+			// Latch it: finishAnchor() clears cur, and the row it just queued
+			// is returned before this branch is reached again.
+			if hr.cur != nil || len(hr.folders) > 0 {
+				hr.truncated = true
+			}
 			hr.finishAnchor()
 			if len(hr.queue) > 0 {
 				continue
@@ -106,7 +110,7 @@ func (hr *HTMLReader) Next() (Row, error) {
 			if !hr.sawMarkup {
 				return Row{}, ErrNotNetscapeHTML
 			}
-			if truncated {
+			if hr.truncated {
 				return Row{}, fmt.Errorf("%w after %d bookmark(s); they were kept", ErrTruncatedHTML, hr.record)
 			}
 			return Row{}, io.EOF
@@ -125,7 +129,9 @@ func (hr *HTMLReader) Next() (Row, error) {
 					hr.inH3 = false
 					hr.title.Reset()
 				}
-				hr.folders = append(hr.folders, hr.pushFolder(hr.pending))
+				if len(hr.folders) < maxFolderDepth {
+					hr.folders = append(hr.folders, hr.pending)
+				}
 				hr.pending = ""
 			case "dt":
 				hr.sawMarkup = true
@@ -235,30 +241,17 @@ func (hr *HTMLReader) finishAnchor() {
 	hr.queue = append(hr.queue, row)
 }
 
-// folder is the current path, innermost last, with unnamed levels dropped. It
-// is O(1): the path is built when a folder opens, not when a bookmark is filed.
+// folder is the current path, innermost last, with unnamed levels dropped. The
+// join is bounded by maxFolderDepth, so it is cheap even though it happens per
+// bookmark.
 func (hr *HTMLReader) folder() string {
-	if len(hr.folders) == 0 {
-		return ""
+	var names []string
+	for _, name := range hr.folders {
+		if name != "" {
+			names = append(names, name)
+		}
 	}
-	return hr.folders[len(hr.folders)-1].path
-}
-
-// pushFolder is the frame a <DL> opens: its path is its parent's plus its own
-// name, so the cost of nesting is paid once instead of per bookmark.
-func (hr *HTMLReader) pushFolder(name string) folderFrame {
-	parent := ""
-	if n := len(hr.folders); n > 0 {
-		parent = hr.folders[n-1].path
-	}
-	switch {
-	case name == "":
-		return folderFrame{path: parent}
-	case parent == "":
-		return folderFrame{name: name, path: name}
-	default:
-		return folderFrame{name: name, path: parent + "/" + name}
-	}
+	return strings.Join(names, "/")
 }
 
 func (hr *HTMLReader) warn(format string, args ...any) {
