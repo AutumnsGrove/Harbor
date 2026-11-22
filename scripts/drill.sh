@@ -45,6 +45,9 @@ cleanup() {
 	# Idempotent: a signal trap exits through here, and EXIT runs it again.
 	[ "$CLEANED" = "1" ] && return 0
 	CLEANED=1
+	# Ignore further signals while cleaning up: an impatient second Ctrl-C must not
+	# abort `rm -rf` halfway and leave a temp directory holding a database.
+	trap '' INT TERM HUP PIPE
 	if [ -n "$SERVE_PID" ]; then
 		kill "$SERVE_PID" 2>/dev/null
 		wait "$SERVE_PID" 2>/dev/null
