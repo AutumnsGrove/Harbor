@@ -193,6 +193,18 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
   per line) that `-record` appends to and never overwrites; a blank kind is "not labelled yet" and
   is reported, not scored. A failed model call counts as **wrong**, because in production it is a
   failed save, and it also fails the run outright.
+- **A capture the pipeline would refuse is not a case.** `-record` applies `enrich.IsHTML`, so a PDF,
+  a JSON endpoint or a binary is a capture failure, not a scored save — production fails those
+  permanently before extraction until phase 6. The PDF in the exit demo is the *item* side of that
+  rule; it never belongs in the scored set. `labels` is refused as an id, because its capture would
+  overwrite `labels.json`.
+- **The tag vocabulary is a flag, not a default.** Production sends the library's canonical tags
+  (`TagVocabulary(50)`) with the write call. The scored set has no library, so `-vocabulary FILE`
+  takes one and the run prints which prompt it measured; without it the tag recall is a *fresh
+  install's* number, not a mature library's, and is not comparable to one. Feeding the set's own
+  human tags in would make the recall self-fulfilling, so it does not happen automatically.
+- **The local key is pi's own** (`~/.pi/agent/auth.json`), read by the `enrich-score` make target and
+  nowhere else: not by the server, not by CI, and exported rather than put on a command line.
 
 Decisions made here:
 

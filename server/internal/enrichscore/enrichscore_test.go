@@ -3,6 +3,7 @@ package enrichscore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -351,6 +352,15 @@ func TestParseSourcesRejectsADuplicateID(t *testing.T) {
 	}
 }
 
+func TestParseSourcesRejectsTheLabelsID(t *testing.T) {
+	// A capture called labels would be written to labels.json and destroy the
+	// set's own labels.
+	_, err := ParseSources(strings.NewReader("labels https://example.test/x\n"))
+	if err == nil || !strings.Contains(err.Error(), "labels") {
+		t.Fatalf("ParseSources = %v, want a reserved-id complaint", err)
+	}
+}
+
 func TestParseSourcesRejectsAnIDThatIsNotAFilename(t *testing.T) {
 	_, err := ParseSources(strings.NewReader("../../etc/passwd https://example.test/x\n"))
 	if err == nil {
@@ -359,8 +369,9 @@ func TestParseSourcesRejectsAnIDThatIsNotAFilename(t *testing.T) {
 }
 
 type fakeFetcher struct {
-	pages map[string]string
-	err   error
+	pages       map[string]string
+	contentType string
+	err         error
 }
 
 func (f *fakeFetcher) Fetch(_ context.Context, rawURL string) (*enrich.FetchedPage, error) {
@@ -371,7 +382,11 @@ func (f *fakeFetcher) Fetch(_ context.Context, rawURL string) (*enrich.FetchedPa
 	if !ok {
 		return nil, errors.New("no fixture for " + rawURL)
 	}
-	return &enrich.FetchedPage{Body: strings.NewReader(body), ContentType: "text/html; charset=utf-8"}, nil
+	contentType := f.contentType
+	if contentType == "" {
+		contentType = "text/html; charset=utf-8"
+	}
+	return &enrich.FetchedPage{Body: strings.NewReader(body), ContentType: contentType}, nil
 }
 
 func TestRecordWritesOneCaseFilePerSource(t *testing.T) {
@@ -426,6 +441,64 @@ func TestRecordDoesNotTouchTheLabels(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "recipe") {
 		t.Errorf("re-recording clobbered the labels: %s", raw)
+	}
+}
+
+func TestRecordRefusesANonHTMLPage(t *testing.T) {
+	// Production fails a PDF before extraction (until phase 6), so a capture of
+	// one could never be a scored save.
+	dir := t.TempDir()
+	fetcher := &fakeFetcher{
+		pages:       map[string]string{"https://example.test/paper.pdf": "%PDF-1.7"},
+		contentType: "application/pdf",
+	}
+	failures, err := Record(context.Background(), fetcher, dir, []Source{
+		{ID: "paper", URL: "https://example.test/paper.pdf"},
+	}, time.Now)
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if len(failures) != 1 || !strings.Contains(failures[0].Err.Error(), "application/pdf") {
+		t.Fatalf("failures = %+v, want the content type named", failures)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "paper.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a non-HTML page was captured: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, labelsFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a failed capture was written into the labels: %v", err)
+	}
+}
+
+func TestLoadVocabulary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vocabulary.txt")
+	body := "# the library's canonical tags\nGo\n\ngo\nrust\n  sqlite  \n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := LoadVocabulary(path)
+	if err != nil {
+		t.Fatalf("LoadVocabulary: %v", err)
+	}
+	if len(tags) != 3 || tags[0] != "go" || tags[2] != "sqlite" {
+		t.Errorf("tags = %v, want go, rust, sqlite", tags)
+	}
+}
+
+func TestLoadVocabularyCapsAtThePipelineLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vocabulary.txt")
+	var b strings.Builder
+	for i := 0; i < 80; i++ {
+		fmt.Fprintf(&b, "tag%02d\n", i)
+	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := LoadVocabulary(path)
+	if err != nil {
+		t.Fatalf("LoadVocabulary: %v", err)
+	}
+	if len(tags) != 50 {
+		t.Errorf("tags = %d, want the pipeline's cap of 50", len(tags))
 	}
 }
 

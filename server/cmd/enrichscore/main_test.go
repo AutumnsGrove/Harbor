@@ -53,7 +53,7 @@ func TestScoreAllAsksBothSurfaces(t *testing.T) {
 		Kind: model.KindRecipe,
 	}}
 
-	answers := scoreAll(context.Background(), cases, decider, writer)
+	answers := scoreAll(context.Background(), cases, decider, writer, nil)
 	if len(answers) != 1 || answers[0].Err != nil {
 		t.Fatalf("answers = %+v", answers)
 	}
@@ -74,12 +74,28 @@ func TestScoreAllAsksBothSurfaces(t *testing.T) {
 	}
 }
 
+func TestScoreAllPassesTheVocabulary(t *testing.T) {
+	// Production sends the library's canonical tags with the write call; a run
+	// without them measures a fresh install's prompt (plans/03).
+	decider := &fakeDecider{kind: model.KindArticle}
+	writer := &fakeWriter{tags: []string{"a", "b", "c"}}
+	cases := []enrichscore.Case{{ID: "x", URL: "https://example.test/x", Text: "body", Kind: model.KindArticle}}
+
+	scoreAll(context.Background(), cases, decider, writer, []string{"go", "rust"})
+	if len(writer.inputs) != 1 {
+		t.Fatalf("write calls = %d", len(writer.inputs))
+	}
+	if got := writer.inputs[0].Vocabulary; len(got) != 2 || got[0] != "go" || got[1] != "rust" {
+		t.Errorf("vocabulary = %v, want the one given", got)
+	}
+}
+
 func TestScoreAllCoercesAnInventedKind(t *testing.T) {
 	decider := &fakeDecider{kind: model.Kind("manifesto")}
 	writer := &fakeWriter{tags: []string{"a", "b", "c"}}
 	cases := []enrichscore.Case{{ID: "x", URL: "https://example.test/x", Text: "body", Kind: model.KindArticle}}
 
-	answers := scoreAll(context.Background(), cases, decider, writer)
+	answers := scoreAll(context.Background(), cases, decider, writer, nil)
 	if answers[0].Kind != model.KindArticle {
 		t.Errorf("kind = %q, want article (the pipeline's coercion)", answers[0].Kind)
 	}
@@ -95,7 +111,7 @@ func TestScoreAllKeepsGoingAfterAFailedCall(t *testing.T) {
 		{ID: "a", URL: "https://example.test/a", Text: "body", Kind: model.KindArticle},
 		{ID: "b", URL: "https://example.test/b", Text: "body", Kind: model.KindArticle},
 	}
-	answers := scoreAll(context.Background(), cases, decider, writer)
+	answers := scoreAll(context.Background(), cases, decider, writer, nil)
 	if len(answers) != 2 {
 		t.Fatalf("answers = %d, want one per labelled case", len(answers))
 	}
@@ -116,7 +132,7 @@ func TestScoreAllSkipsUnlabelledCases(t *testing.T) {
 		{ID: "a", URL: "https://example.test/a", Text: "body"}, // captured, not labelled
 		{ID: "b", URL: "https://example.test/b", Text: "body", Kind: model.KindArticle},
 	}
-	answers := scoreAll(context.Background(), cases, decider, writer)
+	answers := scoreAll(context.Background(), cases, decider, writer, nil)
 	if len(answers) != 1 || answers[0].ID != "b" {
 		t.Fatalf("answers = %+v, want only the labelled case", answers)
 	}

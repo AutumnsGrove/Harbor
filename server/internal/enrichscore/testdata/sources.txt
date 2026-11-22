@@ -6,7 +6,10 @@
 #
 # The set should keep a spread of the twelve kinds and the awkward cases the
 # phase-3 demo names: news, a recipe, a video, a repository, a shop page, a
-# paywalled article, a non-English page, a PDF link.
+# paywalled article, a non-English page. A PDF link is deliberately absent:
+# production refuses a non-HTML content type before extraction until phase 6,
+# so -record refuses it too, and the PDF belongs to the exit demo (the item
+# exists, with an amber "couldn't fetch" strip), not to the scored set.
 
 go-blog-go122       https://go.dev/blog/go1.22
 wikipedia-sourdough https://en.wikipedia.org/wiki/Sourdough

@@ -229,7 +229,7 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		}
 		defer page.Close()
 
-		if !isHTML(page.ContentType) {
+		if !IsHTML(page.ContentType) {
 			return permanent(fmt.Errorf("content type %q is not HTML", page.ContentType))
 		}
 		base := page.URL
@@ -447,7 +447,11 @@ func classifyFetchError(err error) error {
 	return err
 }
 
-func isHTML(contentType string) bool {
+// IsHTML reports whether a fetched content type is one the pipeline can
+// extract. It is exported because the scored set captures pages with the same
+// rule: a capture the pipeline would have refused before extraction is not a
+// save, and must never become a scored case.
+func IsHTML(contentType string) bool {
 	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
 	switch mediaType {
 	case "text/html", "application/xhtml+xml", "application/xml", "text/xml", "text/plain":

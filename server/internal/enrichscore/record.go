@@ -65,6 +65,9 @@ func ParseSources(r io.Reader) ([]Source, error) {
 		if !idPattern.MatchString(source.ID) {
 			return nil, fmt.Errorf("enrichscore: line %d: %q is not a lowercase filename", line, source.ID)
 		}
+		if source.ID == strings.TrimSuffix(labelsFile, ".json") {
+			return nil, fmt.Errorf("enrichscore: line %d: %q is the labels file; pick another id", line, source.ID)
+		}
 		if seen[source.ID] {
 			return nil, fmt.Errorf("enrichscore: line %d: %q appears twice", line, source.ID)
 		}
@@ -120,6 +123,11 @@ func Record(ctx context.Context, fetcher enrich.Fetcher, dir string, sources []S
 		written = append(written, source.ID)
 	}
 
+	if len(written) == 0 {
+		// Nothing captured is nothing to label: an empty labels.json would only
+		// look like a set that lost its labels.
+		return failures, nil
+	}
 	labels, err := loadLabels(dir)
 	if err != nil {
 		return failures, err
@@ -178,6 +186,13 @@ func capture(ctx context.Context, fetcher enrich.Fetcher, source Source) (*extra
 		return nil, err
 	}
 	defer fetched.Close()
+
+	// Production refuses a non-HTML page before extraction (a PDF is a
+	// permanent failure until phase 6), so a capture of one could never be a
+	// scored save.
+	if !enrich.IsHTML(fetched.ContentType) {
+		return nil, fmt.Errorf("content type %q is not HTML", fetched.ContentType)
+	}
 
 	base := fetched.URL
 	if base == nil {

@@ -30,10 +30,13 @@ Usage: enrichscore [flags]
        enrichscore -record SOURCES.txt [flags]
 
 Flags:
-  -dir DIR      the scored set (default server/internal/enrichscore/testdata/saves)
-  -min N        refuse to score fewer than N labelled saves (default 20)
-  -record FILE  capture every "id url" in FILE through fetch and extract, then
-                add any new id to labels.json with a blank kind
+  -dir DIR         the scored set (default server/internal/enrichscore/testdata/saves)
+  -min N           refuse to score fewer than N labelled saves (default 20)
+  -record FILE     capture every "id url" in FILE through fetch and extract, then
+                   add any new id to labels.json with a blank kind
+  -vocabulary FILE one tag per line, sent to the write call the way the library's
+                   canonical tags are in production; without it the prompt has no
+                   vocabulary hint, which is a fresh install's prompt
 
 Scoring calls Nova with OPENROUTER_API_KEY, the same key the server uses, and
 prints the kind accuracy, the gate, the per-kind confusion and the tag recall.
@@ -60,6 +63,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	dir := flags.String("dir", "server/internal/enrichscore/testdata/saves", "the scored set")
 	minimum := flags.Int("min", 20, "refuse to score fewer than this many labelled saves")
 	record := flags.String("record", "", "capture every `id url` in this file")
+	vocabularyPath := flags.String("vocabulary", "", "a tag vocabulary for the write call")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("%s\n%s", err, usage)
 	}
@@ -70,7 +74,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 	if *record != "" {
 		return recordCommand(ctx, *record, *dir, stdout)
 	}
-	return scoreCommand(ctx, *dir, *minimum, getenv, stdout)
+	return scoreCommand(ctx, *dir, *minimum, *vocabularyPath, getenv, stdout)
 }
 
 // recordCommand refreshes the captures. It is the only mode that touches the
@@ -102,7 +106,7 @@ func recordCommand(ctx context.Context, sourcesPath, dir string, stdout io.Write
 }
 
 // scoreCommand asks Nova for every labelled case and prints the report.
-func scoreCommand(ctx context.Context, dir string, minimum int, getenv func(string) string, stdout io.Writer) error {
+func scoreCommand(ctx context.Context, dir string, minimum int, vocabularyPath string, getenv func(string) string, stdout io.Writer) error {
 	cases, err := enrichscore.Load(dir)
 	if err != nil {
 		return err
@@ -121,10 +125,18 @@ func scoreCommand(ctx context.Context, dir string, minimum int, getenv func(stri
 	if key == "" {
 		return fmt.Errorf("%s is not set; scoring calls Nova", build.EnvOpenRouterAPIKey)
 	}
+	// The vocabulary is the one input the scored set cannot read from a database:
+	// production takes the library's canonical tags, and a set that is scored
+	// without them measures a fresh install's prompt, not a mature library's.
+	vocabulary, err := loadVocabulary(vocabularyPath, stdout)
+	if err != nil {
+		return err
+	}
+
 	// The adapter's usage log is the only record of what a run cost.
 	client := enrichnova.New(enrichnova.Config{APIKey: key, Log: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 
-	answers := scoreAll(ctx, cases, client, client)
+	answers := scoreAll(ctx, cases, client, client, vocabulary)
 	for i, answer := range answers {
 		status := string(answer.Kind)
 		if answer.Err != nil {
@@ -142,10 +154,25 @@ func scoreCommand(ctx context.Context, dir string, minimum int, getenv func(stri
 	return nil
 }
 
+// loadVocabulary reads the optional vocabulary and says which prompt the run is
+// measuring, so a tag number is never read as more than it is.
+func loadVocabulary(path string, stdout io.Writer) ([]string, error) {
+	if path == "" {
+		fmt.Fprintln(stdout, "vocabulary: none (a fresh install's prompt)")
+		return nil, nil
+	}
+	vocabulary, err := enrichscore.LoadVocabulary(path)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(stdout, "vocabulary: %d tags from %s\n", len(vocabulary), path)
+	return vocabulary, nil
+}
+
 // scoreAll runs the two calls the pipeline runs per item, in the same order and
 // with the same caps, and coerces an invented kind to article exactly as
 // Process does — a score must measure what production would store.
-func scoreAll(ctx context.Context, cases []enrichscore.Case, decider enrich.Decider, writer enrich.Writer) []enrichscore.Answer {
+func scoreAll(ctx context.Context, cases []enrichscore.Case, decider enrich.Decider, writer enrich.Writer, vocabulary []string) []enrichscore.Answer {
 	answers := make([]enrichscore.Answer, 0, len(cases))
 	for _, c := range cases {
 		if c.Kind == "" {
@@ -164,7 +191,9 @@ func scoreAll(ctx context.Context, cases []enrichscore.Case, decider enrich.Deci
 			kind = model.KindArticle
 		}
 		answer.Kind = kind
-		content, err := writer.Write(ctx, enrich.ContentFor(page, kind))
+		input := enrich.ContentFor(page, kind)
+		input.Vocabulary = vocabulary
+		content, err := writer.Write(ctx, input)
 		if err != nil {
 			answer.Err = err
 			answers = append(answers, answer)
