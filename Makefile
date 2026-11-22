@@ -13,7 +13,7 @@ BIN     := bin/harbor
 VERSION ?= r$(shell git rev-list --count HEAD 2>/dev/null || echo 0).$(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X $(MODULE)/server/internal/build.version=$(VERSION)
 
-.PHONY: version web build dev test fuzz fmt-check vet web-check worker-check watcher-check packaging docker docker-run docker-check deploy check clean drill enrich-score enrich-record
+.PHONY: version web build dev test fuzz fmt-check vet web-check worker-check rsync-check watcher-check packaging docker docker-run docker-check deploy check clean drill enrich-score enrich-record
 
 version:
 	@echo $(VERSION)
@@ -88,6 +88,11 @@ worker-check:
 
 # The update path is the one part of Harbor that can lose data. Its tests use
 # fake docker/curl and never touch the network or the real .env.
+# The rsync copy runs on the receiving machine, so its tests stub ssh and rsync
+# rather than reaching for a real host.
+rsync-check:
+	./deploy/test-rsync.sh
+
 watcher-check:
 	./deploy/watcher/test.sh
 	./deploy/firewall/test.sh
@@ -124,7 +129,7 @@ deploy:
 	docker compose pull
 	docker compose up -d
 
-check: fmt-check vet test web-check worker-check watcher-check packaging
+check: fmt-check vet test web-check worker-check rsync-check watcher-check packaging
 
 clean:
 	rm -rf bin web/.svelte-kit

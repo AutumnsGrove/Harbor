@@ -161,8 +161,11 @@ Rules that make it a real export rather than a data dump:
       already says the route becomes multipart when that happens, and that is a real remaining task,
       not a detail. The nightly timer ships as `deploy/harbor-backup.{service,timer}` (03:10 UTC,
       `exec ... backup --upload`); wiring it up is deploy day.
-- [ ] `deploy/harbor-rsync.sh` for the MacBook Air (host-side; the distroless image has no rsync),
-      reachability-guarded, recording the last successful copy where the Status page can read it.
+- [x] `deploy/harbor-rsync.sh` for the MacBook Air (host-side; the distroless image has no rsync),
+      reachability-guarded, recording the last successful copy. 2026-11-22. It runs on the **receiving**
+      machine and pulls over ssh, so the record (`<dest>/.last-rsync.json`) lives on the Mac: the
+      Status page can read a copy *pushed* from the potato, and cannot see this one. That asymmetry is
+      in the runbook rather than hidden; a potato-side reader is 12b's problem once the copy exists.
 - [x] `harbor restore` with a dry-run plan, `--yes`, a pre-restore snapshot of the *current* DB (so a
       bad restore is itself recoverable), and a refusal to run against an open DB — the refusal is a
       `flock` on `data/.lock`, which `serve` holds for its whole life. A database that will not open

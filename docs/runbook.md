@@ -188,6 +188,25 @@ restore the `pre-update.db` snapshot the update took, then pull the previous dig
 
 That last row is why the export exists. Keep one somewhere that is neither the potato nor R2.
 
+## The copy on the MacBook Air
+
+`deploy/harbor-rsync.sh` runs on the machine that **receives** the copy and pulls over ssh; the
+distroless image has no rsync, so nothing is pushed from inside the container. Run it from cron or a
+launchd job:
+
+```bash
+./deploy/harbor-rsync.sh                        # ~/Backups/Harbor, backups only
+./deploy/harbor-rsync.sh --media --prune        # media too, and mirror deletions
+./deploy/harbor-rsync.sh --dry-run
+```
+
+- **An unreachable potato exits 0** with a note. A laptop that is asleep is not an error, and a job
+  that cries every time it is offline trains people to ignore it.
+- **A failed copy exits 1** and says so in `<dest>/.last-rsync.json`, which also records when the last
+  good copy happened, from which host, and how many files and bytes landed.
+- **`--prune` is opt-in.** By default the destination only ever grows, so a wrong `--from` cannot
+  delete the copies you were keeping.
+
 ---
 
 ## When something looks wrong
