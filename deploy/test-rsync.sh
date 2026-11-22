@@ -109,9 +109,17 @@ if [ "$(field "$WORK/lastgood/.last-rsync.json" outcome)" = "unreachable" ] &&
 else
 	no "an unreachable night keeps the last good copy on record"
 fi
+# The marker has to exist *before* the run it is meant to break; without it this
+# was a successful copy that refreshed last_ok_at and passed only when both runs
+# landed in the same second.
+touch "$WORK/rsync-fails"
 STUB_RSYNC_FAILS="$WORK/rsync-fails" run_rsync "$WORK/lastgood" >/dev/null
-[ "$(field "$WORK/lastgood/.last-rsync.json" last_ok_at)" = "$good_at" ] &&
-	ok "a failed night keeps it too" || no "a failed night keeps it too"
+if [ "$(field "$WORK/lastgood/.last-rsync.json" outcome)" = "failed" ] &&
+	[ "$(field "$WORK/lastgood/.last-rsync.json" last_ok_at)" = "$good_at" ]; then
+	ok "a failed night keeps the last good copy on record"
+else
+	no "a failed night keeps the last good copy on record"
+fi
 
 # A failed copy must not pretend to have worked.
 : >"$STUB_LOG"

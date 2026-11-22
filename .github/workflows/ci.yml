@@ -100,6 +100,13 @@ jobs:
       - uses: actions/checkout@v7
       - run: make watcher-check
 
+  rsync:
+    name: Rsync copy (shell)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: make rsync-check
+
   packaging:
     name: Packaging rules
     runs-on: ubuntu-latest
@@ -138,7 +145,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    needs: [check, fuzz, web, worker, watcher, packaging, image]
+    needs: [check, fuzz, web, worker, watcher, rsync, packaging, image]
     runs-on: ubuntu-latest
     permissions:
       contents: read
