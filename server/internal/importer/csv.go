@@ -267,9 +267,9 @@ func parseTags(cell string) []string {
 //
 // The real cell is prose (spike S9): blocks are marked by a line that starts
 // with "Highlight:", and the quote inside a block may contain blank lines of its
-// own. So a line scan, not a split on blank lines — "Be human." is a paragraph
-// of one highlight, not a second highlight. Rejoining with "\n\nHighlight:"
-// reproduces the cell.
+// own. So a line scan, not a split on blank lines: a paragraph of a quote is
+// still part of that quote. Rejoining with "\n\nHighlight:" reproduces the
+// cell.
 func parseHighlights(cell string) []Highlight {
 	cell = normaliseNewlines(cell)
 	if strings.TrimSpace(cell) == "" {

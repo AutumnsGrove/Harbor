@@ -136,10 +136,10 @@ func TestReadRealShape(t *testing.T) {
 	if got := len(rows[6].Highlights); got != 4 {
 		t.Errorf("row 7 highlights = %d, want 4", got)
 	}
-	if got := rows[6].Highlights[1].Quote; got != "unusual" {
-		t.Errorf("row 7 highlight 2 = %q, want \"unusual\"", got)
+	if got := rows[6].Highlights[1].Quote; got != "tiny" {
+		t.Errorf("row 7 highlight 2 = %q, want \"tiny\"", got)
 	}
-	if got := rows[6].Highlights[2].Quote; !strings.Contains(got, "vending market,\nwe would not hire it.") {
+	if got := rows[6].Highlights[2].Quote; !strings.Contains(got, "line break\nright through") {
 		t.Errorf("row 7 highlight 3 lost its internal newline: %q", got)
 	}
 
