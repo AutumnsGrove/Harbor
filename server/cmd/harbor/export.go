@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
 	"github.com/AutumnsGrove/Harbor/server/internal/export"
@@ -18,8 +19,8 @@ Usage: harbor export --out DIR [flags]
 
 Flags:
   --out DIR        the directory to write; it must be new or empty (required)
+  --format NAME    all (default), json, markdown, netscape; comma-separated
   --include-media  copy media blobs into media/<sha256>
-  --format NAME    json (default); markdown and bookmarks follow
 
 An export never needs the network: no Worker, no R2, no model. It reads the
 database and, with --include-media, the media directory.
@@ -32,7 +33,7 @@ func exportCommand(ctx context.Context, getenv func(string) string, args []strin
 	flags.SetOutput(io.Discard)
 	out := flags.String("out", "", "the directory to write")
 	includeMedia := flags.Bool("include-media", false, "copy media blobs")
-	format := flags.String("format", "json", "json")
+	format := flags.String("format", "all", "all|json|markdown|netscape")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("%s\n%s", err, exportUsage)
 	}
@@ -42,8 +43,9 @@ func exportCommand(ctx context.Context, getenv func(string) string, args []strin
 	if *out == "" {
 		return fmt.Errorf("export needs --out DIR\n\n%s", exportUsage)
 	}
-	if *format != "json" {
-		return fmt.Errorf("export: --format %s does not exist yet; json is the restorable copy\n\n%s", *format, exportUsage)
+	formats, err := parseFormats(*format)
+	if err != nil {
+		return fmt.Errorf("%w\n\n%s", err, exportUsage)
 	}
 
 	cfg, err := build.Load(getenv)
@@ -62,8 +64,9 @@ func exportCommand(ctx context.Context, getenv func(string) string, args []strin
 		return err
 	}
 
-	result, err := export.JSON(ctx, library, export.Options{
+	result, err := export.Write(ctx, library, export.Options{
 		Dir:           *out,
+		Formats:       formats,
 		IncludeMedia:  *includeMedia,
 		MediaDir:      filepath.Join(cfg.DataDir, "media"),
 		AppVersion:    build.Version(),
@@ -75,10 +78,50 @@ func exportCommand(ctx context.Context, getenv func(string) string, args []strin
 
 	fmt.Fprintf(stdout, "exported the library into %s\n", result.Dir)
 	fmt.Fprintf(stdout, "  %d files, schema version %d\n", len(result.Files), schemaVersion)
+	fmt.Fprintf(stdout, "  formats: %s\n", strings.Join(names(formats), ", "))
 	if *includeMedia {
 		fmt.Fprintf(stdout, "  media included\n")
 	} else {
 		fmt.Fprintf(stdout, "  media not included (--include-media copies the blobs)\n")
 	}
 	return nil
+}
+
+// parseFormats turns --format into the set to write. "all" and an empty value
+// mean every format: the readable ones and the restorable one describe the same
+// library, and shipping half of them is a half answer.
+func parseFormats(value string) ([]export.Format, error) {
+	if strings.TrimSpace(value) == "" || value == string(export.FormatAll) {
+		return nil, nil
+	}
+	var formats []export.Format
+	for _, part := range strings.Split(value, ",") {
+		switch strings.TrimSpace(part) {
+		case "":
+			continue
+		case string(export.FormatJSON):
+			formats = append(formats, export.FormatJSON)
+		case string(export.FormatMarkdown), "md":
+			formats = append(formats, export.FormatMarkdown)
+		case string(export.FormatNetscape), "html":
+			formats = append(formats, export.FormatNetscape)
+		default:
+			return nil, fmt.Errorf("export: --format %s is not one of all, json, markdown, netscape", part)
+		}
+	}
+	if len(formats) == 0 {
+		return nil, fmt.Errorf("export: --format names nothing")
+	}
+	return formats, nil
+}
+
+func names(formats []export.Format) []string {
+	if len(formats) == 0 {
+		return []string{"json", "markdown", "netscape"}
+	}
+	out := make([]string, len(formats))
+	for i, format := range formats {
+		out[i] = string(format)
+	}
+	return out
 }

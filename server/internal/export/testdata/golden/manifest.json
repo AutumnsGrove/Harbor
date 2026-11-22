@@ -12,9 +12,29 @@
   },
   "files": [
     {
+      "path": "bookmarks.html",
+      "bytes": 443,
+      "sha256": "0b031a20ceeffa5bbc983850cb3982fc95541e429b3101e970bdc6f8b8cce1c1"
+    },
+    {
       "path": "library.json",
       "bytes": 3627,
       "sha256": "3319e8d787bef79ed8b02e6cb0789580a21bb301e8306bb5d2af7e14a70edad4"
+    },
+    {
+      "path": "markdown/0001-sourdough-pancakes.md",
+      "bytes": 718,
+      "sha256": "682d197f77215be0ccc8b3be33ffe327762d9a87650c9b2df27878e8e9b7739c"
+    },
+    {
+      "path": "markdown/0002-a-thought.md",
+      "bytes": 300,
+      "sha256": "31124943580be6d2b9dd849a59d5262682e9d3718b74fbe00c3543c6cafb15aa"
+    },
+    {
+      "path": "markdown/0003-deleted-but-still-mine.md",
+      "bytes": 298,
+      "sha256": "0d9317aafc952b9a0507a01214f064a1300030c3e8bb1a745885625802664f1d"
     }
   ]
 }

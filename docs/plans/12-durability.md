@@ -127,8 +127,12 @@ Rules that make it a real export rather than a data dump:
 - [x] JSON writer with an `export_version` const and a documented field contract in
       [docs/export.md](../export.md) — `library.json` + `manifest.json`, one read transaction, every
       item including soft-deleted ones. 2026-11-22.
-- [ ] Markdown writer with front-matter, escaping, slug uniqueness, and highlights.
-- [ ] Netscape writer (the same shape the phase 5 importer reads — assert with a round-trip test).
+- [x] Markdown writer with front-matter, escaping, slug uniqueness, and highlights —
+      `markdown/NNNN-slug.md`, JSON scalars as YAML front-matter so there is one escaping rule, the
+      numeric prefix carrying uniqueness. 2026-11-22.
+- [~] Netscape writer — `bookmarks.html`, live URL items only, folders from the first manual Space,
+      `ADD_DATE` = `saved_at`. 2026-11-22. **The round-trip assertion waits for phase 5's importer**,
+      which is the other half of it.
 - [x] Media copy by sha with a manifest of hashes and sizes — `--include-media`, and a missing blob
       fails the export rather than leaving a hash with no bytes. 2026-11-22.
 - [ ] CLI + Settings → Export (download a tar.gz for small libraries; the CLI is the documented path

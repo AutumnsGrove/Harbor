@@ -104,9 +104,49 @@ func TestExportCommandRefusesToGuessADestination(t *testing.T) {
 
 func TestExportCommandRefusesAFormatItDoesNotWrite(t *testing.T) {
 	var stdout bytes.Buffer
-	err := run(context.Background(), []string{"export", "--out", t.TempDir(), "--format", "markdown"},
+	dir := filepath.Join(t.TempDir(), "export")
+	err := run(context.Background(), []string{"export", "--out", dir, "--format", "pdf"},
 		exportEnv(t, t.TempDir()), &stdout)
-	if err == nil || !strings.Contains(err.Error(), "markdown") {
-		t.Fatalf("export --format markdown = %v, want a refusal naming it", err)
+	if err == nil || !strings.Contains(err.Error(), "pdf") {
+		t.Fatalf("export --format pdf = %v, want a refusal naming it", err)
+	}
+	if entries, readErr := os.ReadDir(dir); readErr == nil && len(entries) > 0 {
+		t.Errorf("a refused format still wrote %d files", len(entries))
+	}
+}
+
+func TestExportCommandWritesTheReadableFormats(t *testing.T) {
+	dataDir := t.TempDir()
+	library, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	url := "https://kitchen.example/pancakes"
+	item, err := library.CreateItem(context.Background(), store.ItemInput{
+		ID: "export-a", URL: &url, Title: "Sourdough pancakes", Kind: model.KindRecipe,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem: %v", err)
+	}
+	if _, err := library.SetItemTags(context.Background(), item.ID, []string{"baking"}, model.TagSourceAI); err != nil {
+		t.Fatal(err)
+	}
+	if err := library.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(t.TempDir(), "harbor-export")
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"export", "--out", out}, exportEnv(t, dataDir), &stdout); err != nil {
+		t.Fatalf("harbor export: %v\n%s", err, stdout.String())
+	}
+	for _, name := range []string{"library.json", "manifest.json", "bookmarks.html",
+		filepath.Join("markdown", "0001-sourdough-pancakes.md")} {
+		if _, err := os.Stat(filepath.Join(out, name)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if !strings.Contains(stdout.String(), "json, markdown, netscape") {
+		t.Errorf("stdout does not say what was written: %q", stdout.String())
 	}
 }
