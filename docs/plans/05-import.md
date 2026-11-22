@@ -109,7 +109,25 @@ is a typed error naming the columns it expected, never a positional guess.
 - [ ] First-run screen now offers Import; it is the first real use of the empty state.
 - [ ] A `docs/import.md` with: how to export from Raindrop, the exact expected filename, what is
       preserved, what is not, and how to verify the result.
-- [ ] Record the mapping decisions in design.md §5.
+- [x] Record the mapping decisions in design.md §5 (same PR as the S9 verdict).
+
+## Where the build is (2026-11-22)
+
+S9 is answered, so the mapping table above is measured rather than remembered. What exists:
+
+- **Parsers** — `server/internal/importer` reads Raindrop CSV and Netscape HTML into one `Row` shape.
+  A malformed record is a warned row, never the end of the run; a headerless file is a typed error
+  naming the column it wanted. `FuzzImportRow` and `FuzzImportHTML` carry committed seeds.
+- **Store writes** — the Favourites Space (migration `0002`), `EnsureManualSpace`, `AddItemToSpace`,
+  `ReplaceImportedHighlights` (idempotent, and never touches the owner's own highlights),
+  `HighlightsForItem`, and the read-only `FindManualSpace` a dry run needs.
+
+Still to build, in this order: the driver (`import.go`: canonicalise → merge → tags → Space →
+highlights → `priority=-1`), `import_runs` checkpoint/resume, the CLI (`--dry-run`, `--no-enrich`,
+`--limit`, `--report`), Settings → Import, first-run wiring, `docs/import.md`.
+
+The exit demo has not been run, nothing has been imported into the potato, and this phase is **not**
+ticked in [README.md](README.md).
 
 ## Exit criteria
 
