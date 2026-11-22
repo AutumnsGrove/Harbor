@@ -163,8 +163,8 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
       scoring arithmetic, per-kind confusion, tag recall, the 80% gate) and
       `server/cmd/enrichscore` (`-record` captures through `fetch` + `extract`; the default mode
       scores against live Nova). `make enrich-score` / `make enrich-record`.
-- [ ] The scored set itself: ~40 real saves captured and labelled, and the first scored run
-      recorded here with its accuracy.
+- [x] The scored set itself: 41 real saves captured and labelled; first scored run **95.1% kind
+      accuracy** (39/41) against the 80% gate, 2026-11-22 (below).
 - [x] Measured cost: the first live saves were logged and their real $/save is in design.md §6
       ($0.000788 for four saves, ~$0.0002 each). Re-measure after 100 real saves if the prompt changes.
 
@@ -286,6 +286,36 @@ Per save, from the usage log (input tokens dominated by page text):
 
 The note is the expensive one because its summary was long (347 output tokens); the cap that matters
 is `MaxTokens: 800` on the write call, not the page length.
+
+## The scored set, and its first run (2026-11-22)
+
+`server/internal/enrichscore/testdata/saves/` — 41 captures from 41 sources (`sources.txt`), ten of
+the twelve kinds, five languages, three video hosts, repos and papers and shops, and the walls that
+actually answer a plain fetch: 404 Media's member wall and the Guardian's registration wall stand in
+for the paywalled teaser the demo names, because FT, WSJ, NYT and The Economist all **403** a fetch
+without JavaScript — production cannot save them either.
+
+- **Kind accuracy 95.1% (39/41)**, gate 80% → **pass**. Two misses, both defensible: Central Park's
+  "Planning a Visit" page as `article` (wanted `place`), and a Wikimedia featured-pictures gallery as
+  `article` (wanted `image`). Article is the documented catch-all, so these are the catch-all working.
+- **Tag recall 44.7%** over all 41 — measured with **no vocabulary**, which is a fresh install's
+  prompt (the flag exists so a mature library's number is measurable; feeding the set's own labels in
+  by default would make the recall self-fulfilling).
+- **Cost ≈ $0.06 for 41 saves**, about **$0.0015/save** — several times the $0.0002 in design §6;
+  recorded there with the discrepancy rather than smoothed over.
+- **`note` and `tweet` are absent and cannot be captured:** a note has no page by definition, and
+  x.com serves nothing without auth. Ten kinds, not twelve, and the plan says so rather than faking
+  two cases.
+
+What the captures taught, kept as cases because production would really store them: a YouTube watch
+page yields ~20,000 characters of `ytInitialPlayerResponse` JavaScript as its "article text", Vimeo
+returns a Cloudflare challenge, and `www.thestrand.com` extracts nothing at all. The model still got
+`video`, `video` and `place` right from the title and OG metadata — which is the phase's own risk
+note, measured instead of assumed.
+
+Labels are the agent's reading of each captured page, one line each in `labels.json` and correctable
+in a single edit. The exit demo's *"count what the human agrees with"* is still the owner's to run on
+the potato; this set gates the prompt, not her taste.
 
 ## Exit criteria
 
