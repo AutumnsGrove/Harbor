@@ -20,6 +20,12 @@ migrations_dir = "migrations"
 binding = "BUCKET"
 bucket_name = "harbor-intake"
 
+# Snapshots live in their own bucket: they are the copy that survives the potato,
+# and their retention (30 daily) has nothing to do with intake blobs.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "harbor-backups"
+
 # Lease reclaim every five minutes; the orphan sweep once a day at 03:17 UTC
 # (not on the hour: a cron that fires with everyone else's is a slower cron).
 [triggers]

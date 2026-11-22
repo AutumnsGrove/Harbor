@@ -30,6 +30,11 @@ harbor backup --list      # is last night's backup there, and is it the size you
 harbor backup --verify    # do they all still open?
 ```
 
+The nightly job is `deploy/harbor-backup.timer` → `harbor backup --upload`: it takes the snapshot, prunes the local thirty, and sends
+the new one through the Worker to the `harbor-backups` bucket (the potato holds no R2 credential). If
+the Worker is unreachable the local backup still happens and the command exits non-zero — the copy
+that survives the potato is the one worth being loud about.
+
 `--verify` exits non-zero if any backup does not open. A non-zero exit on a timer run is the alarm,
 not noise.
 

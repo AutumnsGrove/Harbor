@@ -49,7 +49,9 @@ type Failure struct {
 	Err   error
 }
 
-// Result is what a backup run did.
+// Result is what a backup run did. R2 retention is not here on purpose: it is
+// its own window, decided from the remote listing, because the off-box copies
+// exist for the case where this disk is gone (see pruneRemote).
 type Result struct {
 	Kept   []Entry   // newest first, exactly what is on disk now
 	Failed []Failure // old backups retained because verification failed

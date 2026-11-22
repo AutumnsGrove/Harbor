@@ -1,0 +1,20 @@
+# @ROOT@ is replaced with the checkout path by deploy/install.sh.
+#
+# The nightly copy that leaves the box: snapshot, prune the local thirty, upload
+# the new one through the Worker (the potato holds no R2 credential), and delete
+# the R2 copies of anything pruned. A failure is loud in the journal, because the
+# off-box copy is the one this unit exists for.
+[Unit]
+Description=Harbor nightly backup
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+# docker compose exec, not run: it uses the container that is already up, and the
+# entrypoint is /app/harbor, so exec needs the path.
+ExecStart=/usr/bin/docker compose exec -T harbor /app/harbor backup --upload
+# A 100 MB upload on a slow uplink is minutes, not seconds. The command's own
+# client bounds each attempt; this is the outer stop.
+TimeoutStartSec=1h

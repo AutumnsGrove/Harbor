@@ -2,6 +2,10 @@
 // place. Design.md §5 and §11 are where the numbers come from.
 
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+// A compressed snapshot of a personal library. Larger than an intake file
+// because it is the whole database, and capped because nothing here is unbounded
+// (design.md invariant 7).
+export const MAX_BACKUP_BYTES = 100 * 1024 * 1024;
 export const MAX_SAVE_BODY_BYTES = 96 * 1024;
 export const MAX_NOTE_CHARS = 65536;
 export const MAX_LINK_CHARS = 2048;
