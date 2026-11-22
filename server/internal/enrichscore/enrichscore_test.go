@@ -460,6 +460,40 @@ func TestRecordDoesNotTouchTheLabels(t *testing.T) {
 	}
 }
 
+func TestRecordKeepsAPageWithNoArticleText(t *testing.T) {
+	// A JS-only page extracts no article, and production still keeps the item
+	// and classifies it from title and OG metadata — so -record must not reject
+	// the capture (plans/03, risks).
+	dir := t.TempDir()
+	fetcher := &fakeFetcher{pages: map[string]string{
+		"https://shop.example/x": `<html><head><title>Shop</title>
+<meta property="og:description" content="18 miles of books."></head>
+<body><div id="app"></div></body></html>`,
+	}}
+	failures, err := Record(context.Background(), fetcher, dir, []Source{
+		{ID: "shop", URL: "https://shop.example/x"},
+	}, time.Now)
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("failures = %+v, want none: an empty extraction is a real case", failures)
+	}
+	cases, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load after Record: %v", err)
+	}
+	if len(cases) != 1 {
+		t.Fatalf("cases = %+v, want one", cases)
+	}
+	if cases[0].Title != "Shop" || cases[0].Excerpt != "18 miles of books." {
+		t.Errorf("title/excerpt = %q/%q, want the page metadata kept", cases[0].Title, cases[0].Excerpt)
+	}
+	if strings.TrimSpace(cases[0].Text) != "" {
+		t.Errorf("text = %q, want the empty extraction this case pins", cases[0].Text)
+	}
+}
+
 func TestRecordRefusesANonHTMLPage(t *testing.T) {
 	// Production fails a PDF before extraction (until phase 6), so a capture of
 	// one could never be a scored save.
