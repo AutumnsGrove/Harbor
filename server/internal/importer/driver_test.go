@@ -127,6 +127,12 @@ func TestRunImportsARow(t *testing.T) {
 	if report.Imported != 1 || report.Merged != 0 || report.Failed != 0 {
 		t.Fatalf("report = %+v, want one import and nothing else", report)
 	}
+	if report.Highlights != 1 {
+		t.Errorf("report highlights = %d, want 1: the count the UI shows after a real run", report.Highlights)
+	}
+	if report.SpacesCreated != 1 {
+		t.Errorf("spaces created = %d, want 1", report.SpacesCreated)
+	}
 
 	item := e.item(t, "https://example.com/sourdough")
 	if item.Title != "Sourdough" || item.Note != "feed it daily" {

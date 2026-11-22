@@ -184,6 +184,7 @@ func (r *runner) row(row Row) {
 	} else {
 		r.report.Imported++
 	}
+	r.report.Highlights += len(row.Highlights)
 	if row.Favorite {
 		r.report.Favourites++
 	}
