@@ -332,6 +332,10 @@ case_snapshot_failure_aborts_before_pinning() {
 
 case_unhealthy_rolls_back_and_restores() {
 	current="unhealthy: rolls back, restores the snapshot, re-pins the old digest"
+	# SECONDS is the suite's clock, not this case's. Measured from the suite start
+	# it fails whenever the earlier cases took ten seconds between them, which has
+	# nothing to do with the health window.
+	local started=$SECONDS
 	setup
 	rm -f "$STATE/healthy"
 	HEALTH_TIMEOUT=1 run_watcher
@@ -345,10 +349,11 @@ case_unhealthy_rolls_back_and_restores() {
 	assert_contains "$(status_json)" '"status":"failed"'
 
 	# The health window is bounded: 1 s plus one interval, not the 120 s default.
-	if [ "$SECONDS" -lt 10 ]; then
+	local elapsed=$((SECONDS - started))
+	if [ "$elapsed" -lt 10 ]; then
 		ok "the health window is bounded"
 	else
-		no "the health window is bounded" "took ${SECONDS}s for a 1s window"
+		no "the health window is bounded" "took ${elapsed}s for a 1s window"
 	fi
 	teardown
 }
