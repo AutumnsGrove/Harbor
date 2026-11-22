@@ -140,7 +140,21 @@ once phases 6, 8 and 10 have landed.
 | Date | Backup | Box | Time to a working library | Notes |
 |---|---|---|---|---|
 | 2026-11-22 | fixture, 300 & 2000 items | this MacBook Air | 0.06 s / 0.12 s restore | `make drill`, procedure only |
-| — | potato's `harbor.db` | — | — | **not yet run** |
+| 2026-11-22 | the potato's `pre-update.db` (real schema, real box) | this MacBook Air | 0.05 s backup, 0.05 s restore | see below |
+
+The second row is the real one, with two things it is honest to record:
+
+- **The backup came from `data/backups/pre-update.db`, not a nightly `.zst`**, because no
+  `harbor-<UTC>.db.zst` exists on the potato yet: the nightly timer merged on 2026-11-22 and the box has
+  not taken the update that ships it. It is still the potato's real database, taken by the update
+  watcher, and it restored on a machine that is not the potato.
+- **The potato's library is empty** — 0 items, one Space, because nothing has been saved to Harbor yet.
+  To have something to lose, 40 saves were added locally to that copy through the API (one then
+  soft-deleted) before the backup. Everything after that was real: 39 live items and 1 in Recently
+  deleted came back, `harbor export` agreed with the file, and the whole round trip was 0.1 s.
+
+The first genuinely real drill — the potato's own library, with the owner's own saves in it — still
+needs saves to exist. That is the last thing this table is waiting for.
 
 ---
 

@@ -120,6 +120,28 @@ func TestPreserveCurrentFallsBackWhenAJournalCannotBeRemoved(t *testing.T) {
 	}
 }
 
+func TestPreserveCurrentWithNothingToPreserve(t *testing.T) {
+	// A fresh data directory: no database, no journals. There is nothing to keep
+	// and nothing to say, and an empty ".corrupt" directory in backups/ is junk.
+	// Found by running the drill against a real, freshly restored data directory.
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, store.DBFile)
+	backupsDir := filepath.Join(dataDir, "backups")
+
+	preserved, err := preserveCurrent(context.Background(),
+		func(context.Context, string) error { return errors.New("nothing to snapshot") },
+		backupsDir, dbPath, preserveNow)
+	if err != nil {
+		t.Fatalf("preserveCurrent: %v", err)
+	}
+	if preserved != "" {
+		t.Errorf("preserved = %q, want nothing", preserved)
+	}
+	if entries, err := os.ReadDir(backupsDir); err == nil && len(entries) > 0 {
+		t.Errorf("a fresh data directory grew %d entries in backups/", len(entries))
+	}
+}
+
 func TestPreserveCurrentMovesOrphanJournalsAside(t *testing.T) {
 	// No database, but a journal: those bytes can still be the only copy of a
 	// transaction, so they are kept rather than left to be replayed.

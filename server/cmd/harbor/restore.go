@@ -166,6 +166,13 @@ func preserveCurrent(ctx context.Context, take snapshotter, backupsDir, dbPath s
 	_, statErr := os.Stat(dbPath)
 	haveDB := statErr == nil
 
+	// Nothing to preserve: a fresh data directory has no database and no
+	// journals. Creating an empty ".corrupt" directory there would be a lie in
+	// the output ("kept the current database at …") and junk in backups/.
+	if !haveDB && !journalsExist(dbPath) {
+		return "", nil
+	}
+
 	if haveDB {
 		if dest, ok := snapshotCurrent(ctx, take, backupsDir, dbPath, stamp); ok {
 			return dest, nil
@@ -217,6 +224,16 @@ func moveAside(backupsDir, dbPath, stamp string, haveDB bool) (string, error) {
 		}
 	}
 	return aside, nil
+}
+
+// journalsExist reports whether SQLite left anything beside the database.
+func journalsExist(dbPath string) bool {
+	for _, journal := range journalsOf(dbPath) {
+		if _, err := os.Stat(journal); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // journalsOf lists every file SQLite may keep beside the database. A rollback
