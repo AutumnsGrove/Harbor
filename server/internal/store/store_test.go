@@ -70,8 +70,12 @@ func TestOpenCreatesAUsableStore(t *testing.T) {
 	if err := s.db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&applied); err != nil {
 		t.Fatalf("schema_migrations: %v", err)
 	}
-	if applied != 1 {
-		t.Errorf("schema_migrations holds %d rows, want 1 (0001_init)", applied)
+	shipped, err := readMigrations(migrationsFS())
+	if err != nil {
+		t.Fatalf("readMigrations: %v", err)
+	}
+	if applied != len(shipped) {
+		t.Errorf("schema_migrations holds %d rows, want %d (every shipped migration)", applied, len(shipped))
 	}
 }
 

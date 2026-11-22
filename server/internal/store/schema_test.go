@@ -105,8 +105,8 @@ func TestEmptyDatabaseGetsEveryTableAndIndex(t *testing.T) {
 			t.Errorf("index %s is missing", name)
 		}
 	}
-	if got := count(t, s.db, `SELECT user_version FROM pragma_user_version`); got != 1 {
-		t.Errorf("user_version = %d, want 1", got)
+	if got, want := count(t, s.db, `SELECT user_version FROM pragma_user_version`), shippedVersions(t); got != want {
+		t.Errorf("user_version = %d, want %d (every shipped migration)", got, want)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestOpeningTwiceChangesNothing(t *testing.T) {
 		t.Fatalf("second Open() error = %v", err)
 	}
 	defer second.Close()
-	if n := count(t, second.db, `SELECT count(*) FROM schema_migrations`); n != 1 {
-		t.Errorf("history holds %d rows after reopening, want 1", n)
+	if n, want := count(t, second.db, `SELECT count(*) FROM schema_migrations`), shippedVersions(t); n != want {
+		t.Errorf("history holds %d rows after reopening, want %d", n, want)
 	}
 	if n := count(t, second.db, `SELECT count(*) FROM items`); n != 1 {
 		t.Errorf("reopening changed the library: %d items, want 1", n)
@@ -171,7 +171,8 @@ func TestAnOlderDatabaseUpgradesAndKeepsItsRows(t *testing.T) {
 	for _, m := range real {
 		next[fmt.Sprintf("migrations/%04d_%s.sql", m.version, m.name)] = &fstest.MapFile{Data: []byte(m.body)}
 	}
-	next["migrations/0002_future.sql"] = &fstest.MapFile{Data: []byte(`ALTER TABLE items ADD COLUMN future TEXT NOT NULL DEFAULT 'x';`)}
+	futureVersion := len(real) + 1
+	next[fmt.Sprintf("migrations/%04d_future.sql", futureVersion)] = &fstest.MapFile{Data: []byte(`ALTER TABLE items ADD COLUMN future TEXT NOT NULL DEFAULT 'x';`)}
 
 	if err := migrate(context.Background(), db, next); err != nil {
 		t.Fatalf("upgrade error = %v", err)
@@ -183,8 +184,8 @@ func TestAnOlderDatabaseUpgradesAndKeepsItsRows(t *testing.T) {
 	if title != "kept" || future != "x" {
 		t.Errorf("row after upgrade = %q/%q, want kept/x", title, future)
 	}
-	if v := count(t, db, `SELECT user_version FROM pragma_user_version`); v != 2 {
-		t.Errorf("user_version = %d, want 2", v)
+	if v := count(t, db, `SELECT user_version FROM pragma_user_version`); v != futureVersion {
+		t.Errorf("user_version = %d, want %d", v, futureVersion)
 	}
 }
 
@@ -376,4 +377,15 @@ func TestFTSInsertUpdateDeleteReflect(t *testing.T) {
 	if _, err := s.db.Exec(`INSERT INTO items_fts (items_fts) VALUES ('integrity-check')`); err != nil {
 		t.Errorf("FTS integrity-check failed: %v", err)
 	}
+}
+
+// shippedVersions is how many migrations this build ships, so a test that says
+// "the database is fully migrated" does not rot when a phase adds one.
+func shippedVersions(t *testing.T) int {
+	t.Helper()
+	migrations, err := readMigrations(migrationsFS())
+	if err != nil {
+		t.Fatalf("readMigrations: %v", err)
+	}
+	return len(migrations)
 }
