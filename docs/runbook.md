@@ -202,8 +202,10 @@ launchd job:
 
 - **An unreachable potato exits 0** with a note. A laptop that is asleep is not an error, and a job
   that cries every time it is offline trains people to ignore it.
-- **A failed copy exits 1** and says so in `<dest>/.last-rsync.json`, which also records when the last
-  good copy happened, from which host, and how many files and bytes landed.
+- **A failed copy exits 1** and says so in `<dest>/.last-rsync.json`. The file answers two questions:
+  what happened last night (`outcome`, `detail`, `at`), and when the last *good* copy happened
+  (`last_ok_at`, `last_ok_host`, `last_ok_files`, `last_ok_bytes`). A bad night does not overwrite
+  the second, so "copied an hour ago, one bad night since" never reads like "not copied in months".
 - **`--prune` is opt-in.** By default the destination only ever grows, so a wrong `--from` cannot
   delete the copies you were keeping.
 

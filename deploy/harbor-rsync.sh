@@ -36,9 +36,21 @@ usage() {
 
 while [ $# -gt 0 ]; do
 	case "$1" in
-	--from) HOST=${2:-}; shift 2 ;;
-	--to) DEST=${2:-}; shift 2 ;;
-	--remote) REMOTE=${2:-}; shift 2 ;;
+	# shift 2 with one argument left fails and consumes nothing, which would spin
+	# this loop forever with no output — in a cron job, that is a wedged timer.
+	--from | --to | --remote)
+		flag=$1
+		if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+			echo "harbor-rsync: $flag needs a value" >&2
+			exit 2
+		fi
+		case "$flag" in
+		--from) HOST=$2 ;;
+		--to) DEST=$2 ;;
+		--remote) REMOTE=$2 ;;
+		esac
+		shift 2
+		;;
 	--media) MEDIA=1; shift ;;
 	--prune) PRUNE=1; shift ;;
 	--dry-run) DRY_RUN=1; shift ;;
@@ -57,13 +69,58 @@ status() { printf '%-10s %s\n' "$1" "$2"; }
 
 # Write the record the operator (and, when the copy is pushed from the other side,
 # the Status page) reads. JSON because something other than a human will read it.
+#
+# The record answers two questions, not one: what happened last night, and when was
+# the last *good* copy. A single "outcome" field answered only the first, so a
+# failed or unreachable night erased the answer to the second — and "copied an hour
+# ago, one bad night since" became indistinguishable from "not copied in months".
 record() {
-	local outcome=$1 detail=$2 files bytes at
+	local outcome=$1 detail=$2 at
 	at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-	files=$(find "$DEST" -type f ! -name '.last-rsync.json' 2>/dev/null | wc -l | tr -d ' ')
-	bytes=$(du -sk "$DEST" 2>/dev/null | awk '{print $1 * 1024}')
-	printf '{"at":"%s","host":"%s","outcome":"%s","detail":"%s","files":%s,"bytes":%s}\n' \
-		"$at" "$HOST" "$outcome" "$detail" "${files:-0}" "${bytes:-0}" >"$DEST/.last-rsync.json"
+	python3 - "$DEST/.last-rsync.json" "$at" "$HOST" "$outcome" "$detail" "$DEST" <<'PY'
+import json, os, subprocess, sys
+
+path, at, host, outcome, detail, dest = sys.argv[1:7]
+
+def measure():
+    files = bytes_ = 0
+    for root, _, names in os.walk(dest):
+        for name in names:
+            if name == ".last-rsync.json":
+                continue
+            files += 1
+            try:
+                bytes_ += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return files, bytes_
+
+previous = {}
+if os.path.exists(path):
+    try:
+        previous = json.load(open(path))
+    except (OSError, ValueError):
+        previous = {}
+
+record = {
+    "at": at,
+    "host": host,
+    "outcome": outcome,
+    "detail": detail,
+}
+if outcome == "ok":
+    files, bytes_ = measure()
+    record.update({"last_ok_at": at, "last_ok_host": host, "last_ok_files": files, "last_ok_bytes": bytes_})
+else:
+    # Carry the last good copy forward: this run did not replace it.
+    for key in ("last_ok_at", "last_ok_host", "last_ok_files", "last_ok_bytes"):
+        if key in previous:
+            record[key] = previous[key]
+
+with open(path, "w") as handle:
+    json.dump(record, handle, sort_keys=True)
+    handle.write("\n")
+PY
 }
 
 # Reachability first: a copy that hangs for two minutes on a sleeping laptop is
