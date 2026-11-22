@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite\n1,A title,\"note, with \"\"quotes\"\" and a newline\nin it\",,https://example.com/a?utm_source=x,F,\"one, two\",2024-01-02T03:04:05.006Z,https://img.example.com/a.jpg,\"Highlight:first\n\nstill first\n\nHighlight:second\",true\n2,,only a note,,https://example.com/b,F,,2024-01-02T03:04:05Z,,,false\n")

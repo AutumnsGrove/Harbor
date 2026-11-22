@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("id,title,url,folder,created\n1,bad\"quote,https://example.com/a,F,2024-01-02T03:04:05Z\n2,good,https://example.com/b,F,not-a-date\n3,,,,\n")
