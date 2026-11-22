@@ -53,6 +53,26 @@ func (s *Store) EnsureManualSpace(ctx context.Context, name string) (model.Space
 	return s.spaceByID(ctx, space.ID)
 }
 
+// FindManualSpace is EnsureManualSpace without the insert: the dry run reports
+// which folders would become Spaces, and a dry run writes nothing.
+func (s *Store) FindManualSpace(ctx context.Context, name string) (model.Space, bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.Space{}, false, nil
+	}
+	space, err := scanSpaceRow(s.db.QueryRowContext(ctx,
+		`SELECT id, slug, name, kind, rule_json, created_at FROM spaces
+		 WHERE kind = 'manual' AND lower(name) = lower(?) ORDER BY created_at, id LIMIT 1`, name))
+	switch {
+	case err == nil:
+		return space, true, nil
+	case errors.Is(err, ErrNotFound):
+		return model.Space{}, false, nil
+	default:
+		return model.Space{}, false, fmt.Errorf("looking for the manual Space %q: %w", name, err)
+	}
+}
+
 // AddItemToSpace files an item. It is idempotent, and it refuses unknown ids
 // rather than dropping the call: the import counts the result, so a membership
 // that did not happen has to be an error.

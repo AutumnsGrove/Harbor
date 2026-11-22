@@ -86,6 +86,35 @@ func TestEnsureManualSpaceIgnoresRuleSpaces(t *testing.T) {
 	}
 }
 
+// The dry run asks whether a folder would create a Space, so asking must never
+// create one.
+func TestFindManualSpaceWritesNothing(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	if _, ok, err := s.FindManualSpace(ctx, "Recipes"); err != nil || ok {
+		t.Fatalf("FindManualSpace before any import = %v, %v; want not found", ok, err)
+	}
+	if n := count(t, s.db, `SELECT count(*) FROM spaces`); n != 2 {
+		t.Fatalf("%d spaces after a read, want the 2 seeded ones", n)
+	}
+
+	created, err := s.EnsureManualSpace(ctx, "Recipes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	space, ok, err := s.FindManualSpace(ctx, "recipes")
+	if err != nil || !ok {
+		t.Fatalf("FindManualSpace after creating = %v, %v; want found", ok, err)
+	}
+	if space.ID != created.ID {
+		t.Errorf("found %q, want %q", space.ID, created.ID)
+	}
+	if _, ok, err := s.FindManualSpace(ctx, "  "); err != nil || ok {
+		t.Errorf("a blank name returned %v, %v; want not found", ok, err)
+	}
+}
+
 func TestEnsureManualSpaceRejectsAnEmptyName(t *testing.T) {
 	s := openTestStore(t)
 	if _, err := s.EnsureManualSpace(context.Background(), "   "); err == nil {
