@@ -177,6 +177,12 @@ func List(dir string) ([]Entry, error) {
 	return backups, nil
 }
 
+// DateOf reports when a backup was taken, from its name. It is the one piece of
+// metadata a backup carries without a database to read it from.
+func DateOf(path string) (time.Time, bool) {
+	return parseName(filepath.Base(path))
+}
+
 func parseName(name string) (time.Time, bool) {
 	if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
 		return time.Time{}, false

@@ -107,7 +107,7 @@ func restoreCommand(ctx context.Context, getenv func(string) string, args []stri
 		return fmt.Errorf("restore: refusing to overwrite %s without --yes", dbPath)
 	}
 
-	preserved, err := preserveCurrent(ctx, cfg.DataDir, backupsDir, dbPath, time.Now)
+	preserved, err := preserveCurrent(ctx, liveSnapshotter(cfg.DataDir), backupsDir, dbPath, time.Now)
 	if err != nil {
 		return err
 	}
@@ -136,44 +136,77 @@ func restoreCommand(ctx context.Context, getenv func(string) string, args []stri
 	return nil
 }
 
-// preserveCurrent makes the current database recoverable before it is replaced.
-// A database that opens is snapshotted (consistent, WAL included); one that does
-// not is moved aside with its journals, because a restore is exactly when you
-// have a corrupt database and still must not throw the bytes away.
-func preserveCurrent(ctx context.Context, dataDir, backupsDir, dbPath string, now func() time.Time) (string, error) {
-	if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
-		return "", nil
+// snapshotter copies the live database to dest. It is a parameter so the
+// fallback below can be tested: a database that opens and then refuses VACUUM
+// INTO is the common corruption case, and there is no honest way to build one on
+// demand.
+type snapshotter func(ctx context.Context, dest string) error
+
+// liveSnapshotter is the production path: open the library, VACUUM INTO dest.
+func liveSnapshotter(dataDir string) snapshotter {
+	return func(ctx context.Context, dest string) error {
+		library, err := store.Open(dataDir)
+		if err != nil {
+			return err
+		}
+		defer library.Close()
+		return library.Snapshot(ctx, dest)
 	}
+}
+
+// preserveCurrent makes the current database recoverable before it is replaced.
+//
+// The fallback is not "the database is corrupt", it is "the snapshot did not
+// happen". A partially corrupt database usually still *opens* — VACUUM INTO is
+// what fails — so keying the fallback on Open would fail exactly the case it is
+// for. Whatever happens, the previous bytes are kept, journals included: a hot
+// journal can hold the only copy of the last transaction.
+func preserveCurrent(ctx context.Context, take snapshotter, backupsDir, dbPath string, now func() time.Time) (string, error) {
+	stamp := now().UTC().Format("20060102T150405Z")
+	_, statErr := os.Stat(dbPath)
+	haveDB := statErr == nil
+
+	if haveDB {
+		if dest, ok := snapshotCurrent(ctx, take, backupsDir, dbPath, stamp); ok {
+			return dest, nil
+		}
+	}
+	return moveAside(backupsDir, dbPath, stamp, haveDB)
+}
+
+// snapshotCurrent returns the snapshot path, or false when the snapshot did not
+// happen for any reason.
+func snapshotCurrent(ctx context.Context, take snapshotter, backupsDir, dbPath, stamp string) (string, bool) {
+	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
+		return "", false
+	}
+	dest := filepath.Join(backupsDir, "pre-restore-"+stamp+".db")
+	if err := take(ctx, dest); err != nil {
+		_ = os.Remove(dest)
+		return "", false
+	}
+	// The snapshot holds whatever the journals held, because VACUUM INTO reads
+	// the recovered database. Leaving them would let SQLite replay an old journal
+	// into the new file.
+	removeJournals(dbPath)
+	return dest, true
+}
+
+// moveAside keeps an unopenable (or unsnapshotable) database and its journals.
+func moveAside(backupsDir, dbPath, stamp string, haveDB bool) (string, error) {
 	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
 		return "", fmt.Errorf("restore: creating %s: %w", backupsDir, err)
 	}
-	stamp := now().UTC().Format("20060102T150405Z")
-
-	library, err := store.Open(dataDir)
-	if err == nil {
-		defer library.Close()
-		dest := filepath.Join(backupsDir, "pre-restore-"+stamp+".db")
-		if err := library.Snapshot(ctx, dest); err != nil {
-			return "", fmt.Errorf("restore: snapshotting the current database: %w", err)
-		}
-		// The snapshot holds the WAL's contents, so the journals can go.
-		for _, journal := range []string{dbPath + "-wal", dbPath + "-shm"} {
-			if err := os.Remove(journal); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return "", fmt.Errorf("restore: removing %s: %w", journal, err)
-			}
-		}
-		return dest, nil
-	}
-
 	aside := filepath.Join(backupsDir, "pre-restore-"+stamp+".corrupt")
 	if err := os.MkdirAll(aside, 0o755); err != nil {
 		return "", fmt.Errorf("restore: creating %s: %w", aside, err)
 	}
-	moved := filepath.Join(aside, store.DBFile)
-	if err := os.Rename(dbPath, moved); err != nil {
-		return "", fmt.Errorf("restore: moving the unopenable database aside: %w", err)
+	if haveDB {
+		if err := os.Rename(dbPath, filepath.Join(aside, store.DBFile)); err != nil {
+			return "", fmt.Errorf("restore: moving the unopenable database aside: %w", err)
+		}
 	}
-	for _, journal := range []string{dbPath + "-wal", dbPath + "-shm"} {
+	for _, journal := range journalsOf(dbPath) {
 		if err := os.Rename(journal, filepath.Join(aside, filepath.Base(journal))); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("restore: moving %s aside: %w", journal, err)
 		}
@@ -181,14 +214,25 @@ func preserveCurrent(ctx context.Context, dataDir, backupsDir, dbPath string, no
 	return aside, nil
 }
 
+// journalsOf lists every file SQLite may keep beside the database. A rollback
+// journal is as real as a WAL: both can hold the last committed transaction.
+func journalsOf(dbPath string) []string {
+	return []string{dbPath + "-journal", dbPath + "-wal", dbPath + "-shm"}
+}
+
+func removeJournals(dbPath string) {
+	for _, journal := range journalsOf(dbPath) {
+		_ = os.Remove(journal)
+	}
+}
+
 // replayPoint is the moment the backup was taken: everything the Worker queued
-// after it is missing from the restored library and comes back with replay.
+// after it is missing from the restored library and comes back with replay. A
+// file that is not named like a backup still restores, so this returns advice
+// instead of slicing a name it has not checked.
 func replayPoint(backupPath string) string {
-	name := filepath.Base(backupPath)
-	trimmed := name[len("harbor-"):]
-	trimmed = trimmed[:len(trimmed)-len(".db.zst")]
-	if at, err := time.Parse("20060102T150405Z", trimmed); err == nil {
+	if at, ok := backup.DateOf(backupPath); ok {
 		return at.UTC().Format(time.RFC3339)
 	}
-	return "(unknown: replay from the backup's date)"
+	return "(unknown: replay from the backup's own date)"
 }

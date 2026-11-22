@@ -38,7 +38,8 @@ not noise.
 ## Take a backup right now
 
 ```bash
-docker compose exec harbor /usr/local/bin/harbor backup
+# The image's entrypoint is /app/harbor, so `exec` needs the path and `run` does not.
+docker compose exec harbor /app/harbor backup
 # or, on the host with the container stopped:
 harbor backup --keep 30
 ```
@@ -57,12 +58,15 @@ that refusal is the feature.
 ```bash
 docker compose stop harbor
 
+# `run` goes through the entrypoint (/app/harbor), so the subcommand is `restore`,
+# not a path to the binary.
+
 # 1. Look first. This changes nothing.
-docker compose run --rm harbor /usr/local/bin/harbor restore \
+docker compose run --rm harbor restore \
     /data/backups/harbor-20261122T180000Z.db.zst --dry-run
 
 # 2. Then do it.
-docker compose run --rm harbor /usr/local/bin/harbor restore \
+docker compose run --rm harbor restore \
     /data/backups/harbor-20261122T180000Z.db.zst --yes
 
 docker compose up -d harbor
