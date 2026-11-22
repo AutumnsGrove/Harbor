@@ -40,8 +40,16 @@ for credential in HARBOR_WORKER_URL HARBOR_WORKER_TOKEN OPENROUTER_API_KEY \
 done
 export HARBOR_UPDATE_DIR="$WORK/update-signal"
 
+CLEANED=0
 cleanup() {
-	if [ -n "$SERVE_PID" ]; then kill "$SERVE_PID" 2>/dev/null; wait "$SERVE_PID" 2>/dev/null; fi
+	# Idempotent: a signal trap exits through here, and EXIT runs it again.
+	[ "$CLEANED" = "1" ] && return 0
+	CLEANED=1
+	if [ -n "$SERVE_PID" ]; then
+		kill "$SERVE_PID" 2>/dev/null
+		wait "$SERVE_PID" 2>/dev/null
+		SERVE_PID=""
+	fi
 	if [ "$KEEP" = "1" ]; then
 		printf '\nleft behind: %s\n' "$WORK"
 	else
@@ -50,8 +58,10 @@ cleanup() {
 }
 # EXIT alone is not enough: a script killed by a signal (SIGPIPE from a closed
 # pipe, a Ctrl-C) would leave its server running and the next drill would find the
-# port busy. Every way out cleans up.
-trap cleanup EXIT INT TERM HUP PIPE
+# port busy. The signal traps must *exit* — a trap that only runs the handler
+# resumes the script afterwards, against the directory it just deleted.
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP PIPE
 
 step() { printf '\n== %s\n' "$*"; }
 ok() { printf '  ok   %s\n' "$*"; }
