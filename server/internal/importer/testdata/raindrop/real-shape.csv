@@ -7,7 +7,7 @@ second paragraph after a blank line
 ","The excerpt has a paragraph break.
 
 And a second paragraph with “curly quotes” and an em — dash.",https://example.com/blog/markdown-notes,Software,"AI Costs, ai, Writing, 3D, 3d",2025-01-17T23:05:02.000Z,https://img.example.com/1000000002.png,,true
-1000000003,"He said """"parse it twice"""", then shipped it","quoted ""inner"" text, plus a comma, plus a colon: all in one note",,https://example.com/posts/parse-twice,Articles,"quotes, edge cases",2023-06-30T00:00:00.000Z,,,false
+1000000003,"He said ""parse it twice"", then shipped it","quoted ""inner"" text, plus a comma, plus a colon: all in one note",,https://example.com/posts/parse-twice,Articles,"quotes, edge cases",2023-06-30T00:00:00.000Z,,,false
 1000000004,A shop item with a noisy URL,,Short excerpt.,http://example.com/shop/item?id=42&utm_source=newsletter&utm_medium=email#reviews,Read Later,shopping,2019-03-04T11:00:00.000Z,http://img.example.com/1000000004.jpg,,true
 1000000005,China hits a growth goal,,Exports defied the tariffs.,https://example.com/news/growth-goal,Articles,"economy, trade",2026-01-12T08:02:44.971Z,https://img.example.com/1000000005.jpg,"Highlight:Last week, the surplus reached a record $1.19tn, driven by a rise in exports to markets outside the US.",false
 1000000006,Short takes on making things,,,https://example.com/essays/make-things,Inspiration,"essays, craft",2025-09-21T15:30:00.125Z,https://img.example.com/1000000006.jpg,"Highlight:In a moment where machines churn out mediocrity, make something yourself. Make it imperfect. Make it rough. Just make it.
