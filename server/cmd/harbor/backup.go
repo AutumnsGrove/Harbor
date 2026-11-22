@@ -2,21 +2,27 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/backup"
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
+	"github.com/AutumnsGrove/Harbor/server/internal/workerclient"
 )
 
 const backupUsage = `harbor backup — snapshot, compress and keep the database.
 
 Usage:
-  harbor backup [--keep N]   take a backup now, then prune the old ones
+  harbor backup [--keep N] [--upload]
+                             take a backup now, prune the old ones, and with
+                             --upload send the new one through the Worker
   harbor backup --list       list the backups, newest first
   harbor backup --verify     decompress and integrity-check every backup
 
@@ -31,6 +37,7 @@ func backupCommand(ctx context.Context, getenv func(string) string, args []strin
 	flags.SetOutput(io.Discard)
 	list := flags.Bool("list", false, "list the backups")
 	verify := flags.Bool("verify", false, "verify every backup")
+	upload := flags.Bool("upload", false, "upload the new backup through the Worker")
 	keep := flags.Int("keep", backup.DefaultKeep, "how many backups to keep")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("%s\n%s", err, backupUsage)
@@ -40,6 +47,9 @@ func backupCommand(ctx context.Context, getenv func(string) string, args []strin
 	}
 	if *list && *verify {
 		return fmt.Errorf("--list and --verify are separate runs\n\n%s", backupUsage)
+	}
+	if *upload && (*list || *verify) {
+		return fmt.Errorf("--upload takes a backup, so it cannot be combined with --list or --verify\n\n%s", backupUsage)
 	}
 
 	cfg, err := build.Load(getenv)
@@ -98,6 +108,10 @@ func backupCommand(ctx context.Context, getenv func(string) string, args []strin
 
 	// Prune inside Create, so a run either keeps a month of good backups or says
 	// why it could not.
+	schema, err := library.SchemaVersion(ctx)
+	if err != nil {
+		return err
+	}
 	result, err := backup.Create(ctx, library, dir, time.Now, *keep)
 	if err != nil {
 		return err
@@ -108,6 +122,12 @@ func backupCommand(ctx context.Context, getenv func(string) string, args []strin
 	newest := result.Kept[0]
 	fmt.Fprintf(stdout, "backed up %s into %s\n", humanSize(newest.Bytes), newest.Path)
 	fmt.Fprintf(stdout, "  %d backup(s) kept\n", len(result.Kept))
+
+	if *upload {
+		if err := uploadBackup(ctx, cfg, result, schema, stdout); err != nil {
+			return err
+		}
+	}
 
 	// A backup that failed verification is kept and reported: it may be the only
 	// copy that opens, so deleting it is wrong, and staying quiet about it is
@@ -120,6 +140,53 @@ func backupCommand(ctx context.Context, getenv func(string) string, args []strin
 		return fmt.Errorf("%d backup(s) failed verification and were kept", len(result.Failed))
 	}
 	return nil
+}
+
+// uploadBackup sends the new snapshot through the Worker — the potato holds no R2
+// credential (design.md §4) — and removes the R2 copies of what was just pruned,
+// so both sides keep the same thirty.
+func uploadBackup(ctx context.Context, cfg build.Config, result backup.Result, schema int, stdout io.Writer) error {
+	if cfg.WorkerURL == "" || cfg.WorkerToken == "" {
+		return fmt.Errorf("backup --upload needs %s and %s", build.EnvWorkerURL, build.EnvWorkerToken)
+	}
+	client, err := workerclient.New(cfg.WorkerURL, cfg.WorkerToken, build.Version())
+	if err != nil {
+		return err
+	}
+	newest := result.Kept[0]
+	if err := putSnapshot(ctx, client, newest, schema); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "  uploaded %s through the Worker\n", newest.Name)
+
+	for _, pruned := range result.Deleted {
+		if err := client.DeleteBackup(ctx, pruned.Name); err != nil {
+			// The local copy is already gone and the remote one is not: report it
+			// rather than pretend the two sides agree.
+			return fmt.Errorf("backup: removing %s from R2: %w", pruned.Name, err)
+		}
+	}
+	return nil
+}
+
+// putSnapshot streams one file: seekable so the client can retry, hashed first so
+// the Worker records what it actually holds.
+func putSnapshot(ctx context.Context, client *workerclient.Client, entry backup.Entry, schema int) error {
+	file, err := os.Open(entry.Path)
+	if err != nil {
+		return fmt.Errorf("backup: opening %s: %w", entry.Path, err)
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	size, err := io.Copy(hash, file)
+	if err != nil {
+		return fmt.Errorf("backup: hashing %s: %w", entry.Path, err)
+	}
+	if size != entry.Bytes {
+		return fmt.Errorf("backup: %s is %d bytes, expected %d", entry.Name, size, entry.Bytes)
+	}
+	return client.PutBackup(ctx, entry.Name, file, size, hex.EncodeToString(hash.Sum(nil)), schema)
 }
 
 func humanSize(bytes int64) string {

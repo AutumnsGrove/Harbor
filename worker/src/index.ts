@@ -2,6 +2,13 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { authenticate } from './auth';
 import {
+	BACKUP_LIMIT_BYTES,
+	NameError,
+	deleteBackup,
+	listBackups,
+	putBackup,
+} from './backups';
+import {
 	MAX_SAVE_BODY_BYTES,
 	MAX_UPLOAD_BYTES,
 	contentAllowed,
@@ -41,7 +48,7 @@ export const ROUTE_SCOPES = new Map<string, RouteScope>();
 
 type Handler = (c: Context<{ Bindings: Env; Variables: { principal: Principal } }>) => Response | Promise<Response>;
 
-function route(method: 'GET' | 'POST', path: string, scope: RouteScope, handler: Handler): void {
+function route(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, scope: RouteScope, handler: Handler): void {
 	ROUTE_SCOPES.set(`${method} ${path}`, scope);
 	if (scope === 'none') {
 		app.on(method, path, handler);
@@ -70,6 +77,7 @@ function requireScope(scope: Scope) {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+
 
 function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
 	return new Response(JSON.stringify(body), {
@@ -314,6 +322,56 @@ route('POST', '/jobs/:id/failed', 'potato', async (c) => {
 	const result = await markFailed(c.env, nowSeconds(), c.req.param('id') ?? '', error);
 	if (result === 'missing') return json({ error: 'no such job' }, 404);
 	return json({ status: 'ok' });
+});
+
+// ── backups ─────────────────────────────────────────────────────────────────
+// The potato holds no R2 credential (design.md §4), so the only copy that
+// survives the potato arrives here. Upload and retention only: there is no route
+// that reads a backup back out, and a restore pulls with a presigned GET.
+
+route('PUT', '/backups/:name', 'potato', async (c) => {
+	const name = c.req.param('name')!;
+	// R2 will not take an unfixed-length stream, so the length is required rather
+	// than counted as it streams: a request without one is refused here, with a
+	// line that says why, instead of failing inside put() with a TypeError. The
+	// Go client always sends it, because it always uploads a file.
+	const declared = c.req.header('content-length') ?? null;
+	if (declared === null) return json({ error: 'content-length required' }, 411);
+	const bytes = Number(declared);
+	if (!Number.isFinite(bytes) || bytes <= 0) return json({ error: 'no body' }, 400);
+	if (bytes > BACKUP_LIMIT_BYTES) {
+		return json({ error: 'backup too large', limit: BACKUP_LIMIT_BYTES, got: bytes }, 413);
+	}
+	const sha256 = c.req.header('x-harbor-sha256') ?? '';
+	if (!/^[0-9a-f]{64}$/.test(sha256)) return json({ error: 'x-harbor-sha256 required' }, 400);
+	const schema = Number(c.req.header('x-harbor-schema') ?? '0');
+	if (!Number.isInteger(schema) || schema < 0) return json({ error: 'x-harbor-schema required' }, 400);
+	const body = c.req.raw.body;
+	if (!body) return json({ error: 'no body' }, 400);
+
+	try {
+		const summary = await putBackup(c.env, name, body, { sha256, schema });
+		return json(summary, 201);
+	} catch (err) {
+		if (err instanceof NameError) return json({ error: 'invalid backup name', name }, 400);
+		throw err;
+	}
+});
+
+route('GET', '/backups', 'potato', async (c) => {
+	return json({ backups: await listBackups(c.env) });
+});
+
+route('DELETE', '/backups/:name', 'potato', async (c) => {
+	const name = c.req.param('name')!;
+	try {
+		const deleted = await deleteBackup(c.env, name);
+		if (!deleted) return json({ error: 'not found', name }, 404);
+		return json({ deleted: true, name });
+	} catch (err) {
+		if (err instanceof NameError) return json({ error: 'invalid backup name', name }, 400);
+		throw err;
+	}
 });
 
 route('GET', '/presign', 'potato', async (c) => {

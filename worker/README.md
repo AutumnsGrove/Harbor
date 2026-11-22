@@ -44,14 +44,20 @@ wrangler deploy --var VERSION:r$(git rev-list --count HEAD).$(git rev-parse --sh
 - No route reads an item, because there is no item: the library is SQLite on the
   potato. `/jobs/*` and `/presign` are `potato`-scope, and a door token on any of
   them is a 403 with no side effects (there is a test that walks the router).
-- No Telegram webhook, `/mirror`, `/objects` purge, `/render` or `/backups`:
-  those arrive with phases 4, 6, 9, 11 and 12 and are listed in the plan.
+- No Telegram webhook, `/mirror`, `/objects` purge or `/render`: those arrive with
+  phases 4, 6, 9 and 11 and are listed in the plan.
+- `/backups` is upload, list and delete only — there is no route that reads a
+  backup back out. A restore pulls with a presigned GET, like media, so the Worker
+  never becomes a read surface for the library. The snapshots live in their own
+  bucket (`harbor-backups`), not in intake.
 - No plaintext token anywhere: `tokens.sha256` is compared in constant time, and
   revoking one door leaves the others working.
 
 ## Caps
 
 `POST /save` ≤ 96 KB, note ≤ 64 KB, link ≤ 2 KB and http(s) only.
+`PUT /backups/<name>` ≤ 100 MB, `potato` scope, `content-length` and
+`x-harbor-sha256` required (R2 will not take an unfixed-length stream).
 `POST /upload` ≤ 25 MB, content-type allowlist, raw body only. The limit is
 checked from the declared `Content-Length` (the edge always provides one — spike
 S1) with a counting stream as defence in depth.

@@ -150,8 +150,11 @@ Rules that make it a real export rather than a data dump:
       `harbor backup`, `--list`, `--verify`. The listing shows date and size; integrity is what
       `--verify` reports rather than a column, because a stored integrity result is a claim, not a
       check. 2026-11-22.
-- [ ] Upload via the Worker's token-gated route (the potato holds no R2 credentials) with retry and a
-      `last_backup` timestamp that the Status page and `/api/status` read.
+- [~] Upload via the Worker's token-gated route (the potato holds no R2 credential) with retry:
+      `PUT /backups/<name>` + list + delete in the Worker, `harbor backup --upload` on the potato, three
+      attempts with backoff on 5xx/429, and the R2 copy of anything pruned locally deleted so both
+      sides keep the same thirty. 2026-11-22. **The `last_backup` timestamp the Status page reads is
+      still outstanding** — it belongs with the Status work in 12b, which is where the page exists.
 - [ ] `deploy/harbor-rsync.sh` for the MacBook Air (host-side; the distroless image has no rsync),
       reachability-guarded, recording the last successful copy where the Status page can read it.
 - [x] `harbor restore` with a dry-run plan, `--yes`, a pre-restore snapshot of the *current* DB (so a

@@ -94,7 +94,7 @@ describe('scope matrix', () => {
 		expect(routes.length).toBeGreaterThanOrEqual(9);
 		for (const [key, scope] of routes) {
 			expect(['door', 'potato', 'none']).toContain(scope);
-			expect(key).toMatch(/^(GET|POST) \//);
+			expect(key).toMatch(/^(GET|POST|PUT|DELETE) \//);
 		}
 	});
 

@@ -51,8 +51,9 @@ type Failure struct {
 
 // Result is what a backup run did.
 type Result struct {
-	Kept   []Entry   // newest first, exactly what is on disk now
-	Failed []Failure // old backups retained because verification failed
+	Kept    []Entry   // newest first, exactly what is on disk now
+	Failed  []Failure // old backups retained because verification failed
+	Deleted []Entry   // pruned after verifying; their R2 copies should go too
 }
 
 // Create takes a snapshot, compresses it into dir, and prunes the old ones.
@@ -221,6 +222,7 @@ func Prune(dir string, keep int, verify func(string) error) (Result, error) {
 			if err := os.Remove(old.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return Result{}, fmt.Errorf("backup: deleting %s: %w", old.Path, err)
 			}
+			result.Deleted = append(result.Deleted, old)
 		}
 	}
 	return result, nil

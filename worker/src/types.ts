@@ -15,6 +15,9 @@ declare global {
 		interface Env {
 			DB: D1Database;
 			BUCKET: R2Bucket;
+			/** Snapshots, not intake: a separate bucket so its retention and its
+			 *  privacy are not tangled with media (design.md section 11). */
+			BACKUPS: R2Bucket;
 			/** Per-IP dampening; absent in tests and in a binding-less deploy (src/limits.ts). */
 			DOOR_LIMIT?: RateLimit;
 			R2_BUCKET: string;
