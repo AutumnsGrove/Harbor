@@ -11,11 +11,23 @@ import (
 	"golang.org/x/net/html"
 )
 
+// ErrTruncatedHTML means the document ended with markup still open — a download
+// cut off mid-file, or a hand-edited file missing its closing </DL>. The
+// bookmarks already returned are the ones it did contain; the error exists so a
+// caller can tell "that was all of it" from "that is where it stopped" without
+// reading the warnings.
+var ErrTruncatedHTML = errors.New("importer: the bookmark file ended before its markup closed")
+
 // ErrNotNetscapeHTML means the document is not a bookmark file: it has no <DL>,
 // no <DT> and no <A>. An *empty* export is not this error — it has the markup
 // and simply contains nothing — so an accidental upload is distinguishable from
 // an empty library.
 var ErrNotNetscapeHTML = errors.New("importer: not a Netscape bookmark file")
+
+type folderFrame struct {
+	name string
+	path string // the names down to and including this one, joined with "/"
+}
 
 // HTMLReader streams a Netscape bookmark document — the format browsers write
 // and phase 12a's export writes.
@@ -26,10 +38,12 @@ var ErrNotNetscapeHTML = errors.New("importer: not a Netscape bookmark file")
 type HTMLReader struct {
 	tok *html.Tokenizer
 
-	// folders is the open <DL> stack, innermost last. A bookmark's folder is the
-	// non-empty names joined with "/", because nested Space UI does not exist
-	// yet (plans/05 test 4).
-	folders []string
+	// folders is the open <DL> stack, innermost last, with each frame's joined
+	// path kept alongside its name: a bookmark's folder is the non-empty names
+	// joined with "/" (nested Space UI does not exist yet, plans/05 test 4), and
+	// building that string per bookmark would be quadratic in a document with
+	// deep or unclosed nesting.
+	folders []folderFrame
 
 	// pending is the name of the <H3> that the next <DL> opens.
 	pending string
@@ -48,7 +62,6 @@ type HTMLReader struct {
 	skipped   int
 	warns     []string
 	sawMarkup bool
-	warnedEnd bool
 }
 
 // NewHTMLReader prepares a reader. It never rejects a document here: whether
@@ -85,16 +98,16 @@ func (hr *HTMLReader) Next() (Row, error) {
 				return Row{}, fmt.Errorf("importer: reading bookmark HTML: %w", err)
 			}
 			// A download cut off mid-anchor still has a URL worth keeping.
+			truncated := hr.cur != nil || len(hr.folders) > 0
 			hr.finishAnchor()
-			if len(hr.folders) > 0 && !hr.warnedEnd {
-				hr.warnedEnd = true
-				hr.warn("the document ended with %d folder(s) still open; the bookmarks above it were kept", len(hr.folders))
-			}
 			if len(hr.queue) > 0 {
 				continue
 			}
 			if !hr.sawMarkup {
 				return Row{}, ErrNotNetscapeHTML
+			}
+			if truncated {
+				return Row{}, fmt.Errorf("%w after %d bookmark(s); they were kept", ErrTruncatedHTML, hr.record)
 			}
 			return Row{}, io.EOF
 
@@ -112,10 +125,16 @@ func (hr *HTMLReader) Next() (Row, error) {
 					hr.inH3 = false
 					hr.title.Reset()
 				}
-				hr.folders = append(hr.folders, hr.pending)
+				hr.folders = append(hr.folders, hr.pushFolder(hr.pending))
 				hr.pending = ""
 			case "dt":
 				hr.sawMarkup = true
+				hr.finishAnchor()
+			case "dd":
+				// Firefox and Chrome write the description as a <DD> after the
+				// bookmark, and descriptions are not imported, so it ends the
+				// anchor: otherwise a file missing </A> imports the description
+				// as part of the title.
 				hr.finishAnchor()
 			case "h3":
 				hr.sawMarkup = true
@@ -216,15 +235,30 @@ func (hr *HTMLReader) finishAnchor() {
 	hr.queue = append(hr.queue, row)
 }
 
-// folder is the current path, innermost last, with unnamed levels dropped.
+// folder is the current path, innermost last, with unnamed levels dropped. It
+// is O(1): the path is built when a folder opens, not when a bookmark is filed.
 func (hr *HTMLReader) folder() string {
-	var names []string
-	for _, name := range hr.folders {
-		if name != "" {
-			names = append(names, name)
-		}
+	if len(hr.folders) == 0 {
+		return ""
 	}
-	return strings.Join(names, "/")
+	return hr.folders[len(hr.folders)-1].path
+}
+
+// pushFolder is the frame a <DL> opens: its path is its parent's plus its own
+// name, so the cost of nesting is paid once instead of per bookmark.
+func (hr *HTMLReader) pushFolder(name string) folderFrame {
+	parent := ""
+	if n := len(hr.folders); n > 0 {
+		parent = hr.folders[n-1].path
+	}
+	switch {
+	case name == "":
+		return folderFrame{path: parent}
+	case parent == "":
+		return folderFrame{name: name, path: name}
+	default:
+		return folderFrame{name: name, path: parent + "/" + name}
+	}
 }
 
 func (hr *HTMLReader) warn(format string, args ...any) {

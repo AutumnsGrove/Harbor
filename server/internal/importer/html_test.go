@@ -32,6 +32,27 @@ func readHTML(t *testing.T, src string) ([]Row, *HTMLReader) {
 	}
 }
 
+// readHTMLToEOF drains a document and returns the error that ended it, so a
+// truncation can be asserted as a typed error rather than a warning string.
+func readHTMLToEOF(t *testing.T, src string) ([]Row, *HTMLReader, error) {
+	t.Helper()
+	hr, err := NewHTMLReader(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("NewHTMLReader: %v", err)
+	}
+	var rows []Row
+	for {
+		row, err := hr.Next()
+		if errors.Is(err, io.EOF) || errors.Is(err, ErrTruncatedHTML) || errors.Is(err, ErrNotNetscapeHTML) {
+			return rows, hr, err
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		rows = append(rows, row)
+	}
+}
+
 func readHTMLFile(t *testing.T, path string) ([]Row, *HTMLReader) {
 	t.Helper()
 	f, err := os.Open(path)
@@ -156,7 +177,7 @@ func TestNetscapeEmptyDocument(t *testing.T) {
 // missing. Nothing may hang on them.
 func TestNetscapeSloppyMarkup(t *testing.T) {
 	src := "<DL><p><DT><H3>A folder<DL><p><DT><A HREF=\"https://example.com/a\">A</A><DT><A HREF=\"https://example.com/b\"><b>B</b> in bold</A>"
-	rows, hr := readHTML(t, src)
+	rows, hr, err := readHTMLToEOF(t, src)
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want 2: %+v", len(rows), rows)
 	}
@@ -166,21 +187,25 @@ func TestNetscapeSloppyMarkup(t *testing.T) {
 	if rows[1].Title != "B in bold" {
 		t.Errorf("title = %q, want the anchor's text content", rows[1].Title)
 	}
-	if len(hr.Warnings()) == 0 {
-		t.Error("a document that ends inside a folder should say so")
+	if !errors.Is(err, ErrTruncatedHTML) {
+		t.Errorf("err = %v, want ErrTruncatedHTML: the document ended inside a folder", err)
 	}
+	if !strings.Contains(err.Error(), "2 bookmark") {
+		t.Errorf("the truncation error should carry the row count: %v", err)
+	}
+	_ = hr
 }
 
 // A truncated download must still yield the bookmarks it contains, and it must
 // say that it was cut short (plans/05 "Be lenient, never hang").
 func TestNetscapeTruncated(t *testing.T) {
 	src := "<DL><p><DT><A HREF=\"https://example.com/a\" ADD_DATE=\"1700000000\">A title that never closes"
-	rows, hr := readHTML(t, src)
+	rows, _, err := readHTMLToEOF(t, src)
 	if len(rows) != 1 || rows[0].URL != "https://example.com/a" {
 		t.Fatalf("rows = %+v, want the truncated anchor's URL", rows)
 	}
-	if len(hr.Warnings()) == 0 {
-		t.Error("a document cut off mid-anchor should warn")
+	if !errors.Is(err, ErrTruncatedHTML) {
+		t.Errorf("err = %v, want ErrTruncatedHTML: the document was cut off mid-anchor", err)
 	}
 }
 
@@ -258,6 +283,43 @@ func TestNetscapeReadsOurOwnExportShape(t *testing.T) {
 	}
 }
 
+// Firefox and Chrome write a description as <DD> after the bookmark. In the
+// sloppy files this reader supports (</A> missing) the description would
+// otherwise be collected as part of the title, and descriptions are not
+// imported at all.
+func TestNetscapeDDEndsTheAnchor(t *testing.T) {
+	src := "<DL><p><DT><A HREF=\"https://example.com/a\">A title<DD>A description that is not imported<DT><A HREF=\"https://example.com/b\">B</A></DL><p>"
+	rows, _ := readHTML(t, src)
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2: %+v", len(rows), rows)
+	}
+	if rows[0].Title != "A title" {
+		t.Errorf("title = %q, want just the anchor's text", rows[0].Title)
+	}
+	if rows[1].Title != "B" || rows[1].URL != "https://example.com/b" {
+		t.Errorf("row 2 = %+v", rows[1])
+	}
+}
+
+// Folder paths are built when a folder opens, not per bookmark: a document with
+// thousands of unclosed <DL>s must not cost depth × bookmarks.
+func TestNetscapeDeepNestingIsLinear(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("<DL><p>")
+	const depth = 2000
+	for i := 0; i < depth; i++ {
+		b.WriteString("<DT><H3>f</H3><DL><p>")
+	}
+	b.WriteString("<DT><A HREF=\"https://example.com/deep\">Deep</A>")
+	rows, _, _ := readHTMLToEOF(t, b.String())
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if want := strings.TrimPrefix(strings.Repeat("/f", depth), "/"); rows[0].Folder != want {
+		t.Errorf("folder = %.40q…, want the %d-deep path", rows[0].Folder, depth)
+	}
+}
+
 // The files are hostile input like the CSV is, so the same guarantee applies:
 // no panic, no hang, no aborted run.
 func FuzzImportHTML(f *testing.F) {
@@ -277,7 +339,7 @@ func FuzzImportHTML(f *testing.F) {
 				t.Fatalf("reader produced more rows than the file has bytes")
 			}
 			row, err := hr.Next()
-			if errors.Is(err, io.EOF) || errors.Is(err, ErrNotNetscapeHTML) {
+			if errors.Is(err, io.EOF) || errors.Is(err, ErrNotNetscapeHTML) || errors.Is(err, ErrTruncatedHTML) {
 				return
 			}
 			if err != nil {
