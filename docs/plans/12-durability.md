@@ -154,9 +154,14 @@ Rules that make it a real export rather than a data dump:
       `last_backup` timestamp that the Status page and `/api/status` read.
 - [ ] `deploy/harbor-rsync.sh` for the MacBook Air (host-side; the distroless image has no rsync),
       reachability-guarded, recording the last successful copy where the Status page can read it.
-- [ ] `harbor restore` with a dry-run plan, `--yes`, a pre-restore snapshot of the *current* DB (so a
-      bad restore is itself recoverable), and a refusal to run against an open DB.
-- [ ] `docs/runbook.md` with the drills, written so a tired person at 2 a.m. can follow it.
+- [x] `harbor restore` with a dry-run plan, `--yes`, a pre-restore snapshot of the *current* DB (so a
+      bad restore is itself recoverable), and a refusal to run against an open DB — the refusal is a
+      `flock` on `data/.lock`, which `serve` holds for its whole life. A database that will not open
+      is moved aside with its journals rather than snapshot, so a corrupt library is still not
+      thrown away. 2026-11-22.
+- [~] `docs/runbook.md` with the drills, written so a tired person at 2 a.m. can follow it. Written
+      2026-11-22 with deploy, update, rollback, backup, restore, disaster recovery and the drill
+      procedure; **the drill timings table is empty**, because the drill has not been run.
 - [ ] **Run the drill for real**, on a clean directory, and paste the timings into the runbook.
 
 **Status and guardrails**

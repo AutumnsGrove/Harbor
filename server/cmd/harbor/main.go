@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
+	"github.com/AutumnsGrove/Harbor/server/internal/datalock"
 	"github.com/AutumnsGrove/Harbor/server/internal/enrich"
 	enrichnova "github.com/AutumnsGrove/Harbor/server/internal/enrich/nova"
 	"github.com/AutumnsGrove/Harbor/server/internal/fetch"
@@ -36,6 +37,7 @@ Commands:
   snapshot      write data/backups/pre-update.db (use --pre-update)
   export        write the library out as files (--out DIR [--format ...] [--include-media])
   backup        snapshot, compress and keep the database (--list, --verify)
+  restore       replace the database from a backup (--dry-run, --yes)
   replay        re-ingest the Worker's done jobs (--since 1h|<unix>|<RFC3339>)
   version       print the build stamp
   help          print this text
@@ -67,6 +69,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return exportCommand(ctx, getenv, args[1:], stdout)
 	case "backup":
 		return backupCommand(ctx, getenv, args[1:], stdout)
+	case "restore":
+		return restoreCommand(ctx, getenv, args[1:], stdout)
 	case "replay":
 		return replayCommand(ctx, getenv, args[1:], stdout)
 	case "version":
@@ -109,6 +113,19 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 	}
 
 	log := slog.New(slog.NewJSONHandler(stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// One owner per data directory. serve holds this for its whole life, so a
+	// restore can tell "the database is in use" without guessing from a pidfile
+	// (plans/12a).
+	held, err := datalock.Acquire(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("another Harbor is already using %s: %w", cfg.DataDir, err)
+	}
+	defer func() {
+		if err := held.Release(); err != nil {
+			log.Error("releasing the data lock", "error", err)
+		}
+	}()
 
 	// The library opens before the listener: a database that cannot be opened is
 	// a failed update, and the watcher should roll it back rather than serve an
