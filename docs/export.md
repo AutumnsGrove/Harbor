@@ -24,7 +24,9 @@ harbor export --out ./harbor-export-20261122 --include-media   # plus media/<sha
    never lists itself. A media blob that does not hash to its own content address fails the export,
    because copying it would put corrupt bytes under a name the manifest then vouches for.
 5. **New copy only.** `--out` must be a new or empty directory. Exporting on top of yesterday's copy
-   would leave neither version intact.
+   would leave neither version intact. The one directory it will not write into is the current one
+   (`.`): the export has to replace its destination, and replacing the directory a shell is sitting in
+   would leave that shell in a deleted inode, so it says so instead.
 6. **All or nothing.** The export is built in a staging directory beside the destination and renamed
    into place only when every file is written. A failure — a missing or corrupt blob, a full disk —
    leaves nothing behind, so the retry into the same `--out` is never refused for debris.

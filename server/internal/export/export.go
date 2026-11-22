@@ -76,6 +76,17 @@ func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// Staging goes beside the destination, so the final move is a rename on one
+	// filesystem. That needs the destination resolved: filepath.Dir(".") is ".",
+	// which would stage inside the target and then fail to move onto it.
+	absDir, err := filepath.Abs(opts.Dir)
+	if err != nil {
+		return Result{}, fmt.Errorf("export: resolving %s: %w", opts.Dir, err)
+	}
+	if cwd, err := os.Getwd(); err == nil && absDir == filepath.Clean(cwd) {
+		return Result{}, fmt.Errorf(
+			"export: --out %s is the current directory; an export is a directory to create, so give it a name", opts.Dir)
+	}
 	if err := prepareDir(opts.Dir); err != nil {
 		return Result{}, err
 	}
@@ -84,7 +95,7 @@ func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
 	// anywhere — a missing blob, a corrupted one, a full disk — leaves nothing
 	// behind that looks like an export. The half-written version is worse than
 	// none: prepareDir would then refuse the obvious retry.
-	staging, err := os.MkdirTemp(filepath.Dir(opts.Dir), ".harbor-export-*")
+	staging, err := os.MkdirTemp(filepath.Dir(absDir), ".harbor-export-*")
 	if err != nil {
 		return Result{}, fmt.Errorf("export: creating a staging directory: %w", err)
 	}
@@ -151,7 +162,7 @@ func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
 	result.Files = append(result.Files, File{Path: "manifest.json", Bytes: int64(len(manifest))})
 	sort.Slice(result.Files, func(i, j int) bool { return result.Files[i].Path < result.Files[j].Path })
 
-	if err := commitDir(staging, opts.Dir); err != nil {
+	if err := commitDir(staging, absDir); err != nil {
 		return Result{}, err
 	}
 	committed = true

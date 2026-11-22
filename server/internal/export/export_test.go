@@ -341,6 +341,32 @@ func TestMediaThatDoesNotMatchItsHashFailsTheExport(t *testing.T) {
 	}
 }
 
+func TestExportRefusesTheCurrentDirectory(t *testing.T) {
+	// `--out .` is a directory the export would have to replace, and replacing
+	// the directory a shell is sitting in leaves that shell in a deleted inode.
+	// Say so, rather than failing later with a rename error.
+	t.Chdir(t.TempDir())
+	_, err := JSON(context.Background(), fakeReader{library: fixtureLibrary()}, options("."))
+	if err == nil {
+		t.Fatal("exporting into the current directory should be refused")
+	}
+	if !strings.Contains(err.Error(), "current directory") {
+		t.Errorf("error = %v, want it to say why", err)
+	}
+}
+
+func TestExportIntoNamesOfADirectoryThatDoesNotExistYet(t *testing.T) {
+	// The documented usage: --out ./harbor-export-YYYYMMDD, relative and new.
+	t.Chdir(t.TempDir())
+	result, err := JSON(context.Background(), fakeReader{library: fixtureLibrary()}, options("harbor-export-20261122"))
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(result.Dir, "library.json")); err != nil {
+		t.Errorf("library.json: %v", err)
+	}
+}
+
 func TestExportRefusesADirectoryWithFilesInIt(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("mine"), 0o644); err != nil {
