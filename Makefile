@@ -35,10 +35,19 @@ test:
 # `check`: real saves with a human label, scored against the live prompt and
 # model (plans/03, "Exit criteria"). -record refreshes the captures and leaves
 # labels.json alone.
+#
+# The key is the one pi uses for its own tasks (~/.pi/agent/auth.json, mode 600),
+# read for this target only and exported rather than put on a command line, so it
+# stays out of `ps` and out of the repository. An unset key simply fails the
+# command's own check.
 SCORED_SET := server/internal/enrichscore/testdata/saves
+PI_AUTH ?= $(HOME)/.pi/agent/auth.json
+# Lower this while the set is still being labelled; the gate wants 20.
+MIN ?= 20
 
+enrich-score: export OPENROUTER_API_KEY ?= $(shell jq -r '.openrouter.key // empty' "$(PI_AUTH)" 2>/dev/null)
 enrich-score:
-	$(GO) run ./server/cmd/enrichscore -dir $(SCORED_SET)
+	$(GO) run ./server/cmd/enrichscore -dir $(SCORED_SET) -min $(MIN)
 
 enrich-record:
 	$(GO) run ./server/cmd/enrichscore -dir $(SCORED_SET) -record server/internal/enrichscore/testdata/sources.txt
