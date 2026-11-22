@@ -1,0 +1,137 @@
+{
+  "export_version": 1,
+  "app_version": "r1.abcdef",
+  "schema_version": 1,
+  "exported_at": "2026-11-22T18:00:00Z",
+  "counts": {
+    "items": 3,
+    "tags": 2,
+    "spaces": 1,
+    "highlights": 1,
+    "media": 1
+  },
+  "spaces": [
+    {
+      "id": "0190-space",
+      "slug": "read-later",
+      "name": "Read later",
+      "kind": "manual",
+      "rule": {},
+      "created_at": "2026-11-01T22:00:00Z"
+    }
+  ],
+  "items": [
+    {
+      "id": "0190-item-a",
+      "url": "https://kitchen.example/pancakes",
+      "url_original": "https://kitchen.example/pancakes?utm_source=x",
+      "title": "Sourdough pancakes",
+      "note": "Try with the rye starter.",
+      "kind": "recipe",
+      "kind_source": "ai",
+      "summary": "Thin pancakes from starter discard. Good for a slow morning.",
+      "source": "app",
+      "import_ref": "",
+      "link_status": "",
+      "created_at": "2026-11-18T18:00:00Z",
+      "saved_at": "2026-11-19T18:00:00Z",
+      "updated_at": "2026-11-20T18:00:00Z",
+      "tags": [
+        "baking",
+        "breakfast"
+      ],
+      "spaces": [
+        "Read later"
+      ],
+      "details": {
+        "recipe": {
+          "ingredients": [
+            "starter",
+            "egg"
+          ]
+        }
+      },
+      "og": {
+        "site": "Kitchen"
+      },
+      "content_text": "Whisk the starter, egg and milk.\nRest, then cook.",
+      "content_md": "Whisk the starter, egg and milk.\n\nRest, then cook.",
+      "highlights": [
+        {
+          "id": "0190-hl",
+          "quote": "Rest, then cook.",
+          "note": "Fifteen minutes, not five.",
+          "color": "amber",
+          "anchor": {
+            "quote": "Rest, then cook.",
+            "ordinal": 1
+          },
+          "detached": false,
+          "created_at": "2026-11-21T02:00:00Z"
+        }
+      ],
+      "media": [
+        {
+          "id": "0190-media",
+          "kind": "image",
+          "filename": "pancakes.jpg",
+          "content_type": "image/jpeg",
+          "bytes": 2048,
+          "sha256": "aa0f5c1e",
+          "width": 1200,
+          "height": 900,
+          "path": "aa/aa0f5c1e"
+        }
+      ]
+    },
+    {
+      "id": "0190-item-b",
+      "url": null,
+      "url_original": "",
+      "title": "A thought",
+      "note": "Save the gesture, not the library.",
+      "kind": "note",
+      "kind_source": "default",
+      "summary": "A note about the shape of the product.",
+      "source": "app",
+      "import_ref": "",
+      "link_status": "",
+      "created_at": "2026-11-21T18:00:00Z",
+      "saved_at": "2026-11-21T18:00:00Z",
+      "updated_at": "2026-11-21T18:00:00Z",
+      "tags": [],
+      "spaces": [],
+      "details": {},
+      "og": {},
+      "content_text": "",
+      "content_md": "",
+      "highlights": [],
+      "media": []
+    },
+    {
+      "id": "0190-item-c",
+      "url": "https://kitchen.example/pancakes",
+      "url_original": "",
+      "title": "Deleted but still mine",
+      "note": "",
+      "kind": "article",
+      "kind_source": "ai",
+      "summary": "",
+      "source": "",
+      "import_ref": "",
+      "link_status": "",
+      "created_at": "2026-11-17T18:00:00Z",
+      "saved_at": "2026-11-17T18:00:00Z",
+      "updated_at": "2026-11-17T18:00:00Z",
+      "deleted_at": "2026-11-22T06:00:00Z",
+      "tags": [],
+      "spaces": [],
+      "details": {},
+      "og": {},
+      "content_text": "",
+      "content_md": "",
+      "highlights": [],
+      "media": []
+    }
+  ]
+}
