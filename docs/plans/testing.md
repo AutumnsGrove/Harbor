@@ -101,9 +101,13 @@ spec (design.md §)  →  failing test  →  minimal code  →  green  →  refa
   around JSON, an invented kind, 0 tags, 30 tags, a 1023-dim vector, an HTML-escaped apostrophe,
   `null` fields — and asserts the pipeline degrades (retry, then `failed`) instead of corrupting a
   row.
-- Quality is tracked separately: `testdata/scored/` holds ~40 real saves with a human-assigned kind
-  and tag set. `make enrich-score` prints accuracy. It is a report, not a gate — but a prompt change
-  that drops accuracy by >10 points is a regression and gets reverted.
+- Quality is tracked separately: `server/internal/enrichscore/testdata/saves/` holds ~40 real saves
+  (captured through `fetch` + `extract`, so a run never depends on the network) with a
+  human-assigned kind and tag set in `labels.json`. `make enrich-score` asks Nova for every labelled
+  case and prints kind accuracy, per-kind confusion and tag recall, and exits non-zero under 80%.
+  It gates a **phase exit**, not a PR: CI never runs it, because a model's noise must not block an
+  unrelated change. A prompt change that drops accuracy by >10 points is a regression and gets
+  reverted.
 
 ---
 
@@ -192,7 +196,7 @@ file-write paths, SQL construction, and XSS respectively. They run on every PR, 
 | `contract` | every PR | Go and TS validate `contracts/fixtures/` | yes |
 | `no-outside-addresses` | every PR | grep the built frontend for off-host URLs (inherited from Warbler) | yes |
 | `packaging` | every PR | `git ls-files web/build` is exactly `.gitkeep`; `.dockerignore` excludes build output and local data; the publish job is main-only and `needs` every test job | yes |
-| `enrich-score` | manual/nightly with key | scored fixture accuracy report | no |
+| `enrich-score` | manual/nightly with key | scored fixture accuracy report; fails under the 80% gate | no (it is the phase-3 exit criterion, not a PR check) |
 | `publish` | push to `main` after `check`/`web`/`worker`/`contract`/`packaging` | multi-arch build + push, `latest` + short SHA; no PR can reach it | yes |
 
 `make check` is the local equivalent of `check` + `web` + `worker` + `packaging`; if a developer's

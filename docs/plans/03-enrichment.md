@@ -159,8 +159,12 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
       are part of the work, not an afterthought.
 - [x] Attention strip: failed items from `store` (not from logs), one-tap retry, dismissible for the
       session, amber per the colour rules.
-- [ ] Scored fixture set: ~40 real saves with human kind + tag sets; `make enrich-score` prints
-      accuracy and per-kind confusion.
+- [x] The scored-set harness: `server/internal/enrichscore` (case loading, the label file, the
+      scoring arithmetic, per-kind confusion, tag recall, the 80% gate) and
+      `server/cmd/enrichscore` (`-record` captures through `fetch` + `extract`; the default mode
+      scores against live Nova). `make enrich-score` / `make enrich-record`.
+- [ ] The scored set itself: ~40 real saves captured and labelled, and the first scored run
+      recorded here with its accuracy.
 - [x] Measured cost: the first live saves were logged and their real $/save is in design.md §6
       ($0.000788 for four saves, ~$0.0002 each). Re-measure after 100 real saves if the prompt changes.
 
@@ -182,6 +186,13 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
 - **Pipeline**: interfaces for fetch/decide/write/embed, a real store, and fakes with recorded
   answers. Notes skip fetch and decide; a manual kind skips decide; an unknown kind becomes
   `article`.
+- **Scored set**: a case is a capture, not a URL, so scoring never depends on a page still being
+  up and two runs see the same text. `enrich.PageText` with `ClassifyFor`/`ContentFor` is the one
+  place the caps are applied, and both `Process` and the scorer go through it — otherwise the score
+  measures a prompt nobody ships. Labels live in one `labels.json` (`"id": {"kind": "", "tags": []}`
+  per line) that `-record` appends to and never overwrites; a blank kind is "not labelled yet" and
+  is reported, not scored. A failed model call counts as **wrong**, because in production it is a
+  failed save, and it also fails the run outright.
 
 Decisions made here:
 
