@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<DT><H3>f<DL><p><DT><A HREF=>x</A>")

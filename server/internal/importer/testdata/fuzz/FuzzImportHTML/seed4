@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<DL><p><DT><A HREF=\"https://example.com/truncated\" ADD_DATE=\"yesterday\">never closed")
