@@ -35,7 +35,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-say() { printf '\n== %s\n' "$*"; }
+step() { printf '\n== %s\n' "$*"; }
 ok() { printf '  ok   %s\n' "$*"; }
 no() { printf '  FAIL %s\n' "$*"; FAILURES=$((FAILURES + 1)); }
 check() { if [ "$2" = "$3" ]; then ok "$1 ($2)"; else no "$1 (got $2, want $3)"; fi; }
@@ -81,11 +81,11 @@ items_via_api() {
 
 # ── the drill ───────────────────────────────────────────────────────────────
 
-say "build"
+step "build"
 timed "go build" env CGO_ENABLED=0 go build -o "$BIN" "$ROOT/server/cmd/harbor"
 [ -x "$BIN" ] || { echo "the drill cannot continue without a binary"; exit 1; }
 
-say "populate a library through the API ($COUNT items)"
+step "populate a library through the API ($COUNT items)"
 start_server || exit 1
 seed_start=$(stamp)
 python3 - "$PORT" "$COUNT" <<'PY'
@@ -121,18 +121,18 @@ stop_server
 
 printf '  database size: %s\n' "$(du -h "$DATA/harbor.db" | cut -f1)"
 
-say "back up"
+step "back up"
 timed "harbor backup" env HARBOR_DATA_DIR="$DATA" HARBOR_DEPLOYMENT=dev HARBOR_DEV_NO_AUTH=1 "$BIN" backup
 backup_file=$(find "$DATA/backups" -name 'harbor-*.db.zst' | sort | tail -1)
 [ -n "$backup_file" ] || { no "no backup was written"; exit 1; }
 printf '  backup: %s (%s)\n' "$(basename "$backup_file")" "$(du -h "$backup_file" | cut -f1)"
 
-say "lose the potato"
+step "lose the potato"
 mv "$DATA" "$DATA.destroyed"
 mkdir -p "$DATA"
 ok "the data directory is gone (moved to data.destroyed, to compare against)"
 
-say "restore"
+step "restore"
 restore_start=$(stamp)
 # The backup lived in the destroyed directory: copy it back, as an operator would
 # from the off-box copy.
@@ -145,7 +145,7 @@ printf '  %-22s %6ss\n' "harbor restore" "$(since "$restore_end" "$restore_start
 [ "$restore_rc" -eq 0 ] || { no "the restore failed"; sed -n 1,30p "$WORK/restore.log"; }
 grep -q "next: harbor replay --since" "$WORK/restore.log" && ok "the restore printed the replay command" || no "no replay command printed"
 
-say "the library is back"
+step "the library is back"
 start_server || exit 1
 check "items after the restore" "$(items_via_api)" "$((COUNT - 1))"
 list=$(curl -sf "http://127.0.0.1:$PORT/api/items?limit=5")
@@ -170,7 +170,7 @@ sys.exit(0 if sys.argv[1] in ids else 1)
 echo "$list" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["items"], "no items"; print("  first item has", len(data["items"][0].get("note") or ""), "characters of note")'
 stop_server
 
-say "export what was restored"
+step "export what was restored"
 timed "harbor export" env HARBOR_DATA_DIR="$DATA" HARBOR_DEPLOYMENT=dev HARBOR_DEV_NO_AUTH=1 \
 	"$BIN" export --out "$WORK/export"
 python3 - "$WORK/export" "$((COUNT - 1))" <<'PY'
