@@ -24,6 +24,40 @@ func Verify(path string) error {
 	return store.Verify(restored)
 }
 
+// Extract decompresses a verified backup to dest. The caller decides what to do
+// with it; restore does this into a temp file and renames it over the database,
+// so a half-written decompression never becomes the live library.
+func Extract(path, dest string) error {
+	if err := Verify(path); err != nil {
+		return err
+	}
+	in, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("backup: opening %s: %w", path, err)
+	}
+	defer in.Close()
+
+	decoder, err := zstd.NewReader(in)
+	if err != nil {
+		return fmt.Errorf("backup: %s is not a zstd stream: %w", path, err)
+	}
+	defer decoder.Close()
+
+	out, err := os.Create(dest)
+	if err != nil {
+		return fmt.Errorf("backup: creating %s: %w", dest, err)
+	}
+	if _, err := io.Copy(out, decoder); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("backup: decompressing %s: %w", path, err)
+	}
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("backup: syncing %s: %w", dest, err)
+	}
+	return out.Close()
+}
+
 // Check is one backup's verification.
 type Check struct {
 	Entry Entry
