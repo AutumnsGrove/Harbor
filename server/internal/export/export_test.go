@@ -8,6 +8,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,15 @@ const (
 
 var fixedNow = time.Date(2026, 11, 22, 18, 0, 0, 0, time.UTC)
 
+// mediaBytes is the fixture blob; its content address is computed, not invented,
+// because the export checks the two agree.
+const mediaBytes = "jpegbytes"
+
+func shaOf(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
 // fixtureLibrary is a library with one of everything the contract names: a
 // normal item, a typed note, an item in "Recently deleted", tags, a Space, a
 // highlight, and a media row.
@@ -33,6 +43,7 @@ func fixtureLibrary() model.Library {
 	url := "https://kitchen.example/pancakes"
 	slug := "read-later"
 	width, height := 1200, 900
+	mediaHash := shaOf(mediaBytes)
 	return model.Library{
 		Items: []model.Item{
 			{
@@ -86,8 +97,8 @@ func fixtureLibrary() model.Library {
 		Media: []model.Media{
 			{ID: "0190-media", ItemID: "0190-item-a", Kind: model.MediaImage,
 				Filename: "pancakes.jpg", ContentType: "image/jpeg", Bytes: 2048,
-				SHA256: "aa0f5c1e", Width: &width, Height: &height,
-				LocalPath: "aa/aa0f5c1e", CreatedAt: fixedNow.Add(-71 * time.Hour).Truncate(time.Second)},
+				SHA256: mediaHash, Width: &width, Height: &height,
+				LocalPath: "aa/" + mediaHash, CreatedAt: fixedNow.Add(-71 * time.Hour).Truncate(time.Second)},
 		},
 	}
 }
@@ -139,7 +150,10 @@ func TestJSONWritesTheLibraryAndItsManifest(t *testing.T) {
 			ID     string   `json:"id"`
 			Kind   string   `json:"kind"`
 			Tags   []string `json:"tags"`
-			Spaces []string `json:"spaces"`
+			Spaces []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"spaces"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -158,8 +172,10 @@ func TestJSONWritesTheLibraryAndItsManifest(t *testing.T) {
 	if len(first.Tags) != 2 || first.Tags[0] != "baking" {
 		t.Errorf("tags = %v, want the item's canonical tags", first.Tags)
 	}
-	if len(first.Spaces) != 1 || first.Spaces[0] != "Read later" {
-		t.Errorf("spaces = %v, want the Space's name so the file reads without ids", first.Spaces)
+	// Membership carries the id as well as the name: Space names are not unique
+	// in the schema, so a restore cannot match on the name alone.
+	if len(first.Spaces) != 1 || first.Spaces[0].ID != "0190-space" || first.Spaces[0].Name != "Read later" {
+		t.Errorf("spaces = %+v, want the Space's id and name", first.Spaces)
 	}
 	if first.Kind != "recipe" {
 		t.Errorf("kind = %q", first.Kind)
@@ -236,11 +252,12 @@ func TestTheManifestHashesEveryFile(t *testing.T) {
 }
 
 func TestMediaIsCopiedOnlyWhenAsked(t *testing.T) {
+	sha := shaOf(mediaBytes)
 	mediaDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(mediaDir, "aa"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(mediaDir, "aa", "aa0f5c1e"), []byte("jpegbytes"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(mediaDir, "aa", sha), []byte(mediaBytes), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -249,7 +266,7 @@ func TestMediaIsCopiedOnlyWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
-	if result.Has("media/aa0f5c1e") {
+	if result.Has("media/" + sha) {
 		t.Error("media was copied without --include-media")
 	}
 
@@ -260,23 +277,67 @@ func TestMediaIsCopiedOnlyWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
-	if !withResult.Has("media/aa0f5c1e") {
+	if !withResult.Has("media/" + sha) {
 		t.Fatalf("media was not copied: %+v", withResult.Files)
 	}
-	copied, err := os.ReadFile(filepath.Join(with.Dir, "media", "aa0f5c1e"))
-	if err != nil || string(copied) != "jpegbytes" {
+	copied, err := os.ReadFile(filepath.Join(with.Dir, "media", sha))
+	if err != nil || string(copied) != mediaBytes {
 		t.Errorf("copied media = %q, %v", copied, err)
 	}
 }
 
 func TestMissingMediaFailsTheExport(t *testing.T) {
 	// A manifest that lists a hash with no bytes is a broken promise, so this is
-	// an error, not a warning.
-	opts := options(filepath.Join(t.TempDir(), "export"))
+	// an error, not a warning — and it must leave nothing behind, or the obvious
+	// retry would be refused for a directory that only holds the debris.
+	dir := filepath.Join(t.TempDir(), "export")
+	opts := options(dir)
 	opts.IncludeMedia = true
 	opts.MediaDir = t.TempDir()
 	if _, err := JSON(context.Background(), fakeReader{library: fixtureLibrary()}, opts); err == nil {
 		t.Fatal("an export with a missing media file should fail")
+	}
+	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+		t.Errorf("a failed export left %d entries in %s", len(entries), dir)
+	}
+	// And the retry, once the blob exists, works into the same directory.
+	if err := os.MkdirAll(filepath.Join(opts.MediaDir, "aa"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(opts.MediaDir, "aa", shaOf(mediaBytes)), []byte(mediaBytes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := JSON(context.Background(), fakeReader{library: fixtureLibrary()}, opts); err != nil {
+		t.Fatalf("retrying into the same directory: %v", err)
+	}
+}
+
+func TestMediaThatDoesNotMatchItsHashFailsTheExport(t *testing.T) {
+	// The blob is stored under its content address, so a mismatch means the file
+	// is corrupt. Copying it would put corrupt bytes under a name the manifest
+	// then vouches for.
+	mediaDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(mediaDir, "aa"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Stored under its content address, but the bytes inside are something else.
+	if err := os.WriteFile(filepath.Join(mediaDir, "aa", shaOf(mediaBytes)), []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "export")
+	opts := options(dir)
+	opts.IncludeMedia = true
+	opts.MediaDir = mediaDir
+
+	_, err := JSON(context.Background(), fakeReader{library: fixtureLibrary()}, opts)
+	if err == nil {
+		t.Fatal("a blob that does not match its content address should fail the export")
+	}
+	if !strings.Contains(err.Error(), shaOf(mediaBytes)) {
+		t.Errorf("error = %v, want it to name the hash", err)
+	}
+	if entries, readErr := os.ReadDir(dir); readErr == nil && len(entries) > 0 {
+		t.Errorf("a failed export left %d entries in %s", len(entries), dir)
 	}
 }
 

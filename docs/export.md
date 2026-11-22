@@ -21,9 +21,13 @@ harbor export --out ./harbor-export-20261122 --include-media   # plus media/<sha
    timestamps from the database, no wall-clock except `exported_at`. A diff between two exports means
    the library changed.
 4. **Verified.** `manifest.json` carries the byte count and sha256 of every other file. The manifest
-   never lists itself.
+   never lists itself. A media blob that does not hash to its own content address fails the export,
+   because copying it would put corrupt bytes under a name the manifest then vouches for.
 5. **New copy only.** `--out` must be a new or empty directory. Exporting on top of yesterday's copy
    would leave neither version intact.
+6. **All or nothing.** The export is built in a staging directory beside the destination and renamed
+   into place only when every file is written. A failure — a missing or corrupt blob, a full disk —
+   leaves nothing behind, so the retry into the same `--out` is never refused for debris.
 
 ## What is written
 
@@ -59,7 +63,7 @@ DIR/
 | `items[].source`, `import_ref` | where the save came from; the Raindrop id or bookmark path, for re-import |
 | `items[].created_at`, `saved_at`, `updated_at`, `deleted_at` | three clocks, RFC 3339 UTC; `deleted_at` present only when soft-deleted |
 | `items[].tags[]` | canonical tag names, sorted |
-| `items[].spaces[]` | Space **names**, so the file reads without joining ids; the ids are in `spaces[]` |
+| `items[].spaces[]` | `id` and `name` per Space. A restore matches on the **id**: `spaces.name` is not unique in the schema, so two Spaces called "Recipes" would otherwise be indistinguishable; the name is there so the file reads without joining |
 | `items[].details`, `og` | raw JSON from extraction and JSON-LD (`{ }` when empty) |
 | `items[].content_text`, `content_md` | the extracted text and the reader's Markdown |
 | `items[].transcript` | `text`, `lang`, `state`; absent for items without one |

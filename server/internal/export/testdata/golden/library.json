@@ -41,7 +41,10 @@
         "breakfast"
       ],
       "spaces": [
-        "Read later"
+        {
+          "id": "0190-space",
+          "name": "Read later"
+        }
       ],
       "details": {
         "recipe": {
@@ -77,10 +80,10 @@
           "filename": "pancakes.jpg",
           "content_type": "image/jpeg",
           "bytes": 2048,
-          "sha256": "aa0f5c1e",
+          "sha256": "bbf6124fd0287f049f9bd572995c6d04874b173eeeb32b070aef2504d686b87f",
           "width": 1200,
           "height": 900,
-          "path": "aa/aa0f5c1e"
+          "path": "aa/bbf6124fd0287f049f9bd572995c6d04874b173eeeb32b070aef2504d686b87f"
         }
       ]
     },

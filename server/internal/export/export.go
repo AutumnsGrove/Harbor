@@ -80,6 +80,21 @@ func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
+	// Build in a staging directory and rename it into place, so a failure
+	// anywhere — a missing blob, a corrupted one, a full disk — leaves nothing
+	// behind that looks like an export. The half-written version is worse than
+	// none: prepareDir would then refuse the obvious retry.
+	staging, err := os.MkdirTemp(filepath.Dir(opts.Dir), ".harbor-export-*")
+	if err != nil {
+		return Result{}, fmt.Errorf("export: creating a staging directory: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+
 	now := opts.Now
 	if now == nil {
 		now = time.Now
@@ -101,13 +116,13 @@ func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{Dir: opts.Dir}
-	if err := result.write(opts.Dir, "library.json", raw); err != nil {
+	result := Result{}
+	if err := result.write(staging, "library.json", raw); err != nil {
 		return Result{}, err
 	}
 
 	if opts.IncludeMedia {
-		media, err := writeMedia(opts, library.Media)
+		media, err := writeMedia(staging, opts.MediaDir, library.Media)
 		if err != nil {
 			return Result{}, err
 		}
@@ -128,14 +143,34 @@ func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if err := writeFile(filepath.Join(opts.Dir, "manifest.json"), manifest); err != nil {
+	if err := writeFile(filepath.Join(staging, "manifest.json"), manifest); err != nil {
 		return Result{}, err
 	}
 	// It is in the result for a caller that wants to report the whole tree, but
 	// not in the manifest's own file list.
 	result.Files = append(result.Files, File{Path: "manifest.json", Bytes: int64(len(manifest))})
 	sort.Slice(result.Files, func(i, j int) bool { return result.Files[i].Path < result.Files[j].Path })
+
+	if err := commitDir(staging, opts.Dir); err != nil {
+		return Result{}, err
+	}
+	committed = true
+	result.Dir = opts.Dir
 	return result, nil
+}
+
+// commitDir moves the finished export onto its destination, which prepareDir
+// has already established is new or empty.
+func commitDir(staging, target string) error {
+	if entries, err := os.ReadDir(target); err == nil && len(entries) == 0 {
+		if err := os.Remove(target); err != nil {
+			return fmt.Errorf("export: replacing %s: %w", target, err)
+		}
+	}
+	if err := os.Rename(staging, target); err != nil {
+		return fmt.Errorf("export: moving the export into %s: %w", target, err)
+	}
+	return nil
 }
 
 func (r *Result) write(dir, name string, body []byte) error {
@@ -150,8 +185,8 @@ func (r *Result) write(dir, name string, body []byte) error {
 
 // writeMedia copies each blob to media/<sha256>, refusing to continue when one
 // is missing: a manifest that lists a hash with no bytes is a broken promise.
-func writeMedia(opts Options, media []model.Media) ([]File, error) {
-	dir := filepath.Join(opts.Dir, "media")
+func writeMedia(exportDir, mediaDir string, media []model.Media) ([]File, error) {
+	dir := filepath.Join(exportDir, "media")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("export: creating %s: %w", dir, err)
 	}
@@ -162,10 +197,18 @@ func writeMedia(opts Options, media []model.Media) ([]File, error) {
 			continue
 		}
 		seen[entry.SHA256] = true
-		source := filepath.Join(opts.MediaDir, filepath.FromSlash(entry.LocalPath))
+		source := filepath.Join(mediaDir, filepath.FromSlash(entry.LocalPath))
 		written, err := copyFile(source, filepath.Join(dir, entry.SHA256))
 		if err != nil {
 			return nil, fmt.Errorf("export: media %s for item %s: %w", entry.SHA256, entry.ItemID, err)
+		}
+		// A blob that does not match its own content address would be copied to
+		// media/<sha>, and the manifest would then record the hash of the corrupt
+		// bytes — so a later verification would pass and a restore would write it
+		// under a hash it does not have.
+		if written.SHA256 != entry.SHA256 {
+			return nil, fmt.Errorf("export: media for item %s is stored as %s but hashes to %s",
+				entry.ItemID, entry.SHA256, written.SHA256)
 		}
 		written.Path = path.Join("media", entry.SHA256)
 		files = append(files, written)
@@ -288,8 +331,8 @@ type itemEntry struct {
 	UpdatedAt   string  `json:"updated_at"`
 	DeletedAt   *string `json:"deleted_at,omitempty"`
 
-	Tags   []string `json:"tags"`
-	Spaces []string `json:"spaces"`
+	Tags   []string   `json:"tags"`
+	Spaces []spaceRef `json:"spaces"`
 
 	Details json.RawMessage `json:"details"`
 	OG      json.RawMessage `json:"og"`
@@ -300,6 +343,14 @@ type itemEntry struct {
 	Transcript *transcriptEntry `json:"transcript,omitempty"`
 	Highlights []highlightEntry `json:"highlights"`
 	Media      []mediaEntry     `json:"media"`
+}
+
+// spaceRef is a membership entry. The id is what a restore matches on: names are
+// not unique in the schema, so two Spaces called "Recipes" would otherwise be
+// indistinguishable and one membership would vanish.
+type spaceRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type transcriptEntry struct {
@@ -367,10 +418,10 @@ func spaceEntries(library model.Library) []spaceEntry {
 // itemEntries nests each item's tags, Spaces, highlights and media, because
 // library.json is meant to be read as one file per item, not joined by hand.
 func itemEntries(library model.Library) []itemEntry {
-	spaceNames := map[string][]string{}
+	spaceRefs := map[string][]spaceRef{}
 	for _, space := range library.Spaces {
 		for _, itemID := range library.SpaceItems[space.ID] {
-			spaceNames[itemID] = append(spaceNames[itemID], space.Name)
+			spaceRefs[itemID] = append(spaceRefs[itemID], spaceRef{ID: space.ID, Name: space.Name})
 		}
 	}
 	highlights := map[string][]highlightEntry{}
@@ -418,7 +469,7 @@ func itemEntries(library model.Library) []itemEntry {
 			SavedAt:     stamp(item.SavedAt),
 			UpdatedAt:   stamp(item.UpdatedAt),
 			Tags:        library.Tags[item.ID],
-			Spaces:      spaceNames[item.ID],
+			Spaces:      spaceRefs[item.ID],
 			Details:     rawOrEmpty(item.DetailsJSON),
 			OG:          rawOrEmpty(item.OGJSON),
 			ContentText: item.ContentText,
@@ -434,7 +485,7 @@ func itemEntries(library model.Library) []itemEntry {
 			entry.Tags = []string{}
 		}
 		if entry.Spaces == nil {
-			entry.Spaces = []string{}
+			entry.Spaces = []spaceRef{}
 		}
 		if entry.Highlights == nil {
 			entry.Highlights = []highlightEntry{}
