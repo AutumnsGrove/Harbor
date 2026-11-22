@@ -21,21 +21,23 @@ one gates and the pass condition that has to be met.
 | S6 | PDF text extraction in Go | phase 6 exit | 2 h | pending |
 | S7 | Port 8895 free | phase 0 start | 5 min | **changed-plan → 8897** |
 | S8 | Video transcript source | phase 7 exit | 90 min | pending |
-| S9 | Real Raindrop export sample | phase 5 start | 30 min | pending |
+| S9 | Real Raindrop export sample | phase 5 start | 30 min | **pass, plan corrected** |
 | S10 | Tailscale serve headers + Docker peer address | phase 0 start | 45 min | **pass** |
 | S11 | Nova as a dependency in CI/Docker | phase 0 exit | 45 min | **pass** |
 | S12 | Image decode memory + EXIF | phase 6 exit | 90 min | pending |
 
 S7, S9, S10 and S11 are cheap and can be done now (S9 is ten minutes in Raindrop's export screen
-plus sanitising). S1/S2 are prerequisites for writing the Worker; do them first — they were run on
-2026-11-19 and both passed, so phase 1 is unblocked.
+plus sanitising) — S7, S9, S10 and S11 are all answered now. S1/S2 are prerequisites for writing
+the Worker; they were run on 2026-11-19 and both passed, so phase 1 is unblocked.
 S3/S4/S6/S8 are cheap to defer until their phase, but each can invalidate a design assumption, so
 they must be answered *before* the phase's code is finished, not after.
 
 S5, S7, S10 and S11 were run on 2026-11-18. S7 changed the port; S5 and S10 passed in full; S11
 passed locally, and its GitHub Actions half was confirmed on 2026-11-19 by the first green `main`
 run and an anonymous pull on the potato. S1 and S2 were run on 2026-11-19 and both passed (S1 with a
-design correction about chunked bodies). The remaining spikes are still open.
+design correction about chunked bodies). S9 was run on 2026-11-22 against the real export and passed
+with one plan correction (highlights are prose, not structured rows; favourites are imported). The
+remaining spikes are still open.
 
 ---
 
@@ -330,6 +332,73 @@ they carry a note or colour?); the design's CSV mapping table is corrected to ma
 are listed.
 **Fail / surprise:** any field that cannot be mapped is a decision in design.md §5, not an importer
 guess.
+
+**Verdict (2026-11-22): pass, with one plan correction (highlights).**
+
+Run against `~/Downloads/3cad2d1c-677d-4697-a100-69c64d3e72f4.csv` (the later of the two exports;
+the earlier `0c682afb-…` file has the same columns, 1,426 rows and the same shapes). Both were left
+where they are; nothing raw is in the repository.
+
+**Columns — exactly the eleven the plan predicted, in this order, no unknowns:**
+
+```
+id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite
+```
+
+1,476 rows, 1,476 distinct `id`s and 1,476 distinct `url`s (nothing to deduplicate in this export).
+UTF-8, **no BOM, no CRLF**, `\n` line endings.
+
+| Field | What it actually is | Count in 1,476 rows |
+|---|---|---|
+| `id` | Raindrop's numeric id as a string | 1,476 |
+| `title` | plain text, no newlines; commas and `"` appear | 1,476 (none empty) |
+| `note` | Markdown-ish free text, embedded newlines, 4 end with a trailing newline | 376 |
+| `excerpt` | page description; often truncated ending in `...`, often with a blank-line paragraph break | 1,310 (237 end in `...`, 182 contain `\n\n`) |
+| `url` | full URL, query strings kept (567 have a query, 16 a fragment, 26 a `utm_`), 3 are `http://` | 1,476 |
+| `folder` | **one flat collection name**, never a path — 24 distinct values, incl. `Read Later` and `Unsorted` | 1,476 |
+| `tags` | one cell, `, `-separated, no newlines, no trailing comma; names may contain spaces, and case is inconsistent (`3D` and `3d` both exist) | 1,290 rows, 2,134 distinct tags |
+| `created` | RFC 3339 with milliseconds and `Z`: `2026-03-08T21:44:42.849Z` | 1,476 (one format) |
+| `cover` | an absolute image URL (`https` 1,287, `http` 38); never a local path | 1,325 |
+| `highlights` | **free prose, not JSON** — see below | 98 cells, 268 blocks |
+| `favorite` | the literal strings `true`/`false` | 6 `true` |
+
+567 rows contain non-ASCII (curly quotes, em/en dashes, emoji in titles, accented and CJK text).
+
+**Highlights: the plan was wrong.** The plan's table assumed `quote`, `note` and `colour` columns.
+Reality is a single prose cell with no colour, no delimiter and no per-highlight annotation:
+
+- Blocks are `Highlight:<quote text>` separated by a blank line, i.e. `\n\nHighlight:`.
+- 268 blocks across 98 cells (1–19 per cell; median cell 351 bytes, longest 2,372).
+- The quote text inside a block may itself contain blank lines and single newlines, so the **only**
+safe split is a blank line *followed by* `Highlight:` — never a bare blank line. Splitting on `\n\n`
+alone turns multi-paragraph quotes into fragments (`Be human.` becomes its own block).
+- Some blocks are scraped page junk rather than prose (one cell ends `… \n  Subscribe`), and some are
+very short (`Highlight:unusual`). There is no way to tell a quote from the user's own annotation, so
+nothing is guessed: **one `highlights` row per block**, the quote is the block text minus the
+`Highlight:` prefix, `note` stays empty, and `anchor_json` says `{"source":"imported","index":n}`.
+Rejoining an item's rows in index order with `\n\nHighlight:` reproduces the original cell exactly,
+so the import is lossless.
+
+**Favourites are now imported.** With the count known (6), Autumn asked for favourites to be a real
+thing rather than a dry-run statistic: they land in a seeded manual Space named **Favourites**
+(`spaces.slug = 'favourites'`, the same shape as Read later), created by the import phase's
+migration. The item-level star toggle and the Space's UI arrive with phase 9's Space work.
+
+**The HTML export was not needed to answer this.** Only CSVs were exported; phase 12a already writes
+Netscape HTML and phase 5's round-trip test uses that writer, so the HTML importer is written
+against the documented format plus that writer rather than a second Raindrop file.
+
+**Fixture.** `server/internal/import/testdata/raindrop/real-shape.csv` carries these shapes (15 rows:
+multi-line notes, doubled quotes, a noisy URL with `utm_`/fragment, `http` cover, 1/2/4-block
+highlight cells, a block with internal newlines, a 9-character block, scraped-junk text, unicode and
+emoji, an empty title, a duplicate URL, slack in the tag cell). It is **hand-built to the observed
+shapes, not a mechanical sanitisation of her export**: the repository is public, so her note and
+highlight prose is not committed even though the spike suggested keeping it. All URLs are
+`example.com`.
+
+**Consequence:** design.md §5 and plans/05 now carry the corrected mapping (highlights, favourites,
+flat folders). The parser must be header-driven and report unknown columns; a missing header is a
+typed error, not a positional guess.
 
 ---
 

@@ -227,9 +227,12 @@ Polaris opening `harbor.db` directly.
 8. **Video transcript source** — prove caption fetching from the potato's residential IP for a few
    real videos, including a no-caption case and a non-English track. Decide whether a bundled
    yt-dlp is needed or the caption endpoint alone is enough.
-9. **Real Raindrop export** — export the actual library once, commit a sanitised sample, and confirm
-   the CSV columns (`id`, `favorite`, folder separators, the highlights field format) before the
-   importer's tests are written. Gates phase 5.
+9. **Real Raindrop export** — **verified 2026-11-22 (pass; highlights corrected)**: the columns are
+   `id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite`, folders are flat, and
+   `highlights` is prose (`Highlight:`-prefixed blocks separated by a blank line) rather than
+   structured rows — so one `highlights` row per block. `favorite` is imported into a seeded
+   **Favourites** Space. See [plans/spikes.md](plans/spikes.md#s9--a-real-raindrop-export). Gates
+   phase 5.
 10. **Tailscale serve + Docker identity** — **verified 2026-11-18 (pass)**: a forged
     `Tailscale-User-Login` is overwritten, the Docker peer is the bridge gateway (`172.17.0.1`),
     and host-local callers carry no identity header. Gates the phase 0 identity-lock design.

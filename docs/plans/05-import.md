@@ -1,6 +1,6 @@
 # Phase 5 — Import: the old library moves in
 
-**Status:** planned · **Design refs:** [§5](../design.md#5-save-path) (Import),
+**Status:** planned, gate [S9](spikes.md#s9--a-real-raindrop-export) answered 2026-11-22 · **Design refs:** [§5](../design.md#5-save-path) (Import),
 [I1](../open-questions.md), [§9](../design.md#9-ui-sveltekit-embedded) (first run)
 **Depends on:** phases 2, 3 (the tag write path) and **12a** (snapshot, backup and the restore
 drill must exist before the irreplaceable data does) · **Gate:**
@@ -33,7 +33,7 @@ server/internal/import/
   html.go          Netscape bookmark HTML (nested <DL>, folders, ADD_DATE, ICON)
   import.go        the driver: parse → canonicalise → merge → space assignment → enqueue
   progress.go      counters + resume checkpoint (imported URL set is the idempotence key)
-  testdata/raindrop/*.csv     real-shaped fixtures (sanitised from the S9 export): normal, folded, unicode, broken rows
+  testdata/raindrop/*.csv     fixtures in the real shapes (real-shape.csv is hand-built, S9), plus synthetic edge cases: BOM, CRLF, no header, broken rows
   testdata/netscape/*.html    nested folders, duplicates, no dates
 server/cmd/harbor/import.go    CLI flags: --dry-run, --no-enrich, --limit, --report
 server/internal/httpapi/import.go   start/status/cancel, streams progress
@@ -43,23 +43,27 @@ web/src/routes/first-run/+page.svelte         now live: Import or first link
 
 ## Raindrop CSV mapping
 
+Confirmed against a real export by [S9](spikes.md#s9--a-real-raindrop-export) on 2026-11-22: the
+columns are exactly `id,title,note,excerpt,url,folder,tags,created,cover,highlights,favorite`, no
+unknowns, one flat `folder` per row, and a `highlights` cell that is prose (see below).
+
 | CSV column | Harbor |
 |---|---|
 | `title` | `items.title` (fallback: extracted title later) |
 | `note` | `items.note` |
-| `excerpt` | appended to note as a quoted block, or `og_json.excerpt` — **decide: `og_json`**, keep the user's note clean |
-| `url` | canonicalised into `items.url` |
-| `folder` | manual Space (name preserved) |
+| `excerpt` | `og_json.excerpt` — keep the user's note clean |
+| `url` | canonicalised into `items.url`; the raw value stays in `items.url_original` |
+| `folder` | manual Space (name preserved); flat, because the export has no nesting |
 | `tags` | `item_tags` with `source='manual'` (they are the user's, not the model's), written through the phase 3 tag write path so aliases and canonical names apply |
-| `created` | `items.created_at` **and** `items.saved_at` (preserved; this is what makes the import feel like the old library and keeps it out of "recent") |
+| `created` | `items.created_at` **and** `items.saved_at` (preserved; this is what makes the import feel like the old library and keeps it out of "recent"); RFC 3339 with milliseconds |
 | `cover` | `og_json.cover` (the image itself is fetched in phase 6 if it is a URL) |
-| `highlights` | `highlights` rows: `quote`, `note`, colour default |
+| `highlights` | one `highlights` row per `Highlight:` block: `quote` = the block text without the prefix, `note` empty, `anchor_json` marked imported (S9: no colour, no per-highlight note, no delimiter — split only on a blank line *followed by* `Highlight:`) |
 | `id` | `items.import_ref` (idempotence aid and provenance) |
-| `favorite` | reported in the dry-run summary, not imported |
+| `favorite` | `space_items` membership of the seeded manual Space **Favourites** (`slug='favourites'`), and sticky on merge |
 
 Unknown columns are ignored and listed in the report, so a schema change in Raindrop's export is
-visible rather than silent. This table is the design's recollection of the export; **spike S9
-replaces it with the real column list before any importer test is written.** A row with no URL and no title is skipped and counted.
+visible rather than silent. A row with no URL and no title is skipped and counted. A missing header
+is a typed error naming the columns it expected, never a positional guess.
 
 ## Tests first
 
@@ -74,9 +78,9 @@ replaces it with the real column list before any importer test is written.** A r
 4. **Netscape HTML**: nested `<DL>` folders create nested manual Spaces (or a flat space with a
    `/`-joined name — **decide: flat, name path-joined**, because nested Space UI does not exist);
    `ADD_DATE` parsed; entities decoded; a document with no `<DT>` doesn't hang.
-5. **Highlights**: a CSV row with two highlights creates two `highlights` rows anchored to the item
-   with `anchor_json` marked `imported` (no text to anchor against yet); they render on the item page
-   without a reader.
+5. **Highlights**: a CSV row with two `Highlight:` blocks creates two `highlights` rows anchored to
+   the item with `anchor_json` marked `imported` (no text to anchor against yet); they render on the
+   item page without a reader. A block containing its own blank lines stays **one** row.
 6. **Resumability**: cancel at row 500 of 1000, restart, and the run continues without duplicates and
    without re-enriching the first 500 beyond the idempotence rule.
 7. **Report**: counts of imported / merged / skipped / errors, with the first N error reasons, and a
@@ -143,7 +147,12 @@ Demo, with the real subscription data:
 
 ## Build-time decisions to record
 
-- `excerpt` destination (`og_json`).
-- Folder naming: path-joined flat names.
-- Whether import sets `source='import'` (yes, per design.md §7) and how the source filter shows it.
+- `excerpt` destination: `og_json.excerpt`.
+- Folder naming: flat, name preserved (the real export has no nesting; a Netscape import path-joins).
+- Highlights: one row per `Highlight:` block, quote = block minus prefix, `anchor_json`
+  `{"source":"imported","index":n}`; no colour guessing, no annotation guessing (S9).
+- Favourites are a real thing, not a report line: the phase's migration seeds a manual Space named
+  Favourites (`slug='favourites'`), imported `favorite=true` rows join it, and merging a favourite
+  never removes it. The star toggle and Space UI come with phase 9.
+- Import sets `source='import'` (design.md §7) and the source filter shows it.
 - The `--no-enrich` default and the documented cost of a full enrich of an import.

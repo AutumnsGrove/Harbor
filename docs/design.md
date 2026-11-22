@@ -426,10 +426,15 @@ and merges** into it instead of creating a second one. The pre-canonicalisation 
 `Settings → Import` (and a CLI for big files) accepts **Raindrop CSV** and **Netscape HTML**:
 
 - CSV: title, note, excerpt, URL, tags, created date, cover, and highlights are preserved
-  (Raindrop's own `id` becomes `import_ref`; `favorite` is reported, not imported — the exact column
-  set is confirmed against a real export in spike S9); Raindrop collections become **manual
-  Spaces**. Imported items get `saved_at = created_at`, so they sit at their historical position
-  instead of flooding "recent".
+  (Raindrop's own `id` becomes `import_ref`); Raindrop collections become **manual
+  Spaces**, and a `favorite` row joins a seeded manual Space named **Favourites**. The exact column
+  set is confirmed against a real export in spike S9: `id,title,note,excerpt,url,folder,tags,created,
+  cover,highlights,favorite`, one flat folder per row. `highlights` is **prose**, not structured
+  rows — a cell is one or more `Highlight:`-prefixed blocks separated by a blank line, with no
+  colour and no separate annotation — so each block becomes one `highlights` row whose quote is the
+  block text, anchored as `imported`, and rejoining an item's rows reproduces the cell. Imported
+  items get `saved_at = created_at`, so they sit at their historical position instead of flooding
+  "recent".
 - HTML: URL, title, and folder; folders become manual Spaces.
 - Import is idempotent by canonical URL and merges like a re-save, so running it twice is safe.
 - Imported items enter the normal enrichment queue — no special pipeline.

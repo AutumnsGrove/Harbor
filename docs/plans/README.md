@@ -197,20 +197,20 @@ happened, and `make check` is green on `main`.
 
 | # | Phase | State |
 |---|---|---|
-| — | Spikes | ◐ S1, S2, S5, S7, S10, S11 answered (S7 → 8897); S3, S4, S6, S8, S9, S12 pending |
+| — | Spikes | ◐ S1, S2, S5, S7, S9, S10, S11 answered (S7 → 8897); S3, S4, S6, S8, S12 pending |
 | 0 | Foundations | ✅ deployed 2026-11-18, updated to `r56.4c93aa8` and rollback-drilled 2026-11-19 |
 | 1 | Worker intake | ✅ deployed 2026-11-19; exit demo run, `/presign` still needs its R2 credential |
 | 2 | Core library | ◐ store, Worker ingest, items API, pending window and the library UI are in the tree and green; the potato demo and scheduler skeleton outstanding |
-| 3 | Enrichment | ☐ |
+| 3 | Enrichment | ◐ code complete and merged, 95.1% kind accuracy on the 41-case scored set; the potato demo is outstanding |
 | 4 | Front doors | ☐ |
-| 5 | Import | ☐ |
+| 5 | Import | ☐ S9 answered 2026-11-22 (highlights are prose, favourites imported); parsers not started |
 | 6 | Images + documents | ☐ |
 | 7 | Transcripts | ☐ |
 | 8 | Reader + highlights | ☐ |
 | 9 | Tags + Spaces | ☐ |
 | 10 | Hybrid search | ☐ |
 | 11 | Archive + link rot | ☐ |
-| 12a | Backup, restore drill, export (before first real import) | ☐ |
+| 12a | Backup, restore drill, export (before first real import) | ◐ code complete and merged; the potato drill with a real library is outstanding |
 | 12b | Status page, maintenance, runbook | ☐ |
 
 ---
