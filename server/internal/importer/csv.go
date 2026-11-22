@@ -150,6 +150,14 @@ func NewCSVReader(src io.Reader) (*CSVReader, error) {
 // (plans/05) rather than silently dropped.
 func (cr *CSVReader) UnknownColumns() []string { return cr.unknown }
 
+// CarriesHighlights says whether the file has a highlights column at all. A
+// file without one must not clear the highlights an earlier import wrote: the
+// HTML export has none, and it is imported over the same library.
+func (cr *CSVReader) CarriesHighlights() bool {
+	_, ok := cr.index["highlights"]
+	return ok
+}
+
 // Warnings are file-level findings — a duplicated column — as opposed to a
 // row's own.
 func (cr *CSVReader) Warnings() []string { return cr.warns }
