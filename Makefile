@@ -13,7 +13,7 @@ BIN     := bin/harbor
 VERSION ?= r$(shell git rev-list --count HEAD 2>/dev/null || echo 0).$(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X $(MODULE)/server/internal/build.version=$(VERSION)
 
-.PHONY: version web build dev test fuzz fmt-check vet web-check worker-check watcher-check packaging docker docker-run docker-check deploy check clean enrich-score enrich-record
+.PHONY: version web build dev test fuzz fmt-check vet web-check worker-check watcher-check packaging docker docker-run docker-check deploy check clean drill enrich-score enrich-record
 
 version:
 	@echo $(VERSION)
@@ -48,6 +48,12 @@ MIN ?= 20
 enrich-score: export OPENROUTER_API_KEY ?= $(shell jq -r '.openrouter.key // empty' "$(PI_AUTH)" 2>/dev/null)
 enrich-score:
 	$(GO) run ./server/cmd/enrichscore -dir $(SCORED_SET) -min $(MIN)
+
+# The phase-12a restore drill: a library, a backup, the data directory destroyed,
+# a restore, and an export that agrees with it. Not part of `check`, because it
+# runs a server and the point is the timing a human records (docs/runbook.md).
+drill:
+	./scripts/drill.sh
 
 enrich-record:
 	$(GO) run ./server/cmd/enrichscore -dir $(SCORED_SET) -record server/internal/enrichscore/testdata/sources.txt
