@@ -1,0 +1,124 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"path/filepath"
+	"time"
+
+	"github.com/AutumnsGrove/Harbor/server/internal/backup"
+	"github.com/AutumnsGrove/Harbor/server/internal/build"
+	"github.com/AutumnsGrove/Harbor/server/internal/store"
+)
+
+const backupUsage = `harbor backup — snapshot, compress and keep the database.
+
+Usage:
+  harbor backup [--keep N]   take a backup now, then prune the old ones
+  harbor backup --list       list the backups, newest first
+  harbor backup --verify     decompress and integrity-check every backup
+
+Backups live in data/backups as harbor-<UTC>.db.zst. The last 30 are kept, and
+one that cannot be verified is never deleted: a broken old backup may be the only
+copy that opens, and the operator should find out rather than lose it.
+`
+
+// backupCommand is the nightly job and the operator's tool (plans/12a).
+func backupCommand(ctx context.Context, getenv func(string) string, args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	list := flags.Bool("list", false, "list the backups")
+	verify := flags.Bool("verify", false, "verify every backup")
+	keep := flags.Int("keep", backup.DefaultKeep, "how many backups to keep")
+	if err := flags.Parse(args); err != nil {
+		return fmt.Errorf("%s\n%s", err, backupUsage)
+	}
+	if flags.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q\n\n%s", flags.Arg(0), backupUsage)
+	}
+	if *list && *verify {
+		return fmt.Errorf("--list and --verify are separate runs\n\n%s", backupUsage)
+	}
+
+	cfg, err := build.Load(getenv)
+	if err != nil {
+		return fmt.Errorf("configuration is not usable:\n%w", err)
+	}
+	dir := filepath.Join(cfg.DataDir, "backups")
+
+	switch {
+	case *list:
+		entries, err := backup.List(dir)
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			fmt.Fprintf(stdout, "no backups in %s\n", dir)
+			return nil
+		}
+		for _, entry := range entries {
+			fmt.Fprintf(stdout, "%s  %8s  %s\n",
+				entry.Date.UTC().Format(time.RFC3339), humanSize(entry.Bytes), entry.Name)
+		}
+		return nil
+
+	case *verify:
+		checks, err := backup.VerifyAll(dir)
+		if err != nil {
+			return err
+		}
+		if len(checks) == 0 {
+			fmt.Fprintf(stdout, "no backups in %s\n", dir)
+			return nil
+		}
+		failed := 0
+		for _, check := range checks {
+			if check.Err != nil {
+				failed++
+				fmt.Fprintf(stdout, "%s  %8s  FAILED: %v\n",
+					check.Entry.Date.UTC().Format(time.RFC3339), humanSize(check.Entry.Bytes), check.Err)
+				continue
+			}
+			fmt.Fprintf(stdout, "%s  %8s  ok\n",
+				check.Entry.Date.UTC().Format(time.RFC3339), humanSize(check.Entry.Bytes))
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d of %d backups did not verify", failed, len(checks))
+		}
+		return nil
+	}
+
+	library, err := store.Open(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer library.Close()
+
+	// Prune inside Create, so a run either keeps a month of good backups or says
+	// why it could not.
+	entries, err := backup.Create(ctx, library, dir, time.Now, *keep)
+	if err != nil {
+		return err
+	}
+	newest := entries[0]
+	fmt.Fprintf(stdout, "backed up %s into %s\n", humanSize(newest.Bytes), newest.Path)
+	fmt.Fprintf(stdout, "  %d backup(s) kept\n", len(entries))
+	return nil
+}
+
+func humanSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%dB", bytes)
+	}
+	value := float64(bytes)
+	for _, suffix := range []string{"KiB", "MiB", "GiB"} {
+		value /= unit
+		if value < unit {
+			return fmt.Sprintf("%.1f%s", value, suffix)
+		}
+	}
+	return fmt.Sprintf("%.1fTiB", value/unit)
+}

@@ -8,6 +8,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.14.0
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/google/uuid v1.6.0
+	github.com/klauspost/compress v1.20.5
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/net v0.62.0
 	modernc.org/sqlite v1.62.0

@@ -143,9 +143,13 @@ Rules that make it a real export rather than a data dump:
 
 **Backup and restore**
 
-- [ ] `snapshot.go` with temp → fsync → rename, integrity check, and a pre-update hook reused by the
-      update watcher from phase 0.
-- [ ] zstd compression, 30-daily retention, and a listing that shows date/size/version/integrity.
+- [x] `snapshot.go` with temp → fsync → rename, integrity check, and a pre-update hook reused by the
+      update watcher from phase 0 — landed in phase 0 as `store.Snapshot`/`store.Verify`; phase 12 adds
+      only the compressed backup on top, and reuses the verification for `--verify` and retention.
+- [x] zstd compression, 30-daily retention, and a listing that shows date, size and integrity —
+      `harbor backup`, `--list`, `--verify`. The listing shows date and size; integrity is what
+      `--verify` reports rather than a column, because a stored integrity result is a claim, not a
+      check. 2026-11-22.
 - [ ] Upload via the Worker's token-gated route (the potato holds no R2 credentials) with retry and a
       `last_backup` timestamp that the Status page and `/api/status` read.
 - [ ] `deploy/harbor-rsync.sh` for the MacBook Air (host-side; the distroless image has no rsync),
