@@ -80,21 +80,21 @@ func TestCreateWritesAVerifiableBackup(t *testing.T) {
 	snapshotter, dataDir := realSnapshotter(t)
 	backups := filepath.Join(dataDir, "backups")
 
-	entries, err := Create(context.Background(), snapshotter, backups, clock(fixedNow), DefaultKeep)
+	result, err := Create(context.Background(), snapshotter, backups, clock(fixedNow), DefaultKeep)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("entries = %+v, want one", entries)
+	if len(result.Kept) != 1 {
+		t.Fatalf("result = %+v, want one", result)
 	}
 	want := "harbor-20261122T180000Z.db.zst"
-	if entries[0].Name != want {
-		t.Errorf("name = %q, want %q", entries[0].Name, want)
+	if result.Kept[0].Name != want {
+		t.Errorf("name = %q, want %q", result.Kept[0].Name, want)
 	}
 
 	// The compressed file must be a database that passes integrity_check, which
 	// is the only thing that makes calling it a backup honest.
-	restored := decompress(t, entries[0].Path)
+	restored := decompress(t, result.Kept[0].Path)
 	if err := store.Verify(restored); err != nil {
 		t.Fatalf("the backup does not verify: %v", err)
 	}
@@ -131,18 +131,21 @@ func TestCreateKeepsThirtyAndPrunesTheRest(t *testing.T) {
 		}
 	}
 
-	entries, err := Create(context.Background(), snapshotter, backups, clock(fixedNow), DefaultKeep)
+	result, err := Create(context.Background(), snapshotter, backups, clock(fixedNow), DefaultKeep)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if len(entries) != DefaultKeep {
-		t.Errorf("kept %d backups, want %d", len(entries), DefaultKeep)
+	if len(result.Kept) != DefaultKeep {
+		t.Errorf("kept %d backups, want %d", len(result.Kept), DefaultKeep)
 	}
-	if entries[0].Date != fixedNow {
-		t.Errorf("newest = %v, want the one just written", entries[0].Date)
+	if result.Kept[0].Date != fixedNow {
+		t.Errorf("newest = %v, want the one just written", result.Kept[0].Date)
+	}
+	if len(result.Failed) != 0 {
+		t.Errorf("failures = %+v, want none", result.Failed)
 	}
 	oldest := fixedNow.AddDate(0, 0, -31)
-	for _, entry := range entries {
+	for _, entry := range result.Kept {
 		if entry.Date.Before(oldest) || entry.Date.Equal(oldest) {
 			t.Errorf("the oldest backup survived: %v", entry.Date)
 		}
@@ -159,16 +162,20 @@ func TestPruneKeepsABackupItCannotVerify(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	survivors, err := Prune(dir, 1, func(path string) error {
+	result, err := Prune(dir, 1, func(path string) error {
 		return fmt.Errorf("integrity_check on %s: not a database", path)
 	})
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
-	if len(survivors) != 3 {
-		t.Errorf("survivors = %d, want all three kept", len(survivors))
+	if len(result.Kept) != 3 {
+		t.Errorf("kept = %d, want all three", len(result.Kept))
 	}
-	for _, entry := range survivors {
+	// Kept, but not silently: each one comes back with its reason.
+	if len(result.Failed) != 2 {
+		t.Errorf("failures = %+v, want the two the keep could not verify", result.Failed)
+	}
+	for _, entry := range result.Kept {
 		if _, err := os.Stat(entry.Path); err != nil {
 			t.Errorf("%s was deleted", entry.Name)
 		}
@@ -183,12 +190,12 @@ func TestPruneDeletesTheOldOnesItCanVerify(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	survivors, err := Prune(dir, 1, func(string) error { return nil })
+	result, err := Prune(dir, 1, func(string) error { return nil })
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
-	if len(survivors) != 1 {
-		t.Fatalf("survivors = %+v, want the newest only", survivors)
+	if len(result.Kept) != 1 || len(result.Failed) != 0 {
+		t.Fatalf("result = %+v, want the newest only and no failures", result)
 	}
 	left, err := List(dir)
 	if err != nil {
@@ -228,17 +235,53 @@ func TestListOfAMissingDirectoryIsEmpty(t *testing.T) {
 func TestVerifyCatchesACorruptBackup(t *testing.T) {
 	snapshotter, dataDir := realSnapshotter(t)
 	backups := filepath.Join(dataDir, "backups")
-	entries, err := Create(context.Background(), snapshotter, backups, clock(fixedNow), DefaultKeep)
+	result, err := Create(context.Background(), snapshotter, backups, clock(fixedNow), DefaultKeep)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	// Truncate the compressed file: not a valid zstd stream any more.
-	if err := os.Truncate(entries[0].Path, 20); err != nil {
+	if err := os.Truncate(result.Kept[0].Path, 20); err != nil {
 		t.Fatal(err)
 	}
-	if err := Verify(entries[0].Path); err == nil {
+	if err := Verify(result.Kept[0].Path); err == nil {
 		t.Fatal("verify accepted a truncated backup")
+	}
+}
+
+func TestVerifyRejectsAZeroByteBackup(t *testing.T) {
+	// An empty zstd stream decompresses to nothing, and SQLite reports
+	// integrity_check "ok" for an empty file — so without this check a backup
+	// containing nothing would pass as a good one.
+	empty := filepath.Join(t.TempDir(), "harbor-20261122T180000Z.db.zst")
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(empty, encoder.EncodeAll(nil, nil), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	encoder.Close()
+	if err := Verify(empty); err == nil {
+		t.Fatal("verify accepted a zero-byte backup")
+	}
+}
+
+func TestVerifyRejectsZstdOfSomethingThatIsNotADatabase(t *testing.T) {
+	// A valid stream of valid bytes is not a backup. The header check is what
+	// separates the two, because integrity_check cannot.
+	path := filepath.Join(t.TempDir(), "harbor-20261122T180000Z.db.zst")
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := encoder.EncodeAll([]byte(strings.Repeat("not a database", 100)), nil)
+	encoder.Close()
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(path); err == nil {
+		t.Fatal("verify accepted a compressed text file")
 	}
 }
 

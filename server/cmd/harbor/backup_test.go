@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,6 +90,43 @@ func TestBackupVerifyFailsOnACorruptBackup(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "FAILED") || !strings.Contains(err.Error(), "did not verify") {
 		t.Errorf("stdout = %q, err = %v", stdout.String(), err)
+	}
+}
+
+func TestBackupFailsLoudWhenAnOldBackupCannotBeVerified(t *testing.T) {
+	// Retention keeps a broken old backup — it may be the only copy that opens —
+	// but a nightly job that says nothing about it is a job nobody can trust, so
+	// the run names it and exits non-zero.
+	dataDir := t.TempDir()
+	dir := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for day := 1; day <= 31; day++ {
+		name := fmt.Sprintf("harbor-202610%02dT120000Z.db.zst", day)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("not a backup"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"backup"}, exportEnv(t, dataDir), &stdout)
+	if err == nil {
+		t.Fatalf("backup over 31 unverifiable files exited zero:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "did not verify and was kept") {
+		t.Errorf("stdout does not name the kept-broken backups:\n%s", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "failed verification") {
+		t.Errorf("err = %v, want a loud failure", err)
+	}
+	// And none of them were deleted.
+	left, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(left) != 32 {
+		t.Errorf("backups dir holds %d files, want the new one plus the 31 kept", len(left))
 	}
 }
 

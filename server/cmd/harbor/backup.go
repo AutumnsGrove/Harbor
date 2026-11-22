@@ -98,13 +98,27 @@ func backupCommand(ctx context.Context, getenv func(string) string, args []strin
 
 	// Prune inside Create, so a run either keeps a month of good backups or says
 	// why it could not.
-	entries, err := backup.Create(ctx, library, dir, time.Now, *keep)
+	result, err := backup.Create(ctx, library, dir, time.Now, *keep)
 	if err != nil {
 		return err
 	}
-	newest := entries[0]
+	if len(result.Kept) == 0 {
+		return fmt.Errorf("backup: the run wrote nothing into %s", dir)
+	}
+	newest := result.Kept[0]
 	fmt.Fprintf(stdout, "backed up %s into %s\n", humanSize(newest.Bytes), newest.Path)
-	fmt.Fprintf(stdout, "  %d backup(s) kept\n", len(entries))
+	fmt.Fprintf(stdout, "  %d backup(s) kept\n", len(result.Kept))
+
+	// A backup that failed verification is kept and reported: it may be the only
+	// copy that opens, so deleting it is wrong, and staying quiet about it is
+	// worse. The run fails, because the timer's log is the only place anyone
+	// will look.
+	for _, failure := range result.Failed {
+		fmt.Fprintf(stdout, "  warning: %s did not verify and was kept: %v\n", failure.Entry.Name, failure.Err)
+	}
+	if len(result.Failed) > 0 {
+		return fmt.Errorf("%d backup(s) failed verification and were kept", len(result.Failed))
+	}
 	return nil
 }
 

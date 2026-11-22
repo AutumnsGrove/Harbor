@@ -63,7 +63,8 @@ func decompressToTemp(path string) (string, func(), error) {
 		return "", nil, fmt.Errorf("backup: creating a verification file: %w", err)
 	}
 	cleanup := func() { _ = os.Remove(out.Name()) }
-	if _, err := io.Copy(out, decoder); err != nil {
+	written, err := io.Copy(out, decoder)
+	if err != nil {
 		_ = out.Close()
 		cleanup()
 		return "", nil, fmt.Errorf("backup: decompressing %s: %w", path, err)
@@ -72,5 +73,29 @@ func decompressToTemp(path string) (string, func(), error) {
 		cleanup()
 		return "", nil, fmt.Errorf("backup: closing the verification file: %w", err)
 	}
+	// Zero bytes is not an empty database, it is an empty file — and SQLite
+	// happily reports integrity_check "ok" for one. So does an empty zstd
+	// stream, which io.Copy copies without complaint.
+	if written == 0 {
+		cleanup()
+		return "", nil, fmt.Errorf("backup: %s decompresses to nothing", path)
+	}
+	// A real database starts with SQLite's header. This catches a file that is
+	// a valid zstd stream of something else, which integrity_check cannot.
+	head := make([]byte, len(sqliteHeader))
+	file, err := os.Open(out.Name())
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("backup: reading back %s: %w", path, err)
+	}
+	read, err := io.ReadFull(file, head)
+	_ = file.Close()
+	if err != nil || string(head[:read]) != sqliteHeader {
+		cleanup()
+		return "", nil, fmt.Errorf("backup: %s is not a SQLite database", path)
+	}
 	return out.Name(), cleanup, nil
 }
+
+// sqliteHeader is the first 16 bytes of every SQLite file.
+const sqliteHeader = "SQLite format 3\x00"

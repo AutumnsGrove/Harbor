@@ -42,10 +42,23 @@ type Entry struct {
 	Bytes int64
 }
 
+// Failure is a backup that was kept because it could not be verified. Keeping it
+// is right; keeping it silently is not, so it comes back with its reason.
+type Failure struct {
+	Entry Entry
+	Err   error
+}
+
+// Result is what a backup run did.
+type Result struct {
+	Kept   []Entry   // newest first, exactly what is on disk now
+	Failed []Failure // old backups retained because verification failed
+}
+
 // Create takes a snapshot, compresses it into dir, and prunes the old ones.
 // The snapshot is verified before it is compressed, and the compressed file is
 // renamed into place, so dir never holds a backup that looks valid and is not.
-func Create(ctx context.Context, store Store, dir string, now func() time.Time, keep int) ([]Entry, error) {
+func Create(ctx context.Context, store Store, dir string, now func() time.Time, keep int) (Result, error) {
 	if keep <= 0 {
 		keep = DefaultKeep
 	}
@@ -53,14 +66,14 @@ func Create(ctx context.Context, store Store, dir string, now func() time.Time, 
 		now = time.Now
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("backup: creating %s: %w", dir, err)
+		return Result{}, fmt.Errorf("backup: creating %s: %w", dir, err)
 	}
 
 	// The snapshot is a plain SQLite file; it is compressed and then removed, so
 	// the only lasting copy is the .zst.
 	temp, err := os.CreateTemp(dir, ".snapshot-*.db")
 	if err != nil {
-		return nil, fmt.Errorf("backup: reserving a snapshot name: %w", err)
+		return Result{}, fmt.Errorf("backup: reserving a snapshot name: %w", err)
 	}
 	tempPath := temp.Name()
 	_ = temp.Close()
@@ -68,13 +81,13 @@ func Create(ctx context.Context, store Store, dir string, now func() time.Time, 
 	defer func() { _ = os.Remove(tempPath) }()
 
 	if err := store.Snapshot(ctx, tempPath); err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
 	name := prefix + now().UTC().Format(nameLayout) + suffix
 	dest := filepath.Join(dir, name)
 	if err := compress(tempPath, dest); err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	return Prune(dir, keep, Verify)
 }
@@ -179,29 +192,30 @@ func parseName(name string) (time.Time, bool) {
 // Prune keeps the newest keep backups and deletes the rest — except any it
 // cannot verify, which it leaves alone and reports. Deleting the last readable
 // copy because it was old is how a backup system loses data quietly.
-func Prune(dir string, keep int, verify func(string) error) ([]Entry, error) {
+func Prune(dir string, keep int, verify func(string) error) (Result, error) {
 	if keep <= 0 {
 		keep = DefaultKeep
 	}
 	backups, err := List(dir)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
-	survivors := backups
+	result := Result{Kept: backups}
 	if len(backups) > keep {
-		survivors = backups[:keep]
+		result.Kept = backups[:keep]
 		for _, old := range backups[keep:] {
 			if err := verify(old.Path); err != nil {
 				// A backup that cannot be verified is not safe to delete: it may
 				// be the only copy that opens, and the operator needs to know it
 				// is broken rather than find it gone.
-				survivors = append(survivors, old)
+				result.Kept = append(result.Kept, old)
+				result.Failed = append(result.Failed, Failure{Entry: old, Err: err})
 				continue
 			}
 			if err := os.Remove(old.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("backup: deleting %s: %w", old.Path, err)
+				return Result{}, fmt.Errorf("backup: deleting %s: %w", old.Path, err)
 			}
 		}
 	}
-	return survivors, nil
+	return result, nil
 }
