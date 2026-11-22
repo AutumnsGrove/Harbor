@@ -143,9 +143,12 @@ func backupCommand(ctx context.Context, getenv func(string) string, args []strin
 	return nil
 }
 
-// uploadBackup sends the new snapshot through the Worker — the potato holds no R2
-// credential (design.md §4) — and removes the R2 copies of what was just pruned,
-// so both sides keep the same thirty.
+// uploadBackup sends the new snapshot through the Worker (the potato holds no R2
+// credential, design.md §4), then trims R2 to its own window.
+//
+// The remote side is not derived from the local directory or from what this run
+// pruned: those copies exist for the case where this disk is gone, so their
+// retention is decided from the remote listing alone.
 func uploadBackup(ctx context.Context, cfg build.Config, result backup.Result, schema int, stdout io.Writer) error {
 	if cfg.WorkerURL == "" || cfg.WorkerToken == "" {
 		return fmt.Errorf("backup --upload needs %s and %s", build.EnvWorkerURL, build.EnvWorkerToken)

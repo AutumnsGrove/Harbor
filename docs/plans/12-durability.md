@@ -152,8 +152,10 @@ Rules that make it a real export rather than a data dump:
       check. 2026-11-22.
 - [~] Upload via the Worker's token-gated route (the potato holds no R2 credential) with retry:
       `PUT /backups/<name>` + list + delete in the Worker, `harbor backup --upload` on the potato, three
-      attempts with backoff on 5xx/429, and the R2 copy of anything pruned locally deleted so both
-      sides keep the same thirty. 2026-11-22. **The `last_backup` timestamp the Status page reads is
+      attempts with backoff on 5xx/429. R2 keeps its **own** thirty by date, decided from the remote
+      listing: the local directory is never authoritative for the off-box copies, because those exist
+      for the case where the local disk is gone (a replacement potato would otherwise upload once and
+      delete the history), and `--keep` is the SD card's window, not R2's. 2026-11-22. **The `last_backup` timestamp the Status page reads is
       still outstanding** — it belongs with the Status work in 12b, which is where the page exists.
       **A single PUT is capped at 100 MB**, which a library with years of text could outgrow; design §11
       already says the route becomes multipart when that happens, and that is a real remaining task,

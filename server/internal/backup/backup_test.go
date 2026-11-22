@@ -197,11 +197,6 @@ func TestPruneDeletesTheOldOnesItCanVerify(t *testing.T) {
 	if len(result.Kept) != 1 || len(result.Failed) != 0 {
 		t.Fatalf("result = %+v, want the newest only and no failures", result)
 	}
-	// The pruned names come back so their R2 copies can be deleted too: a backup
-	// that is gone locally and still on R2 is a copy nobody is looking after.
-	if len(result.Deleted) != 2 {
-		t.Errorf("deleted = %+v, want the two pruned names", result.Deleted)
-	}
 	left, err := List(dir)
 	if err != nil {
 		t.Fatal(err)
