@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("1,A title,,,https://example.com/a,F,x,2024-01-02T03:04:05Z,,,false\n")

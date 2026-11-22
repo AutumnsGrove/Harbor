@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("\ufeffURL , Title,ID,TAGS,Note,Created,type\r\nhttps://example.com/a,A title,9,one,\"a note\r\nwith CRLF\",2024-01-02T03:04:05.006Z,3\r\n")
