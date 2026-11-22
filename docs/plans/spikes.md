@@ -371,9 +371,9 @@ Reality is a single prose cell with no colour, no delimiter and no per-highlight
 - 268 blocks across 98 cells (1–19 per cell; median cell 351 bytes, longest 2,372).
 - The quote text inside a block may itself contain blank lines and single newlines, so the **only**
 safe split is a blank line *followed by* `Highlight:` — never a bare blank line. Splitting on `\n\n`
-alone turns multi-paragraph quotes into fragments (`Be human.` becomes its own block).
-- Some blocks are scraped page junk rather than prose (one cell ends `… \n  Subscribe`), and some are
-very short (`Highlight:unusual`). There is no way to tell a quote from the user's own annotation, so
+alone turns each paragraph of a multi-paragraph quote into its own block.
+- Some blocks are scraped page junk rather than prose (whitespace and a link label), and some are a
+single short word. There is no way to tell a quote from the user's own annotation, so
 nothing is guessed: **one `highlights` row per block**, the quote is the block text minus the
 `Highlight:` prefix, `note` stays empty, and `anchor_json` says `{"source":"imported","index":n}`.
 Rejoining an item's rows in index order with `\n\nHighlight:` reproduces the original cell up to the
@@ -389,12 +389,13 @@ migration. The item-level star toggle and the Space's UI arrive with phase 9's S
 Netscape HTML and phase 5's round-trip test uses that writer, so the HTML importer is written
 against the documented format plus that writer rather than a second Raindrop file.
 
-**Fixture.** `server/internal/importer/testdata/raindrop/real-shape.csv` carries these shapes (15 rows:
-multi-line notes, doubled quotes, a noisy URL with `utm_`/fragment, `http` cover, 1/2/4-block
-highlight cells, a block with internal newlines, a 9-character block, scraped-junk text, unicode and
-emoji, an empty title, a duplicate URL, slack in the tag cell). It is **hand-built to the observed
-shapes, not a mechanical sanitisation of her export**: the repository is public, so her note and
-highlight prose is not committed even though the spike suggested keeping it. All URLs are
+**Fixture.** `server/internal/importer/testdata/raindrop/real-shape.csv` carries these shapes in 15
+rows: multi-line notes, doubled quotes, a noisy URL with `utm_`/fragment, an `http` cover, 1/2/4-block
+highlight cells, a block with internal newlines, a one-word block, a scraped-junk cell, unicode and
+emoji, and slack in the tag cell; plus two cases the real export did not have, an empty title and a
+duplicate URL, because the parser has to survive them. **Every title, note and quote in it is
+fabricated**: the repository is public, so none of her text is committed even though the spike
+suggested keeping it, and only the *shapes* are reproduced from the measurement above. All URLs are
 `example.com`.
 
 **Consequence:** design.md §5 and plans/05 now carry the corrected mapping (highlights, favourites,

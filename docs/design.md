@@ -1170,8 +1170,8 @@ the first real import. Details, the milestone, and the cut list are in
 - Hybrid ranking weights (keyword vs semantic) — tune once there is real search data.
 - The remaining implementation spikes: Worker streaming upload (S1), D1 claim semantics (S2),
   brute-force vector cache (S3), Browser Rendering on the free plan (S4), PDF extraction (S6), video
-  transcripts (S8), a real Raindrop export (S9), and image decode memory/EXIF (S12). S5, S7, S10 and
-  S11 were answered on 2026-11-18 (S7 changed the port to 8897); see
+  transcripts (S8), and image decode memory/EXIF (S12). S5, S7, S10 and S11 were answered on
+  2026-11-18 (S7 changed the port to 8897) and S9 on 2026-11-22; see
   [plans/spikes.md](plans/spikes.md). Nova's `embed` prerequisite is no longer a blocker.
 
 ### How it is built (settled 2026-11-03)

@@ -4,9 +4,9 @@ The refinement agenda, worked through on 2026-11-03. Almost everything is now se
 answers are folded into [design.md](design.md) and recorded here with the reasoning that produced
 them.
 
-**Still open:** hybrid ranking weights and the remaining spikes in section G (S1–S4, S6, S8, S9,
-S12). S5, S7, S10 and S11 were verified on 2026-11-18; S7 changed the port to 8897. Everything else
-is decided.
+**Still open:** hybrid ranking weights and the remaining spikes in section G (S1–S4, S6, S8, S12).
+S5, S7, S10 and S11 were verified on 2026-11-18 (S7 changed the port to 8897), and S9 on 2026-11-22
+(highlights are prose; favourites are imported). Everything else is decided.
 
 Format: ~~question~~ → **decision** → why the alternatives lost.
 
