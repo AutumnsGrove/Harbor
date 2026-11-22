@@ -29,28 +29,45 @@ func (s *Store) EnsureManualSpace(ctx context.Context, name string) (model.Space
 		return model.Space{}, errors.New("store: a Space needs a name")
 	}
 
-	space, err := scanSpaceRow(s.db.QueryRowContext(ctx,
-		`SELECT id, slug, name, kind, rule_json, created_at FROM spaces
-		 WHERE kind = 'manual' AND lower(name) = lower(?) ORDER BY created_at, id LIMIT 1`, name))
-	switch {
-	case err == nil:
-		return space, nil
-	case !errors.Is(err, ErrNotFound):
-		return model.Space{}, fmt.Errorf("looking for the manual Space %q: %w", name, err)
-	}
+	// The lookup and the insert are one transaction: the pool serialises single
+	// statements, not the pair, so two callers could both see "no such Space"
+	// and both create it — exactly the duplicate this method exists to prevent.
+	var space model.Space
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		found, err := scanSpaceRow(tx.QueryRowContext(ctx,
+			`SELECT id, slug, name, kind, rule_json, created_at FROM spaces
+			 WHERE kind = 'manual' AND lower(name) = lower(?) ORDER BY created_at, id LIMIT 1`, name))
+		switch {
+		case err == nil:
+			space = found
+			return nil
+		case !errors.Is(err, ErrNotFound):
+			return fmt.Errorf("looking for the manual Space %q: %w", name, err)
+		}
 
-	space = model.Space{
-		ID:       uuid.NewString(),
-		Name:     name,
-		Kind:     model.SpaceManual,
-		RuleJSON: "{}",
+		created := model.Space{
+			ID:       uuid.NewString(),
+			Name:     name,
+			Kind:     model.SpaceManual,
+			RuleJSON: "{}",
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO spaces (id, name, kind, rule_json) VALUES (?, ?, ?, ?)`,
+			created.ID, created.Name, string(created.Kind), created.RuleJSON); err != nil {
+			return fmt.Errorf("creating the manual Space %q: %w", name, err)
+		}
+		stored, err := scanSpaceRow(tx.QueryRowContext(ctx,
+			`SELECT id, slug, name, kind, rule_json, created_at FROM spaces WHERE id = ?`, created.ID))
+		if err != nil {
+			return fmt.Errorf("reading back the manual Space %q: %w", name, err)
+		}
+		space = stored
+		return nil
+	})
+	if err != nil {
+		return model.Space{}, err
 	}
-	if _, err := s.db.ExecContext(ctx,
-		`INSERT INTO spaces (id, name, kind, rule_json) VALUES (?, ?, ?, ?)`,
-		space.ID, space.Name, string(space.Kind), space.RuleJSON); err != nil {
-		return model.Space{}, fmt.Errorf("creating the manual Space %q: %w", name, err)
-	}
-	return s.spaceByID(ctx, space.ID)
+	return space, nil
 }
 
 // FindManualSpace is EnsureManualSpace without the insert: the dry run reports
@@ -78,12 +95,13 @@ func (s *Store) FindManualSpace(ctx context.Context, name string) (model.Space, 
 // that did not happen has to be an error.
 func (s *Store) AddItemToSpace(ctx context.Context, spaceID, itemID string) error {
 	// The INSERT below would fail on the foreign keys anyway; the explicit
-	// lookup is what makes the message say which id was wrong.
+	// lookups are what make the message say which id was wrong, because the
+	// import report shows it.
 	if _, err := s.spaceByID(ctx, spaceID); err != nil {
-		return err
+		return fmt.Errorf("filing item %q in unknown Space %q: %w", itemID, spaceID, err)
 	}
 	if _, err := s.GetItem(ctx, itemID); err != nil {
-		return err
+		return fmt.Errorf("filing unknown item %q in Space %q: %w", itemID, spaceID, err)
 	}
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO space_items (space_id, item_id) VALUES (?, ?)

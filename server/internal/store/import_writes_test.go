@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
@@ -152,11 +153,17 @@ func TestAddItemToSpaceRejectsUnknownIDs(t *testing.T) {
 	}
 	item := mustCreate(t, s, ItemInput{ID: "a", Title: "Sourdough"})
 
-	if err := s.AddItemToSpace(ctx, space.ID, "nope"); err == nil {
+	err = s.AddItemToSpace(ctx, space.ID, "nope")
+	if err == nil {
 		t.Error("AddItemToSpace accepted an unknown item")
+	} else if !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), "item") {
+		t.Errorf("the error should name the unknown item: %v", err)
 	}
-	if err := s.AddItemToSpace(ctx, "nope", item.ID); err == nil {
+	err = s.AddItemToSpace(ctx, "nope", item.ID)
+	if err == nil {
 		t.Error("AddItemToSpace accepted an unknown Space")
+	} else if !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), "Space") {
+		t.Errorf("the error should name the unknown Space: %v", err)
 	}
 }
 
@@ -274,5 +281,51 @@ func TestReplaceImportedHighlightsSkipsBlankQuotes(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Quote != "real" {
 		t.Errorf("highlights = %+v, want only the real quote", got)
+	}
+}
+
+// The lookup and the insert are one transaction, so concurrent callers cannot
+// both decide "no such Space" and both create it. The pool is a single
+// connection, which is exactly why the pair has to be a transaction: statements
+// serialise, the read-then-write does not.
+func TestEnsureManualSpaceConcurrentCallsMakeOneSpace(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	const callers = 8
+	start := make(chan struct{})
+	ids := make(chan string, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			space, err := s.EnsureManualSpace(ctx, "Recipes")
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- space.ID
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(ids)
+	close(errs)
+
+	for err := range errs {
+		t.Fatalf("EnsureManualSpace: %v", err)
+	}
+	seen := map[string]bool{}
+	for id := range ids {
+		seen[id] = true
+	}
+	if len(seen) != 1 {
+		t.Errorf("callers got %d different Spaces, want 1: %v", len(seen), seen)
+	}
+	if n := count(t, s.db, `SELECT count(*) FROM spaces WHERE lower(name) = 'recipes'`); n != 1 {
+		t.Errorf("%d Recipes spaces exist, want 1", n)
 	}
 }
