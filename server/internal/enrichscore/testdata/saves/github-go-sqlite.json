@@ -1,0 +1,8 @@
+{
+  "url": "https://github.com/glebarez/go-sqlite",
+  "captured": "2026-11-22",
+  "title": "GitHub - glebarez/go-sqlite: pure-Go SQLite driver for Go (SQLite embedded)",
+  "siteName": "GitHub",
+  "excerpt": "pure-Go SQLite driver for Go (SQLite embedded). Contribute to glebarez/go-sqlite development by creating an account on GitHub.",
+  "text": "This is a pure-Go SQLite driver for Golang's native database/sql package.\nThe driver has Go-based implementation of SQLite embedded in itself (so, you don't need to install SQLite separately)\nThis is a fork of cznic/sqlite with changes to make it compatible with GORM.\nUsage\nExample\npackage main\n\nimport (\n\t\"database/sql\"\n\t\"log\"\n\n\t_ \"github.com/glebarez/go-sqlite\"\n)\n\nfunc main() {\n\t// connect\n\tdb, err := sql.Open(\"sqlite\", \":memory:\")\n\tif err != nil {\n\t\tlog.Fatal(err)\n\t}\n\n\t// get SQLite version\n\t_ := db.QueryRow(\"select sqlite_version()\")\n}\nConnection string examples\n\nin-memory SQLite: \":memory:\"\non-disk SQLite: \"path/to/some.db\"\nForeign-key constraint activation: \":memory:?_pragma=foreign_keys(1)\"\n\nSettings PRAGMAs in connection string\nAny SQLIte pragma can be preset for a Database connection using _pragma query parameter. Examples:\n\njournal mode: path/to/some.db?_pragma=journal_mode(WAL)\nbusy timeout: :memory:?_pragma=busy_timeout(5000)\n\nMultiple PRAGMAs can be specified, e.g.:\npath/to/some.db?_pragma=busy_timeout(5000)\u0026_pragma=journal_mode(WAL)"
+}
