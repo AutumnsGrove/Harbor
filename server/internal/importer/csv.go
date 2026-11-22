@@ -78,12 +78,15 @@ const (
 // CSVReader streams a Raindrop CSV export. One row at a time, because a real
 // library is not small and the driver has a checkpoint to honour.
 type CSVReader struct {
-	r         *csv.Reader
-	record    int
-	columns   []string
-	index     map[string]int
-	unknown   []string
-	warns     []string
+	r     *csv.Reader
+	width int // the header's actual field count, blank and duplicate names included
+
+	record  int
+	columns []string // the recognised names, in file order
+	index   map[string]int
+	unknown []string
+	warns   []string
+
 	lastErrAt int64
 }
 
@@ -106,6 +109,9 @@ func NewCSVReader(src io.Reader) (*CSVReader, error) {
 	case err != nil:
 		return nil, fmt.Errorf("%w: %v", ErrNotRaindropCSV, err)
 	}
+	// The header's width, not the number of recognised names: a blank or
+	// duplicate column is dropped from the mapping but still occupies a field.
+	cr.width = len(head)
 
 	for i, name := range head {
 		name = normaliseHeader(name)
@@ -182,8 +188,11 @@ func (cr *CSVReader) Next() (Row, error) {
 func (cr *CSVReader) mapRecord(rec []string) Row {
 	row := Row{Record: cr.record}
 
-	if len(rec) != len(cr.columns) {
-		row.warn("record %d has %d fields, the header has %d", cr.record, len(rec), len(cr.columns))
+	// The header's width, not the number of recognised names: a duplicate or
+	// blank column is dropped from the mapping, and a record with the same
+	// fields as the header is not a ragged record.
+	if len(rec) != cr.width {
+		row.warn("record %d has %d fields, the header has %d", cr.record, len(rec), cr.width)
 	}
 
 	row.ID = cr.field(rec, "id")

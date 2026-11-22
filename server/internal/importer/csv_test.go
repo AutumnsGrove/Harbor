@@ -163,7 +163,9 @@ func TestReadRealShape(t *testing.T) {
 	}
 
 	// Rejoining a row's highlights reproduces the cell (design.md §5): the
-	// import is lossless, which is the whole point of not guessing.
+	// import is lossless, which is the whole point of not guessing. This holds
+	// for the export's shape — one blank line between blocks and no stray
+	// whitespace around them — which is what the fixture is.
 	for _, row := range rows {
 		if len(row.Highlights) == 0 {
 			continue
@@ -319,6 +321,34 @@ func TestCSVDuplicateColumn(t *testing.T) {
 	}
 	if row.URL != "https://example.com/first" {
 		t.Errorf("url = %q, want the first column", row.URL)
+	}
+	// A well-formed record of a header with a repeated column is not ragged:
+	// the report must not claim a data-integrity problem on every row.
+	if hasWarning(row.Warnings, "field") {
+		t.Errorf("the duplicate column made a well-formed row look ragged: %v", row.Warnings)
+	}
+}
+
+// A spreadsheet round-trip leaves a trailing empty column. Like a duplicate
+// name, it is dropped from the mapping and must not warn on every row.
+func TestCSVTrailingEmptyColumn(t *testing.T) {
+	src := "id,title,url,folder,created,\n1,A,https://example.com/a,F,2024-01-02T03:04:05Z,\n"
+	cr, err := NewCSVReader(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("NewCSVReader: %v", err)
+	}
+	row, err := cr.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if row.URL != "https://example.com/a" || row.Title != "A" {
+		t.Errorf("row = %+v", row)
+	}
+	if len(row.Warnings) != 0 {
+		t.Errorf("a trailing empty column is not a ragged record: %v", row.Warnings)
+	}
+	if got, want := cr.Columns(), []string{"id", "title", "url", "folder", "created"}; !equalSlices(got, want) {
+		t.Errorf("columns = %v, want %v", got, want)
 	}
 }
 
