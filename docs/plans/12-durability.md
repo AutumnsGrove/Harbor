@@ -124,14 +124,18 @@ Rules that make it a real export rather than a data dump:
 
 **Export**
 
-- [ ] JSON writer with an `export_version` const and a documented field contract in `docs/export.md`.
+- [x] JSON writer with an `export_version` const and a documented field contract in
+      [docs/export.md](../export.md) — `library.json` + `manifest.json`, one read transaction, every
+      item including soft-deleted ones. 2026-11-22.
 - [ ] Markdown writer with front-matter, escaping, slug uniqueness, and highlights.
 - [ ] Netscape writer (the same shape the phase 5 importer reads — assert with a round-trip test).
-- [ ] Media copy by sha with a manifest of hashes and sizes.
+- [x] Media copy by sha with a manifest of hashes and sizes — `--include-media`, and a missing blob
+      fails the export rather than leaving a hash with no bytes. 2026-11-22.
 - [ ] CLI + Settings → Export (download a tar.gz for small libraries; the CLI is the documented path
       for a full one).
-- [ ] The CI job that runs export against the fixture on every PR (design.md §5's "tested in CI with a
-      fixture from day one").
+- [x] Export runs against a fixture on every PR: `TestGoldenJSON` builds a library of every shape and
+      diffs `library.json` and `manifest.json` against committed goldens inside `go test ./...`, which
+      is the CI job `make check` already is. 2026-11-22.
 
 **Backup and restore**
 

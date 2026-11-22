@@ -1,0 +1,20 @@
+{
+  "export_version": 1,
+  "app_version": "r1.abcdef",
+  "schema_version": 1,
+  "exported_at": "2026-11-22T18:00:00Z",
+  "counts": {
+    "items": 3,
+    "tags": 2,
+    "spaces": 1,
+    "highlights": 1,
+    "media": 1
+  },
+  "files": [
+    {
+      "path": "library.json",
+      "bytes": 3627,
+      "sha256": "3319e8d787bef79ed8b02e6cb0789580a21bb301e8306bb5d2af7e14a70edad4"
+    }
+  ]
+}
