@@ -80,9 +80,10 @@ func TestExportLibraryReadsEverything(t *testing.T) {
 	if got := library.Tags["a"]; len(got) != 2 || got[0] != "go" || got[1] != "sqlite" {
 		t.Errorf("tags for a = %v, want go, sqlite", got)
 	}
-	// The seeded system Space and the owner's manual one both come out.
-	if len(library.Spaces) != 2 {
-		t.Fatalf("spaces = %+v, want the seeded read-later and one manual", library.Spaces)
+	// The seeded system Spaces and the owner's manual one all come out.
+	seededCount := 2 // read-later (0001) and favourites (0002)
+	if len(library.Spaces) != seededCount+1 {
+		t.Fatalf("spaces = %+v, want %d seeded and one manual", library.Spaces, seededCount)
 	}
 	byID := map[string]model.Space{}
 	for _, space := range library.Spaces {
@@ -99,6 +100,9 @@ func TestExportLibraryReadsEverything(t *testing.T) {
 	}
 	if seeded == nil {
 		t.Errorf("the seeded read-later Space is missing from %+v", library.Spaces)
+	}
+	if space, ok := byID["favourites"]; !ok || space.Name != "Favourites" || space.Slug == nil || *space.Slug != "favourites" {
+		t.Errorf("the seeded favourites Space is missing from %+v", library.Spaces)
 	}
 	if got := library.SpaceItems["sp1"]; len(got) != 1 || got[0] != "a" {
 		t.Errorf("space items = %v", got)
@@ -137,8 +141,8 @@ func TestSchemaVersionIsReadable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("version = %d, want 1 (the only migration)", version)
+	if want := shippedVersions(t); version != want {
+		t.Errorf("version = %d, want %d (every shipped migration)", version, want)
 	}
 }
 
