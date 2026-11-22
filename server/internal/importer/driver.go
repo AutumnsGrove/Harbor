@@ -30,6 +30,10 @@ type Source interface {
 	Next() (Row, error)
 	UnknownColumns() []string
 	Warnings() []string
+	// CarriesHighlights says whether this format can express highlights at
+	// all. A source that cannot must never clear highlights another import
+	// wrote: Raindrop's CSV has them, Netscape HTML does not.
+	CarriesHighlights() bool
 }
 
 // NewCSVSource reads a Raindrop CSV export.
@@ -81,7 +85,7 @@ type Report struct {
 // the run carries on: a file with three bad rows in it is still 1,473 saves
 // worth having (plans/05 test 3).
 func Run(ctx context.Context, s *store.Store, src Source, opts Options) (Report, error) {
-	r := &runner{store: s, ctx: ctx, opts: opts}
+	r := &runner{store: s, ctx: ctx, opts: opts, carriesHighlights: src.CarriesHighlights()}
 	r.report.UnknownColumns = src.UnknownColumns()
 	r.favourites, r.err = s.SpaceBySlug(ctx, "favourites")
 	if r.err != nil {
@@ -114,6 +118,14 @@ type runner struct {
 	favourites model.Space
 	err        error
 
+	// carriesHighlights is the source's answer, so a format without highlights
+	// leaves the ones already in the library alone when flushed.
+	carriesHighlights bool
+
+	// seen is the dry run's memory of which canonical URLs it has counted: the
+	// second row for one URL is a merge, not a second import.
+	seen map[string]bool
+
 	// folders and spaces exist for the dry run: which names would become a
 	// Space, and which have been counted already.
 	folders map[string]bool
@@ -134,12 +146,14 @@ type pendingImport struct {
 
 // row turns one record into an item, or explains why it could not.
 func (r *runner) row(row Row) {
+	r.noteWarnings(row)
 	if strings.TrimSpace(row.URL) == "" {
 		// A bookmark export's row without a URL is not a note: Raindrop always
 		// writes one, so this is a broken row and it is counted as skipped.
 		r.report.Skipped++
 		return
 	}
+
 	canonical, err := canon.CanonicalURL(row.URL)
 	if err != nil {
 		r.fail(row, err)
@@ -154,38 +168,62 @@ func (r *runner) row(row Row) {
 	}
 
 	if r.opts.DryRun {
-		if found {
-			r.report.Merged++
-		} else {
-			r.report.Imported++
-		}
-		r.report.Highlights += len(row.Highlights)
-		if row.Favorite {
-			r.report.Favourites++
-		}
-		r.countFolder(row)
+		r.dryRunRow(row, canonical, found)
 		return
 	}
 
-	if found {
+	// Count only what happened: a row whose write fails is a failure, not an
+	// import as well.
+	_, merged, err := r.write(row, canonical, existing, found)
+	if err != nil {
+		r.fail(row, err)
+		return
+	}
+	if merged {
 		r.report.Merged++
 	} else {
 		r.report.Imported++
 	}
-	if _, err := r.write(row, canonical, existing, found); err != nil {
-		r.fail(row, err)
-		return
+	if row.Favorite {
+		r.report.Favourites++
 	}
+}
+
+// dryRunRow reports what the real run would do, without writing anything. A URL
+// the file already carried is a merge, exactly as it is in the real run.
+func (r *runner) dryRunRow(row Row, canonical string, found bool) {
+	if r.seen == nil {
+		r.seen = map[string]bool{}
+	}
+	if found || r.seen[canonical] {
+		r.report.Merged++
+	} else {
+		r.report.Imported++
+	}
+	r.seen[canonical] = true
 	r.report.Highlights += len(row.Highlights)
 	if row.Favorite {
 		r.report.Favourites++
+	}
+	r.countFolder(row)
+}
+
+// noteWarnings puts the reader's row-level findings in the report: a date that
+// will not parse is exactly what the dry run exists to show before anything is
+// written. The list is bounded like the row errors.
+func (r *runner) noteWarnings(row Row) {
+	for _, warning := range row.Warnings {
+		if len(r.report.FileWarnings) >= maxRowErrors {
+			return
+		}
+		r.report.FileWarnings = append(r.report.FileWarnings, fmt.Sprintf("record %d: %s", row.Record, warning))
 	}
 }
 
 // write is the save path: one item, its tags, its folder, the favourites Space,
 // and the highlights, all through the store's own functions so an import cannot
 // invent a second way to write a bookmark.
-func (r *runner) write(row Row, canonical string, existing model.Item, found bool) (model.Item, error) {
+func (r *runner) write(row Row, canonical string, existing model.Item, found bool) (model.Item, bool, error) {
 	in := store.ItemInput{
 		ID:          uuid.NewString(),
 		URL:         &canonical,
@@ -208,9 +246,9 @@ func (r *runner) write(row Row, canonical string, existing model.Item, found boo
 		in.SavedAt = existing.SavedAt
 	}
 
-	item, _, err := r.store.MergeItem(r.ctx, in)
+	item, merged, err := r.store.MergeItem(r.ctx, in)
 	if err != nil {
-		return model.Item{}, err
+		return model.Item{}, false, err
 	}
 
 	if p, ok := r.pending[canonical]; ok {
@@ -218,17 +256,26 @@ func (r *runner) write(row Row, canonical string, existing model.Item, found boo
 	}
 
 	if row.Folder != "" {
+		// Ask before creating, so the report can say how many Spaces this run
+		// made rather than how many folders it saw.
+		_, exists, err := r.store.FindManualSpace(r.ctx, row.Folder)
+		if err != nil {
+			return model.Item{}, false, err
+		}
 		space, err := r.store.EnsureManualSpace(r.ctx, row.Folder)
 		if err != nil {
-			return model.Item{}, err
+			return model.Item{}, false, err
+		}
+		if !exists {
+			r.report.SpacesCreated++
 		}
 		if err := r.store.AddItemToSpace(r.ctx, space.ID, item.ID); err != nil {
-			return model.Item{}, err
+			return model.Item{}, false, err
 		}
 	}
 	if row.Favorite {
 		if err := r.store.AddItemToSpace(r.ctx, r.favourites.ID, item.ID); err != nil {
-			return model.Item{}, err
+			return model.Item{}, false, err
 		}
 	}
 
@@ -236,10 +283,10 @@ func (r *runner) write(row Row, canonical string, existing model.Item, found boo
 	// highlights are what the owner came for, and the model can wait.
 	if r.opts.NoEnrich {
 		if err := r.store.MarkReady(r.ctx, item.ID); err != nil {
-			return model.Item{}, err
+			return model.Item{}, false, err
 		}
 	}
-	return item, nil
+	return item, merged, nil
 }
 
 // accumulate records this row's quotes against its URL. The set is per run, so a
@@ -264,7 +311,14 @@ func (r *runner) accumulate(canonical string, row Row) {
 
 // flush writes each item's highlights once the whole file has been read. An
 // error is attributed to the first row that contributed to that URL.
+//
+// A source that cannot express highlights (Netscape HTML) never reaches the
+// store here: it is imported over a library that already has them, and clearing
+// them would destroy the one thing the owner cannot recreate.
 func (r *runner) flush() {
+	if !r.carriesHighlights {
+		return
+	}
 	for _, p := range r.pending {
 		if p.itemID == "" {
 			continue

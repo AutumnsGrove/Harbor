@@ -489,3 +489,128 @@ func diffLibraries(before, after model.Library) string {
 	}
 	return out.String()
 }
+
+// A source that cannot express highlights must not clear the ones an earlier
+// import wrote: plans/05 imports the Netscape HTML twin of the same library over
+// the CSV's result, and design calls highlights the part she cannot recreate.
+func TestRunWithoutHighlightsDoesNotClearThem(t *testing.T) {
+	e := newEnv(t)
+	e.runCSV(t, `1,Cut ,Highlight:one,,"https://example.com/a",,,"2020-01-01T00:00:00Z",,"Highlight:one",false
+`, Options{})
+	item := e.item(t, "https://example.com/a")
+	before, err := e.store.HighlightsForItem(e.ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 1 {
+		t.Fatalf("highlights = %d, want 1", len(before))
+	}
+
+	// A CSV without a highlights column at all is the shape of a highlight-free
+	// source; the HTML reader answers the same way.
+	src, err := NewCSVSource(strings.NewReader("id,title,url\n2,Same page,https://example.com/a\n"))
+	if err != nil {
+		t.Fatalf("NewCSVSource: %v", err)
+	}
+	if src.CarriesHighlights() {
+		t.Fatal("a file with no highlights column claims to carry highlights")
+	}
+	if _, err := Run(e.ctx, e.store, src, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	after, err := e.store.HighlightsForItem(e.ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 1 || after[0].Quote != "one" {
+		t.Errorf("highlights = %+v, want the imported one kept", after)
+	}
+}
+
+// The same file with an empty cell on a highlights-bearing source does clear
+// them: there the file is the truth.
+func TestRunClearsHighlightsTheFileDropped(t *testing.T) {
+	e := newEnv(t)
+	e.runCSV(t, `1,A,,,"https://example.com/a",,,"2020-01-01T00:00:00Z",,"Highlight:one",false
+`, Options{})
+	e.runCSV(t, `1,A,,,"https://example.com/a",,,"2020-01-01T00:00:00Z",,,false
+`, Options{})
+
+	item := e.item(t, "https://example.com/a")
+	got, err := e.store.HighlightsForItem(e.ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("highlights = %+v, want none: the file no longer carries one", got)
+	}
+}
+
+// The dry run's new-vs-merge headline has to match the real run, including when
+// two rows canonicalise to the same URL.
+func TestRunDryRunCountsDuplicateURLsAsMerges(t *testing.T) {
+	e := newEnv(t)
+	body := `1,One,,,https://example.com/a?utm_source=x,A,,2020-01-01T00:00:00Z,,,false
+2,Two,,,https://example.com/a#frag,A,,2020-01-01T00:00:00Z,,,false
+`
+	dry := e.runCSV(t, body, Options{DryRun: true})
+	if dry.Imported != 1 || dry.Merged != 1 {
+		t.Errorf("dry run = %d new / %d merged, want 1 / 1", dry.Imported, dry.Merged)
+	}
+	real := e.runCSV(t, body, Options{})
+	if real.Imported != dry.Imported || real.Merged != dry.Merged {
+		t.Errorf("real run = %d new / %d merged, dry run said %d / %d",
+			real.Imported, real.Merged, dry.Imported, dry.Merged)
+	}
+}
+
+// The counters describe the file, so they add up to the number of rows read.
+func TestRunCountersAddUp(t *testing.T) {
+	e := newEnv(t)
+	report := e.runCSV(t, `1,Good,,,https://example.com/good,A,,2020-01-01T00:00:00Z,,,false
+2,Nope,,,javascript:alert(1),A,,2020-01-01T00:00:00Z,,,false
+3,No url,,,,A,,2020-01-01T00:00:00Z,,,false
+4,Bad date,,,https://example.com/date,A,,not-a-date,,,false
+`, Options{})
+	if got := report.Imported + report.Merged + report.Skipped + report.Failed; got != report.Total {
+		t.Errorf("imported+merged+skipped+failed = %d, total = %d (report %+v)", got, report.Total, report)
+	}
+	// A row whose date will not parse is imported, but the report says so.
+	if !hasFileWarning(report.FileWarnings, "record 4", "created") {
+		t.Errorf("warnings = %v, want the bad date surfaced", report.FileWarnings)
+	}
+}
+
+// SpacesCreated is what the UI shows; a folder reused by the second pass is not
+// a Space created by it.
+func TestRunCountsSpacesCreated(t *testing.T) {
+	e := newEnv(t)
+	body := `1,A,,,https://example.com/1,Recipes,,2020-01-01T00:00:00Z,,,false
+2,B,,,https://example.com/2,Recipes,,2020-01-01T00:00:00Z,,,false
+`
+	first := e.runCSV(t, body, Options{})
+	if first.SpacesCreated != 1 {
+		t.Errorf("spaces created = %d, want 1 for the one new folder", first.SpacesCreated)
+	}
+	second := e.runCSV(t, body, Options{})
+	if second.SpacesCreated != 0 {
+		t.Errorf("spaces created = %d on a re-run, want 0", second.SpacesCreated)
+	}
+}
+
+func hasFileWarning(warnings []string, parts ...string) bool {
+	for _, warning := range warnings {
+		matched := true
+		for _, part := range parts {
+			if !strings.Contains(warning, part) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
