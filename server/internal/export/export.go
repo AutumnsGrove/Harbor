@@ -83,7 +83,7 @@ func JSON(ctx context.Context, reader Reader, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("export: resolving %s: %w", opts.Dir, err)
 	}
-	if cwd, err := os.Getwd(); err == nil && absDir == filepath.Clean(cwd) {
+	if cwd, err := os.Getwd(); err == nil && sameDir(absDir, filepath.Clean(cwd)) {
 		return Result{}, fmt.Errorf(
 			"export: --out %s is the current directory; an export is a directory to create, so give it a name", opts.Dir)
 	}
@@ -257,6 +257,23 @@ func writeFile(dest string, body []byte) error {
 		return fmt.Errorf("export: writing %s: %w", dest, err)
 	}
 	return nil
+}
+
+// sameDir compares two paths as directories, following symlinks. The lexical
+// answer is not enough: /tmp/link/work and /tmp/probe/r/work can be one
+// directory, and the guard exists to protect the directory a shell is sitting
+// in, not a particular spelling of it. A destination that does not exist yet
+// cannot be a symlink, so the lexical answer is the answer.
+func sameDir(a, b string) bool {
+	if a == b {
+		return true
+	}
+	resolvedA, errA := filepath.EvalSymlinks(a)
+	resolvedB, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return resolvedA == resolvedB
 }
 
 // prepareDir makes an export directory: a missing one is created, an existing

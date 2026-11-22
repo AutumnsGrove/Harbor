@@ -355,6 +355,21 @@ func TestExportRefusesTheCurrentDirectory(t *testing.T) {
 	}
 }
 
+func TestExportRefusesTheCurrentDirectoryThroughASymlink(t *testing.T) {
+	// The same directory spelled another way is still the directory the shell is
+	// sitting in, so the guard has to compare resolved paths, not strings.
+	work := t.TempDir()
+	t.Chdir(work)
+	link := filepath.Join(t.TempDir(), "work-link")
+	if err := os.Symlink(work, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	_, err := JSON(context.Background(), fakeReader{library: fixtureLibrary()}, options(link))
+	if err == nil || !strings.Contains(err.Error(), "current directory") {
+		t.Fatalf("exporting through a symlink to the current directory = %v, want a refusal", err)
+	}
+}
+
 func TestExportIntoNamesOfADirectoryThatDoesNotExistYet(t *testing.T) {
 	// The documented usage: --out ./harbor-export-YYYYMMDD, relative and new.
 	t.Chdir(t.TempDir())
