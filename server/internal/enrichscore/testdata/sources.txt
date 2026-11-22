@@ -4,13 +4,82 @@
 # and writes testdata/saves/<id>.json. `labels.json` is the owner's file: it
 # gets a blank entry for every capture and is never overwritten.
 #
-# The set should keep a spread of the twelve kinds and the awkward cases the
-# phase-3 demo names: news, a recipe, a video, a repository, a shop page, a
-# paywalled article, a non-English page. A PDF link is deliberately absent:
-# production refuses a non-HTML content type before extraction until phase 6,
-# so -record refuses it too, and the PDF belongs to the exit demo (the item
-# exists, with an amber "couldn't fetch" strip), not to the scored set.
+# A capture that production would refuse is a capture failure, not a case: a PDF,
+# a JSON endpoint or a bot-walled 403 never becomes a scored save. The PDF the
+# phase-3 demo names belongs to the exit demo (the item exists, with an amber
+# "couldn't fetch" strip), not here.
+#
+# Two kinds are deliberately absent and cannot be captured: `note` has no page
+# by definition, and `tweet` has no server-rendered page without x.com auth. The
+# set covers ten of the twelve.
+#
+# The spread is the point: five languages, long-form and link-heavy fronts, repos
+# and papers and shops, two video hosts, member-walled reporting (404 Media),
+# and the Guardian's registration wall standing in for a paywalled teaser — the
+# sites that actually paywall (FT, WSJ, NYT, The Economist) answer 403 to a plain
+# fetch, so production cannot save them either.
 
-go-blog-go122       https://go.dev/blog/go1.22
-wikipedia-sourdough https://en.wikipedia.org/wiki/Sourdough
-github-go-sqlite    https://github.com/glebarez/go-sqlite
+# article — reference, long-form and front pages
+wiki-sourdough              https://en.wikipedia.org/wiki/Sourdough
+go-blog-go122               https://go.dev/blog/go1.22
+go-blog-go121               https://go.dev/blog/go1.21
+github-go-sqlite            https://github.com/glebarez/go-sqlite
+github-hono                 https://github.com/honojs/hono
+danluu-cocktail             https://danluu.com/cocktail-ideas/
+simonw-2024                 https://simonwillison.net/2024/Dec/31/llms-in-2024/
+bbc-news                    https://www.bbc.com/news
+guardian-intl               https://www.theguardian.com/international
+guardian-hacks              https://www.theguardian.com/technology/2026/nov/22/hacks-ai-internet-outages-airlines-banks-microsoft-apple
+guardian-cop31              https://www.theguardian.com/environment/2026/nov/22/cop31-climate-talks-set-to-end-in-deep-division-as-key-deal-rejected
+guardian-comment            https://www.theguardian.com/commentisfree/2026/nov/22/sorting-through-mother-in-laws-belongings
+smittenkitchen              https://smittenkitchen.com/
+
+# article — non-English
+wiki-sauerteig-de           https://de.wikipedia.org/wiki/Sauerteig
+wiki-masa-madre-es          https://es.wikipedia.org/wiki/Masa_madre
+wiki-pain-levain-fr         https://fr.wikipedia.org/wiki/Pain_au_levain
+wiki-sourdough-ja           https://ja.wikipedia.org/wiki/%E3%82%B5%E3%83%AF%E3%83%BC%E3%83%89%E3%82%A6
+
+# article — member-walled teasers
+404-eagle                   https://www.404media.co/scientists-discover-new-and-horrible-eagle-based-way-our-ancestors-died
+404-furniture               https://www.404media.co/high-end-furniture-marketplace-aptdeco-is-taking-peoples-furniture-and-not-paying-them
+
+# recipe
+bonapp-cinnamon             https://www.bonappetit.com/recipe/cinnamon-rolls-cream-cheese-frosting
+
+# product
+apple-macbook-air           https://www.apple.com/macbook-air/
+ikea-billy                  https://www.ikea.com/us/en/p/billy-bookcase-white-00263850/
+dji-mini4                   https://www.dji.com/mini-4-pro
+
+# book
+standardebooks-pnp          https://standardebooks.org/ebooks/jane-austen/pride-and-prejudice
+penguin-left-hand           https://www.penguinrandomhouse.com/books/292283/the-left-hand-of-darkness-by-ursula-k-le-guin/
+openlibrary-lotr            https://openlibrary.org/works/OL27448W/The_Lord_of_the_Rings
+
+# paper
+arxiv-attention             https://arxiv.org/abs/1706.03762
+arxiv-mistral               https://arxiv.org/abs/2310.06825
+nature-numpy                https://www.nature.com/articles/s41586-020-2649-2
+plos-one                    https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0000308
+
+# video
+youtube-meatzoo             https://www.youtube.com/watch?v=jNQXAC9IVRw
+youtube-3b1b                https://www.youtube.com/watch?v=aircAruvnKk
+vimeo-player                https://vimeo.com/76979871
+
+# podcast
+npr-hibt                    https://www.npr.org/podcasts/510313/how-i-built-this
+darknet-diaries             https://darknetdiaries.com/episode/1/
+hanselminutes               https://www.hanselminutes.com/
+
+# place
+centralpark                 https://www.centralparknyc.org/visit
+strand-books                https://www.thestrand.com/
+
+# movie
+letterboxd-spirited         https://letterboxd.com/film/spirited-away/
+tmdb-spirited               https://www.themoviedb.org/movie/129
+
+# image
+commons-featured            https://commons.wikimedia.org/wiki/Commons:Featured_pictures

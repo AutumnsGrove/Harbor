@@ -568,6 +568,14 @@ whose summary ran long). That is well under the **$0.001/save** this section bud
 dollar a year at realistic volume. The expensive subscription tier wasn't paying for inference; it
 was paying for the UI and the gesture.
 
+**Re-measured 2026-11-22 on the scored set:** 41 live saves cost roughly **$0.0015 each** — write
+calls of $0.0011–$0.0017, with 250–340 completion tokens and the same `MaxTokens: 800`. Token counts
+are in line with the first run, so the difference is **price per token, not usage**, for the same
+requested and served model. At personal volume either figure is dollars a year, so nothing here
+changes a decision; but the **$0.001/save** budget above is no longer met, and if the higher figure
+holds it should be revised to $0.002 rather than the cap or the model changed. Re-check at 100 real
+saves (`make enrich-score` prints what a run cost).
+
 ---
 
 ## 7. Data model (sketch — **OPEN** in details)
