@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"strings"
@@ -724,7 +725,8 @@ func TestRunResumesFromTheCheckpoint(t *testing.T) {
 	}
 }
 
-// A cancelled context stops the run where it is, without losing what it wrote.
+// A cancelled context stops the run where it is, without losing what it wrote
+// and without claiming the row it was writing failed.
 func TestRunStopsOnCancellation(t *testing.T) {
 	e := newEnv(t)
 	ctx, cancel := context.WithCancel(e.ctx)
@@ -749,6 +751,14 @@ func TestRunStopsOnCancellation(t *testing.T) {
 	}
 	if report.Imported != 1 {
 		t.Errorf("report = %+v, want the one row that was written", report)
+	}
+	// The interrupted row is the run stopping, not a failed row: counting it as
+	// failed would leave it behind the checkpoint, and the resume would skip it.
+	if report.Failed != 0 {
+		t.Errorf("report = %+v, want no failed rows for a cancellation", report)
+	}
+	if n := len(e.library(t).Items); n != 1 {
+		t.Errorf("%d items after the cancel, want 1", n)
 	}
 }
 
@@ -830,3 +840,119 @@ func TestRunDryRunDoesNotTouchHighlights(t *testing.T) {
 		t.Errorf("highlights = %+v, want the stored one untouched by the dry run", got)
 	}
 }
+
+// cancelSource cancels the run from inside Next, which is the only way to reach
+// the row-write path with a dead context: cancelling from OnCheckpoint stops the
+// run at the loop's own check before any write is attempted.
+type cancelSource struct {
+	rows   []string // the CSV rows, without the header
+	at     int      // cancel when Next is called for this row (1-based)
+	cancel context.CancelFunc
+	next   int
+}
+
+func (s *cancelSource) Next() (Row, error) {
+	if s.next >= len(s.rows) {
+		return Row{}, io.EOF
+	}
+	s.next++
+	if s.next == s.at {
+		s.cancel()
+	}
+	row, err := parseCSVRow(strings.NewReader(header + s.rows[s.next-1]))
+	return row, err
+}
+
+func (s *cancelSource) UnknownColumns() []string { return nil }
+func (s *cancelSource) Warnings() []string       { return nil }
+func (s *cancelSource) CarriesHighlights() bool  { return true }
+
+// parseCSVRow reads one row out of a one-row CSV. The reader is reused so a test
+// can cancel mid-file without a real file.
+func parseCSVRow(src io.Reader) (Row, error) {
+	cr, err := NewCSVReader(src)
+	if err != nil {
+		return Row{}, err
+	}
+	return cr.Next()
+}
+
+// The interrupted row must be re-read by the resume, not skipped: if it is
+// counted in the report the stored checkpoint lands past it and its item is lost
+// — the exact bug this file exists to prevent, which only a cancellation inside
+// a row's write can reach.
+func TestRunResumesTheInterruptedRow(t *testing.T) {
+	e := newEnv(t)
+	rows := []string{
+		`1,One,,,"https://example.com/1",A,,"2020-01-01T00:00:00Z",,Highlight:one,false`,
+		`2,Two,,,"https://example.com/2",A,,"2020-01-01T00:00:00Z",,Highlight:two,false`,
+		`3,Three,,,"https://example.com/3",A,,"2020-01-01T00:00:00Z",,Highlight:three,false`,
+	}
+
+	ctx, cancel := context.WithCancel(e.ctx)
+	src := &cancelSource{rows: rows, at: 2, cancel: cancel}
+	first, err := Run(ctx, e.store, src, Options{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("first pass err = %v, want context.Canceled", err)
+	}
+	if first.Total != 1 || first.Imported != 1 || first.Failed != 0 {
+		t.Fatalf("first pass = %+v, want the interrupted row neither counted nor failed", first)
+	}
+
+	// The resume starts where the first pass stopped, so row 2 is read again.
+	src2, err := NewCSVSource(strings.NewReader(header + strings.Join(rows, "\n") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(e.ctx, e.store, src2, Options{SkipRows: first.Total}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+
+	library := e.library(t)
+	if len(library.Items) != 3 {
+		t.Fatalf("%d items after the resume, want 3 (the interrupted row was skipped)", len(library.Items))
+	}
+	if len(library.Highlights) != 3 {
+		t.Errorf("%d highlights after the resume, want 3", len(library.Highlights))
+	}
+}
+
+// A flush cut short by the interrupt must not look like a finished run: the CLI
+// closes the run done only when Run returns nil.
+func TestRunFinalFlushReportsCancellation(t *testing.T) {
+	e := newEnv(t)
+	rows := []string{`1,One,,,"https://example.com/1",A,,"2020-01-01T00:00:00Z",,Highlight:one,false`}
+
+	// Cancel as the source reports EOF, so the interrupt lands in the final flush.
+	ctx, cancel := context.WithCancel(e.ctx)
+	src := &eofCancelSource{rows: rows, cancel: cancel}
+	report, err := Run(ctx, e.store, src, Options{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled from the final flush", err)
+	}
+	if report.Highlights != 1 {
+		t.Errorf("report = %+v, want the row counted", report)
+	}
+	if n := len(e.library(t).Highlights); n != 0 {
+		t.Errorf("%d highlights written, want 0: the flush died with the context", n)
+	}
+}
+
+type eofCancelSource struct {
+	rows   []string
+	cancel context.CancelFunc
+	done   bool
+}
+
+func (s *eofCancelSource) Next() (Row, error) {
+	if s.done {
+		s.cancel()
+		return Row{}, io.EOF
+	}
+	s.done = true
+	return parseCSVRow(strings.NewReader(header + s.rows[0]))
+}
+
+func (s *eofCancelSource) UnknownColumns() []string { return nil }
+func (s *eofCancelSource) Warnings() []string       { return nil }
+func (s *eofCancelSource) CarriesHighlights() bool  { return true }

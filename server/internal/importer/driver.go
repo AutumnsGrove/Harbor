@@ -122,25 +122,40 @@ func Run(ctx context.Context, s *store.Store, src Source, opts Options) (Report,
 		if err := r.ctx.Err(); err != nil {
 			// Stop where we are and keep what was written: the checkpoint says
 			// how far, and the next run starts from there.
-			r.flush()
+			_ = r.flush()
 			return r.report, err
 		}
 		row, err := src.Next()
 		switch {
 		case errors.Is(err, io.EOF):
-			r.flush()
+			// The final flush is a write like any other: if the interrupt landed
+			// during it, the run has not finished, and saying so is what makes
+			// the CLI close it cancelled instead of done.
+			if err := r.flush(); err != nil {
+				return r.report, err
+			}
 			r.report.FileWarnings = append(r.report.FileWarnings, src.Warnings()...)
 			return r.report, nil
 		case err != nil:
 			return r.report, fmt.Errorf("reading the import file: %w", err)
 		}
 		r.report.Total++
-		r.row(row)
+		if err := r.row(row); err != nil {
+			// The context died while writing this row. It is not counted, and not
+			// reported as a failure: the checkpoint the caller stores must sit
+			// *behind* this record, so the resume reads it again (re-merging it is
+			// idempotent, and skipping it would lose the item).
+			r.report.Total--
+			_ = r.flush()
+			return r.report, err
+		}
 		if err := r.checkpoint(); err != nil {
 			return r.report, err
 		}
 	}
-	r.flush()
+	if err := r.flush(); err != nil {
+		return r.report, err
+	}
 	r.report.FileWarnings = append(r.report.FileWarnings, src.Warnings()...)
 	return r.report, nil
 }
@@ -184,39 +199,41 @@ type pendingImport struct {
 }
 
 // row turns one record into an item, or explains why it could not.
-func (r *runner) row(row Row) {
+//
+// It returns an error only when the run itself has to stop — a cancelled
+// context mid-write — because a row that has been applied must never be
+// reported as failed while the resume skips past it.
+func (r *runner) row(row Row) error {
 	r.noteWarnings(row)
 	if strings.TrimSpace(row.URL) == "" {
 		// A bookmark export's row without a URL is not a note: Raindrop always
 		// writes one, so this is a broken row and it is counted as skipped.
 		r.report.Skipped++
-		return
+		return nil
 	}
 
 	canonical, err := canon.CanonicalURL(row.URL)
 	if err != nil {
 		r.fail(row, err)
-		return
+		return nil
 	}
 
 	r.accumulate(canonical, row)
 	existing, found, err := r.existing(canonical)
 	if err != nil {
-		r.fail(row, err)
-		return
+		return r.rowError(row, err)
 	}
 
 	if r.opts.DryRun {
 		r.dryRunRow(row, canonical, found)
-		return
+		return nil
 	}
 
 	// Count only what happened: a row whose write fails is a failure, not an
 	// import as well.
 	_, merged, err := r.write(row, canonical, existing, found)
 	if err != nil {
-		r.fail(row, err)
-		return
+		return r.rowError(row, err)
 	}
 	if merged {
 		r.report.Merged++
@@ -227,6 +244,19 @@ func (r *runner) row(row Row) {
 	if row.Favorite {
 		r.report.Favourites++
 	}
+	return nil
+}
+
+// rowError separates the two kinds of failure. A cancelled context is the run
+// stopping, and it must propagate: the checkpoint is behind this row, so a
+// resume will read it again. Anything else is this row's own problem, counted
+// and reported while the run carries on.
+func (r *runner) rowError(row Row, err error) error {
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	r.fail(row, err)
+	return nil
 }
 
 // rememberSkipped keeps a resumed run's view of the file complete without
@@ -373,7 +403,9 @@ func (r *runner) checkpoint() error {
 	if r.report.Total%r.opts.CheckpointEvery != 0 {
 		return nil
 	}
-	r.flush()
+	if err := r.flush(); err != nil {
+		return err
+	}
 	return r.opts.OnCheckpoint(r.opts.SkipRows+r.report.Total, r.report)
 }
 
@@ -383,11 +415,17 @@ func (r *runner) checkpoint() error {
 // A source that cannot express highlights (Netscape HTML) never reaches the
 // store here: it is imported over a library that already has them, and clearing
 // them would destroy the one thing the owner cannot recreate.
-func (r *runner) flush() {
+// flush returns an error only when the run's context died during the write: the
+// caller has to treat that as "not finished", or a run whose final highlights
+// were never written would be recorded as done.
+func (r *runner) flush() error {
 	// A dry run writes nothing, highlights included: its pending entries are the
 	// preview, and filling in an item id here would let it overwrite a real item.
 	if r.opts.DryRun || !r.carriesHighlights {
-		return
+		return nil
+	}
+	if r.ctx.Err() != nil {
+		return r.ctx.Err()
 	}
 	for canonical, p := range r.pending {
 		if p.itemID == "" {
@@ -398,15 +436,30 @@ func (r *runner) flush() {
 				continue
 			}
 			item, found, err := r.existing(canonical)
-			if err != nil || !found {
+			if err != nil {
+				// A dead context here must not be mistaken for "nothing to do":
+				// the caller records the run as done when flush returns nil.
+				if ctxErr := r.ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				continue
+			}
+			if !found {
 				continue
 			}
 			p.itemID = item.ID
 		}
 		if err := r.store.ReplaceImportedHighlights(r.ctx, p.itemID, p.quotes); err != nil {
+			// A flush cut short by the interrupt is not the row's fault, and the
+			// resume rebuilds the set from the file's own rows: reporting it as a
+			// failure would be a lie in the report.
+			if ctxErr := r.ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			r.fail(Row{Record: p.record, URL: p.url}, err)
 		}
 	}
+	return nil
 }
 
 func containsString(haystack []string, needle string) bool {
