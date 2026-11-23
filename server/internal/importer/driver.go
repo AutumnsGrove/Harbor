@@ -106,12 +106,16 @@ func Run(ctx context.Context, s *store.Store, src Source, opts Options) (Report,
 		return r.report, fmt.Errorf("the seeded Favourites Space is missing: %w", r.err)
 	}
 
-	// A resume re-reads nothing it has already applied: import is idempotent by
-	// canonical URL, but re-merging 1,400 rows to reach row 1,401 is wasteful.
+	// A resume does not re-apply the rows an earlier run wrote, but it does read
+	// them: the file is the truth for a URL's highlights, and a URL can appear on
+	// both sides of the checkpoint. Skipping the bytes without remembering their
+	// quotes would let flush() delete what the first pass wrote.
 	for skipped := 0; skipped < opts.SkipRows; skipped++ {
-		if _, err := src.Next(); err != nil {
+		row, err := src.Next()
+		if err != nil {
 			break
 		}
+		r.rememberSkipped(row)
 	}
 
 	for opts.Limit <= 0 || r.report.Total < opts.Limit {
@@ -218,6 +222,16 @@ func (r *runner) row(row Row) {
 	r.report.Highlights += len(row.Highlights)
 	if row.Favorite {
 		r.report.Favourites++
+	}
+}
+
+// rememberSkipped keeps a resumed run's view of the file complete without
+// applying it: the quotes are accumulated, the row is not written. A row that
+// could not have been imported the first time is ignored here too.
+func (r *runner) rememberSkipped(row Row) {
+	full := row
+	if canonical, err := canon.CanonicalURL(row.URL); err == nil {
+		r.accumulate(canonical, full)
 	}
 }
 
@@ -365,9 +379,15 @@ func (r *runner) flush() {
 	if !r.carriesHighlights {
 		return
 	}
-	for _, p := range r.pending {
+	for canonical, p := range r.pending {
 		if p.itemID == "" {
-			continue
+			// Only the skipped part of a resumed run contributed for this URL, so
+			// its item is looked up rather than remembered.
+			item, found, err := r.existing(canonical)
+			if err != nil || !found {
+				continue
+			}
+			p.itemID = item.ID
 		}
 		if err := r.store.ReplaceImportedHighlights(r.ctx, p.itemID, p.quotes); err != nil {
 			r.fail(Row{Record: p.record, URL: p.url}, err)

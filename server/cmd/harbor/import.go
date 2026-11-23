@@ -119,12 +119,17 @@ func importCommand(ctx context.Context, getenv func(string) string, args []strin
 		fmt.Fprintf(stdout, "resuming the cancelled run of this file from record %d\n", skip)
 	}
 
+	// Bookkeeping writes must survive the interrupt that stops the import:
+	// Ctrl-C cancels ctx, and a checkpoint (or the final state) written on it
+	// would fail, leaving the row saying "running" at an older position than
+	// the one the operator was told.
+	bookkeeping := context.WithoutCancel(ctx)
 	checkpoint := func(records int, report importer.Report) error {
 		encoded, err := json.Marshal(report)
 		if err != nil {
 			return fmt.Errorf("encoding the checkpoint: %w", err)
 		}
-		return library.CheckpointImportRun(ctx, run.ID, records, string(encoded))
+		return library.CheckpointImportRun(bookkeeping, run.ID, records, string(encoded))
 	}
 
 	report, err := importer.Run(ctx, library, source, importer.Options{
@@ -142,18 +147,15 @@ func importCommand(ctx context.Context, getenv func(string) string, args []strin
 	}
 
 	// Close the run: done if we reached the end, cancelled if the operator
-	// stopped it, so the next attempt resumes rather than restarts.
-	final := store.ImportDone
-	if errors.Is(err, context.Canceled) {
-		final = store.ImportCancelled
+	// stopped it, so the next attempt resumes rather than restarts. A Ctrl-C is
+	// a controlled stop, not a failure — it has already been reported.
+	stopped := errors.Is(err, context.Canceled)
+	if err := finishImportRun(ctx, library, run.ID, skip+report.Total, report, stopped); err != nil {
+		return err
+	}
+	if stopped {
 		fmt.Fprintf(stdout, "stopped at record %d; run the same command again to resume\n", skip+report.Total)
-	}
-	encoded, encodeErr := json.Marshal(report)
-	if encodeErr != nil {
-		return fmt.Errorf("encoding the report: %w", encodeErr)
-	}
-	if finishErr := library.FinishImportRun(ctx, run.ID, final, skip+report.Total, string(encoded)); finishErr != nil {
-		return finishErr
+		err = nil
 	}
 
 	if *reportPath != "" {
@@ -227,6 +229,21 @@ func writeImportReport(stdout io.Writer, report importer.Report, dryRun bool) er
 		fmt.Fprintln(stdout, "nothing was written; run again without --dry-run to import")
 	}
 	return nil
+}
+
+// finishImportRun writes the run's final state on a context that survives the
+// interrupt: finishImportRun is reached *because* the run was cancelled, so the
+// cancelled context is the one thing it cannot use.
+func finishImportRun(ctx context.Context, library *store.Store, id string, records int, report importer.Report, stopped bool) error {
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("encoding the report: %w", err)
+	}
+	final := store.ImportDone
+	if stopped {
+		final = store.ImportCancelled
+	}
+	return library.FinishImportRun(context.WithoutCancel(ctx), id, final, records, string(encoded))
 }
 
 // fileSHA256 is the import run's key: the same file resumes, different content

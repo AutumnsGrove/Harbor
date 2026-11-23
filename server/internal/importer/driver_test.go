@@ -751,3 +751,58 @@ func TestRunStopsOnCancellation(t *testing.T) {
 		t.Errorf("report = %+v, want the one row that was written", report)
 	}
 }
+
+// A URL that appears on both sides of a checkpoint keeps every quote it has: a
+// resumed run must not flush a partial set over what the first pass wrote.
+func TestRunResumeKeepsHighlightsFromBothSidesOfTheCheckpoint(t *testing.T) {
+	e := newEnv(t)
+	body := `1,First,H1,,"https://example.com/same",A,,"2020-01-01T00:00:00Z",,Highlight:one,false
+2,Other,H2,,"https://example.com/other",A,,"2020-01-01T00:00:00Z",,Highlight:other,false
+3,Third,H3,,"https://example.com/same",A,,"2020-01-01T00:00:00Z",,Highlight:three,false
+`
+	// A single pass keeps both quotes.
+	src, err := NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(e.ctx, e.store, src, Options{}); err != nil {
+		t.Fatalf("single pass: %v", err)
+	}
+	single, err := e.store.HighlightsForItem(e.ctx, e.item(t, "https://example.com/same").ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(single) != 2 {
+		t.Fatalf("single pass kept %d quotes, want 2", len(single))
+	}
+
+	// Now the same file through a checkpoint at row 2 and a resume: the same two
+	// quotes, in the same order.
+	e2 := newEnv(t)
+	src, err = NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(e2.ctx, e2.store, src, Options{Limit: 2}); err != nil {
+		t.Fatalf("first half: %v", err)
+	}
+	src, err = NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(e2.ctx, e2.store, src, Options{SkipRows: 2}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	resumed, err := e2.store.HighlightsForItem(e2.ctx, e2.item(t, "https://example.com/same").ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resumed) != 2 {
+		t.Fatalf("the resume left %d quotes, want 2 (the first pass's must survive)", len(resumed))
+	}
+	for i := range single {
+		if resumed[i].Quote != single[i].Quote {
+			t.Errorf("quote %d = %q, want %q", i, resumed[i].Quote, single[i].Quote)
+		}
+	}
+}
