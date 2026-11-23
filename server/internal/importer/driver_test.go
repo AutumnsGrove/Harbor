@@ -620,3 +620,56 @@ func hasFileWarning(warnings []string, parts ...string) bool {
 	}
 	return false
 }
+
+// The HTML twin of the same library imports into the same items — merging, not
+// duplicating — and leaves the highlights the CSV import wrote (plans/05 exit
+// criterion 5). This is the end-to-end shape of the round trip.
+func TestRunImportsTheHTMLTwinOverTheCSV(t *testing.T) {
+	e := newEnv(t)
+	e.runCSV(t, `1,Sourdough,my note,,https://example.com/sourdough,Recipes,"baking, bread",2020-03-04T05:06:07Z,,Highlight:one,true
+`, Options{})
+	csvItem := e.item(t, "https://example.com/sourdough")
+	before := e.library(t)
+
+	html := `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<DL><p>
+    <DT><A HREF="https://example.com/sourdough" ADD_DATE="1583298367" TAGS="baking,bread">Sourdough</A>
+</DL><p>
+`
+	src, err := NewHTMLSource(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.CarriesHighlights() {
+		t.Fatal("the HTML source claims to carry highlights")
+	}
+	report, err := Run(e.ctx, e.store, src, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Merged != 1 || report.Imported != 0 {
+		t.Errorf("report = %+v, want the one bookmark merged into the CSV's item", report)
+	}
+
+	after := e.library(t)
+	if len(after.Items) != len(before.Items) {
+		t.Fatalf("the HTML import made %d items, want %d", len(after.Items), len(before.Items))
+	}
+	item := e.item(t, "https://example.com/sourdough")
+	if item.ID != csvItem.ID {
+		t.Errorf("the HTML import created a second item: %q vs %q", item.ID, csvItem.ID)
+	}
+	if !strings.Contains(item.Note, "my note") {
+		t.Errorf("note = %q, want the CSV note kept", item.Note)
+	}
+	highlights, err := e.store.HighlightsForItem(e.ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(highlights) != 1 {
+		t.Errorf("highlights = %+v, want the imported one kept across the HTML pass", highlights)
+	}
+	if names := e.spaceNames(t, item.ID); !names["Recipes"] || !names["Favourites"] {
+		t.Errorf("spaces = %v, want Recipes and Favourites kept", names)
+	}
+}

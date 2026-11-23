@@ -39,6 +39,11 @@ type Source interface {
 // NewCSVSource reads a Raindrop CSV export.
 func NewCSVSource(r io.Reader) (Source, error) { return NewCSVReader(r) }
 
+// NewHTMLSource reads a Netscape bookmark file: what a browser exports, and what
+// phase 12a's export writes. It carries no highlights, and the driver honours
+// that rather than treating the absence as a deletion.
+func NewHTMLSource(r io.Reader) (Source, error) { return NewHTMLReader(r) }
+
 // Options is what the CLI passes.
 type Options struct {
 	// DryRun reports what would happen and writes nothing. This is what gets

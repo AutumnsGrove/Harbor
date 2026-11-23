@@ -39,6 +39,7 @@ Commands:
   backup        snapshot, compress and keep the database (--list, --verify)
   restore       replace the database from a backup (--dry-run, --yes)
   replay        re-ingest the Worker's done jobs (--since 1h|<unix>|<RFC3339>)
+  import        move a Raindrop CSV or bookmarks.html in (--dry-run, --no-enrich)
   version       print the build stamp
   help          print this text
 `
@@ -73,6 +74,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout 
 		return restoreCommand(ctx, getenv, args[1:], stdout)
 	case "replay":
 		return replayCommand(ctx, getenv, args[1:], stdout)
+	case "import":
+		return importCommand(ctx, getenv, args[1:], stdout)
 	case "version":
 		fmt.Fprintln(stdout, build.Version())
 		return nil

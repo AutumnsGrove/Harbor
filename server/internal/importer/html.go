@@ -26,7 +26,9 @@ var ErrNotNetscapeHTML = errors.New("importer: not a Netscape bookmark file")
 
 // maxFolderDepth bounds nesting. Real exports are two or three levels deep
 // (spike S9: Raindrop's folders are flat), so this only ever bites a crafted
-// file, and it keeps both the stack and the per-bookmark join bounded.
+// file, and it keeps both the stack and the per-bookmark join bounded. The
+// names it keeps are the outermost ones: a bookmark 70 levels deep is filed
+// under the first 64, not the last 64.
 const maxFolderDepth = 64
 
 // HTMLReader streams a Netscape bookmark document — the format browsers write
@@ -71,6 +73,14 @@ type HTMLReader struct {
 func NewHTMLReader(src io.Reader) (*HTMLReader, error) {
 	return &HTMLReader{tok: html.NewTokenizer(src)}, nil
 }
+
+// CarriesHighlights is false: the Netscape format has no highlights at all, so
+// importing it must never clear the ones a Raindrop CSV import wrote (design.md
+// §5 calls them the part the owner cannot recreate).
+func (hr *HTMLReader) CarriesHighlights() bool { return false }
+
+// UnknownColumns is always empty: an HTML bookmark file has no columns.
+func (hr *HTMLReader) UnknownColumns() []string { return nil }
 
 // Skipped is how many anchors had no HREF, and so were not bookmarks. The driver
 // reports it; silently dropping them would make an import look complete when it

@@ -121,10 +121,26 @@ S9 is answered, so the mapping table above is measured rather than remembered. W
 - **Store writes** — the Favourites Space (migration `0002`), `EnsureManualSpace`, `AddItemToSpace`,
   `ReplaceImportedHighlights` (idempotent, and never touches the owner's own highlights),
   `HighlightsForItem`, and the read-only `FindManualSpace` a dry run needs.
+- **Driver** — canonicalise → merge → tags through the shared write path → the folder as a manual
+  Space → Favourites → highlights → `priority=-1`, with a dry run that writes nothing, a report whose
+  counters add up, and per-row failures that never stop the run. A source that cannot express
+  highlights (the HTML one) never clears the ones a CSV import wrote.
+- **CLI** — `harbor import FILE` with `--dry-run`, `--no-enrich`, `--limit` and `--report`, detecting
+  CSV or HTML from the file's contents; `docs/import.md` is the operator's page for it.
 
-Still to build, in this order: the driver (`import.go`: canonicalise → merge → tags → Space →
-highlights → `priority=-1`), `import_runs` checkpoint/resume, the CLI (`--dry-run`, `--no-enrich`,
-`--limit`, `--report`), Settings → Import, first-run wiring, `docs/import.md`.
+**The real export has been run** (2026-11-22), on a throwaway database, with the export S9 measured:
+`harbor import <export>.csv --dry-run` reports 1,476 of 1,476 rows, 0 merges, 23 Spaces to create,
+268 highlights, 6 favourites, and no warnings, failures or unknown columns. The real run then wrote
+1,476 items (all `source=import`, `priority=-1`, `state=ready` under `--no-enrich`), 1,482 Space
+memberships, 268 highlights and 2,051 canonical tags (down from 2,134 raw strings — `3D`/`3d` and
+punctuation collapse), with dates preserved from 2024-03-21 to 2026-11-14. A second run imported 0
+and merged 1,476, created no Spaces and left the library identical, so idempotence holds on the real
+file and not only under `rapid`. 23 Spaces rather than 24 folders is the `Read Later` folder reusing
+the seeded Read later Space case-insensitively, which is the intended behaviour.
+
+Still to build: `import_runs` checkpoint/resume (a cancelled run is safe to repeat, but it restarts
+from the top), Settings → Import and first-run wiring. The exit demo proper (on the potato, from the
+UI) has not been run.
 
 The exit demo has not been run, nothing has been imported into the potato, and this phase is **not**
 ticked in [README.md](README.md).
@@ -151,7 +167,7 @@ Demo, with the real subscription data:
 
 - **Import is the one operation that can double a library.** Everything about it is idempotence-first;
   run the dry run on real data, and take a `VACUUM INTO` snapshot before the first real run
-  (`harbor backup --now`). Do not do the first real run until milestone M4 (phase 12a): the restore
+  (`harbor backup`). Do not do the first real run until milestone M4 (phase 12a): the restore
   drill must have been run, because this is the moment the box starts holding irreplaceable data.
 - **Raindrop's export changes.** The unknown-column report is the early warning. Do not silently
   coerce.
