@@ -77,6 +77,11 @@
 		cancelled = false;
 		try {
 			status = await api.import.start(file, { enrich });
+			// The dry run's numbers described the whole file; once the run is
+			// going they are not what happened, and after a resume they are not
+			// even about the same pass. Only the run's own report is shown from
+			// here on.
+			preview = null;
 			phase = 'running';
 			void poll();
 		} catch (error) {
@@ -138,10 +143,8 @@
 	const total = $derived(status?.bytesTotal ?? 0);
 	const percent = $derived(total > 0 ? Math.min(100, Math.round((read / total) * 100)) : 0);
 	const records = $derived(status?.run?.checkpoint ?? 0);
-
-	function report(): ImportReport | null {
-		return preview?.report ?? status?.run?.report ?? null;
-	}
+	/** What the run itself wrote: the preview never reaches these panels. */
+	const runReport = $derived<ImportReport | null>(status?.run?.report ?? null);
 
 	function finishedWhen(iso: string | null | undefined): string {
 		if (!iso) return '';
@@ -372,23 +375,23 @@
 				</p>
 			{/if}
 
-			{#if report()}
+			{#if runReport}
 				<div class="report">
-					<div><strong>{number.format(report()?.imported ?? 0)}</strong><span>new saves</span></div>
-					<div><strong>{number.format(report()?.merged ?? 0)}</strong><span>merged</span></div>
-					<div><strong>{number.format(report()?.spaces_created ?? 0)}</strong><span>Spaces</span></div>
-					<div><strong>{number.format(report()?.highlights ?? 0)}</strong><span>highlights</span></div>
-					<div><strong>{number.format(report()?.favourites ?? 0)}</strong><span>favourites</span></div>
-					{#if (report()?.skipped ?? 0) > 0}
-						<div><strong>{number.format(report()?.skipped ?? 0)}</strong><span>skipped</span></div>
+					<div><strong>{number.format(runReport.imported)}</strong><span>new saves</span></div>
+					<div><strong>{number.format(runReport.merged)}</strong><span>merged</span></div>
+					<div><strong>{number.format(runReport.spaces_created ?? 0)}</strong><span>Spaces</span></div>
+					<div><strong>{number.format(runReport.highlights)}</strong><span>highlights</span></div>
+					<div><strong>{number.format(runReport.favourites)}</strong><span>favourites</span></div>
+					{#if runReport.skipped > 0}
+						<div><strong>{number.format(runReport.skipped)}</strong><span>skipped</span></div>
 					{/if}
-					{#if (report()?.failed ?? 0) > 0}
-						<div><strong>{number.format(report()?.failed ?? 0)}</strong><span>failed</span></div>
+					{#if runReport.failed > 0}
+						<div><strong>{number.format(runReport.failed)}</strong><span>failed</span></div>
 					{/if}
 				</div>
 			{/if}
 
-			{#each report()?.errors ?? [] as row (row.record)}
+			{#each runReport?.errors ?? [] as row (row.record)}
 				<p class="note">
 					record {number.format(row.record)}
 					{#if row.url}<span class="code">{row.url}</span>{/if} — {row.reason}
