@@ -135,7 +135,13 @@ func Run(ctx context.Context, s *store.Store, src Source, opts Options) (Report,
 			return r.report, fmt.Errorf("reading the import file: %w", err)
 		}
 		r.report.Total++
-		r.row(row)
+		if err := r.row(row); err != nil {
+			// The context died while writing this row: stop here rather than
+			// count it as a failure, because everything after it is unprocessed
+			// and the resume re-reads from the checkpoint.
+			r.flush()
+			return r.report, err
+		}
 		if err := r.checkpoint(); err != nil {
 			return r.report, err
 		}
@@ -184,39 +190,41 @@ type pendingImport struct {
 }
 
 // row turns one record into an item, or explains why it could not.
-func (r *runner) row(row Row) {
+//
+// It returns an error only when the run itself has to stop — a cancelled
+// context mid-write — because a row that has been applied must never be
+// reported as failed while the resume skips past it.
+func (r *runner) row(row Row) error {
 	r.noteWarnings(row)
 	if strings.TrimSpace(row.URL) == "" {
 		// A bookmark export's row without a URL is not a note: Raindrop always
 		// writes one, so this is a broken row and it is counted as skipped.
 		r.report.Skipped++
-		return
+		return nil
 	}
 
 	canonical, err := canon.CanonicalURL(row.URL)
 	if err != nil {
 		r.fail(row, err)
-		return
+		return nil
 	}
 
 	r.accumulate(canonical, row)
 	existing, found, err := r.existing(canonical)
 	if err != nil {
-		r.fail(row, err)
-		return
+		return r.rowError(row, err)
 	}
 
 	if r.opts.DryRun {
 		r.dryRunRow(row, canonical, found)
-		return
+		return nil
 	}
 
 	// Count only what happened: a row whose write fails is a failure, not an
 	// import as well.
 	_, merged, err := r.write(row, canonical, existing, found)
 	if err != nil {
-		r.fail(row, err)
-		return
+		return r.rowError(row, err)
 	}
 	if merged {
 		r.report.Merged++
@@ -227,6 +235,19 @@ func (r *runner) row(row Row) {
 	if row.Favorite {
 		r.report.Favourites++
 	}
+	return nil
+}
+
+// rowError separates the two kinds of failure. A cancelled context is the run
+// stopping, and it must propagate: the checkpoint is behind this row, so a
+// resume will read it again. Anything else is this row's own problem, counted
+// and reported while the run carries on.
+func (r *runner) rowError(row Row, err error) error {
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	r.fail(row, err)
+	return nil
 }
 
 // rememberSkipped keeps a resumed run's view of the file complete without
@@ -386,7 +407,11 @@ func (r *runner) checkpoint() error {
 func (r *runner) flush() {
 	// A dry run writes nothing, highlights included: its pending entries are the
 	// preview, and filling in an item id here would let it overwrite a real item.
-	if r.opts.DryRun || !r.carriesHighlights {
+	//
+	// A cancelled run has nothing left to write: the flush after a stop would
+	// fail on the dead context and report it as a row failure, which is exactly
+	// the false failure the checkpoint exists to avoid.
+	if r.opts.DryRun || !r.carriesHighlights || r.ctx.Err() != nil {
 		return
 	}
 	for canonical, p := range r.pending {
@@ -404,6 +429,12 @@ func (r *runner) flush() {
 			p.itemID = item.ID
 		}
 		if err := r.store.ReplaceImportedHighlights(r.ctx, p.itemID, p.quotes); err != nil {
+			// A flush cut short by the interrupt is not the row's fault, and the
+			// resume rebuilds the set from the file's own rows: reporting it as a
+			// failure would be a lie in the report.
+			if r.ctx.Err() != nil {
+				return
+			}
 			r.fail(Row{Record: p.record, URL: p.url}, err)
 		}
 	}

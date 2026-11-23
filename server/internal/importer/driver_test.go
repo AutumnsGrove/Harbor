@@ -724,7 +724,8 @@ func TestRunResumesFromTheCheckpoint(t *testing.T) {
 	}
 }
 
-// A cancelled context stops the run where it is, without losing what it wrote.
+// A cancelled context stops the run where it is, without losing what it wrote
+// and without claiming the row it was writing failed.
 func TestRunStopsOnCancellation(t *testing.T) {
 	e := newEnv(t)
 	ctx, cancel := context.WithCancel(e.ctx)
@@ -749,6 +750,14 @@ func TestRunStopsOnCancellation(t *testing.T) {
 	}
 	if report.Imported != 1 {
 		t.Errorf("report = %+v, want the one row that was written", report)
+	}
+	// The interrupted row is the run stopping, not a failed row: counting it as
+	// failed would leave it behind the checkpoint, and the resume would skip it.
+	if report.Failed != 0 {
+		t.Errorf("report = %+v, want no failed rows for a cancellation", report)
+	}
+	if n := len(e.library(t).Items); n != 1 {
+		t.Errorf("%d items after the cancel, want 1", n)
 	}
 }
 
