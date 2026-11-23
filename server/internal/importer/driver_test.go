@@ -806,3 +806,27 @@ func TestRunResumeKeepsHighlightsFromBothSidesOfTheCheckpoint(t *testing.T) {
 		}
 	}
 }
+
+// A dry run writes nothing, highlights included — not even the fallback that a
+// resumed run uses to fill in an item it never wrote.
+func TestRunDryRunDoesNotTouchHighlights(t *testing.T) {
+	e := newEnv(t)
+	e.runCSV(t, `1,Seed,,,"https://example.com/a",,,"2020-01-01T00:00:00Z",,Highlight:old,false
+`, Options{})
+	item := e.item(t, "https://example.com/a")
+
+	// The file now says something different; the preview must not apply it.
+	dry := e.runCSV(t, `2,Seed,,,"https://example.com/a",,,"2020-01-01T00:00:00Z",,Highlight:new,false
+`, Options{DryRun: true})
+	if dry.Imported != 0 || dry.Merged != 1 {
+		t.Fatalf("dry run = %+v, want one merge", dry)
+	}
+
+	got, err := e.store.HighlightsForItem(e.ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Quote != "old" {
+		t.Errorf("highlights = %+v, want the stored one untouched by the dry run", got)
+	}
+}

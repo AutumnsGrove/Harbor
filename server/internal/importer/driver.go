@@ -177,6 +177,10 @@ type pendingImport struct {
 	record int
 	url    string
 	quotes []string
+	// fromSkipped marks an entry whose only contributions were rows a resumed
+	// run skipped: its item has to be looked up at flush time, because nothing
+	// in this run wrote it.
+	fromSkipped bool
 }
 
 // row turns one record into an item, or explains why it could not.
@@ -229,9 +233,13 @@ func (r *runner) row(row Row) {
 // applying it: the quotes are accumulated, the row is not written. A row that
 // could not have been imported the first time is ignored here too.
 func (r *runner) rememberSkipped(row Row) {
-	full := row
-	if canonical, err := canon.CanonicalURL(row.URL); err == nil {
-		r.accumulate(canonical, full)
+	canonical, err := canon.CanonicalURL(row.URL)
+	if err != nil {
+		return
+	}
+	r.accumulate(canonical, row)
+	if p, ok := r.pending[canonical]; ok {
+		p.fromSkipped = true
 	}
 }
 
@@ -376,13 +384,19 @@ func (r *runner) checkpoint() error {
 // store here: it is imported over a library that already has them, and clearing
 // them would destroy the one thing the owner cannot recreate.
 func (r *runner) flush() {
-	if !r.carriesHighlights {
+	// A dry run writes nothing, highlights included: its pending entries are the
+	// preview, and filling in an item id here would let it overwrite a real item.
+	if r.opts.DryRun || !r.carriesHighlights {
 		return
 	}
 	for canonical, p := range r.pending {
 		if p.itemID == "" {
-			// Only the skipped part of a resumed run contributed for this URL, so
-			// its item is looked up rather than remembered.
+			// Only rows this run skipped can leave an entry without an item: look
+			// it up rather than let the URL go unwritten. Anything else is a row
+			// whose write failed, and that is already in the report.
+			if !p.fromSkipped {
+				continue
+			}
 			item, found, err := r.existing(canonical)
 			if err != nil || !found {
 				continue
