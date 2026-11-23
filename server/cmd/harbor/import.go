@@ -31,9 +31,9 @@ Flags:
   --report FILE write the report as JSON to FILE
 
 Import is idempotent: running it twice leaves the same library, so a cancelled
-or interrupted run is safe to repeat. Take a snapshot first
-(` + "`harbor backup --now`" + `) — this is the operation that doubles a library
-if it is wrong, and the snapshot is the way back.
+or interrupted run is safe to repeat. Take a snapshot first (` + "`harbor backup`" + `, and see
+docs/runbook.md) — this is the operation that doubles a library if it is wrong,
+and the snapshot is the way back.
 `
 
 // importCommand is the real interface for a big file: the UI's drop zone is

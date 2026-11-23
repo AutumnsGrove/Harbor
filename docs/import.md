@@ -36,7 +36,7 @@ imported highlights leaves them alone; it never treats "this format cannot say" 
 
 ```bash
 # 1. A snapshot first. Import is the one operation that can double a library.
-make backup-now            # or: harbor backup --now
+harbor backup              # or, on the potato: docker compose exec harbor /app/harbor backup
 
 # 2. Dry run, and read it.
 harbor import ~/Downloads/<export>.csv --dry-run --report /tmp/import.json

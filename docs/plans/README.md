@@ -203,7 +203,7 @@ happened, and `make check` is green on `main`.
 | 2 | Core library | ◐ store, Worker ingest, items API, pending window and the library UI are in the tree and green; the potato demo and scheduler skeleton outstanding |
 | 3 | Enrichment | ◐ code complete and merged, 95.1% kind accuracy on the 41-case scored set; the potato demo is outstanding |
 | 4 | Front doors | ☐ |
-| 5 | Import | ◐ S9 answered 2026-11-22; parsers, store writes, the driver and the CLI are merged and green, the UI and the real-export dry run are outstanding |
+| 5 | Import | ◐ S9 answered and the real export imported on a throwaway database 2026-11-22 (1,476 items, twice); the CLI is in review, the UI, resume and the potato demo are outstanding |
 | 6 | Images + documents | ☐ |
 | 7 | Transcripts | ☐ |
 | 8 | Reader + highlights | ☐ |

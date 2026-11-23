@@ -205,7 +205,7 @@ Demo, the drill that decides whether the project works:
 1. `harbor export` a real library → open three Markdown files in a plain editor, open
    `bookmarks.html` in a browser, verify images render, verify a highlight is present with its note.
 2. Re-import the export into an empty Harbor → equivalent library; note the diff (should be zero).
-3. `harbor backup --now` → snapshot created, verified, uploaded; `--list` shows 30-day retention.
+3. `harbor backup` → snapshot created, verified, uploaded; `--list` shows 30-day retention.
 4. **Restore drill on a clean box:** stop the container, `docker compose run --rm harbor restore
    <snapshot> --yes` into a fresh `data/`, run `harbor replay --since <snapshot time>`, start, and confirm: item count, tags, spaces, highlights, one image and one PDF open,
    search works, and the mirror state is correct. Time it; put the number in the runbook.

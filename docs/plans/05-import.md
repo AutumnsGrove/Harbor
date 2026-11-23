@@ -167,7 +167,7 @@ Demo, with the real subscription data:
 
 - **Import is the one operation that can double a library.** Everything about it is idempotence-first;
   run the dry run on real data, and take a `VACUUM INTO` snapshot before the first real run
-  (`harbor backup --now`). Do not do the first real run until milestone M4 (phase 12a): the restore
+  (`harbor backup`). Do not do the first real run until milestone M4 (phase 12a): the restore
   drill must have been run, because this is the moment the box starts holding irreplaceable data.
 - **Raindrop's export changes.** The unknown-column report is the early warning. Do not silently
   coerce.

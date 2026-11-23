@@ -89,11 +89,12 @@ func TestImportCommandDryRunThenReal(t *testing.T) {
 	}
 }
 
-// A bookmarks.html is detected by its contents, not its name, and imports
-// through the same command.
+// The format is chosen from the contents, not the name. The HTML here has no
+// .html suffix and the CSV below is called bookmarks.html, so an extension-based
+// implementation fails both halves.
 func TestImportCommandDetectsHTML(t *testing.T) {
 	dataDir := t.TempDir()
-	path := writeImportFile(t, "bookmarks.html", `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+	path := writeImportFile(t, "3cad2d1c-677d-4697-a100-69c64d3e72f4", `<!DOCTYPE NETSCAPE-Bookmark-file-1>
 <DL><p>
     <DT><A HREF="https://example.com/a" ADD_DATE="1700000000">A &amp; B</A>
 </DL><p>
@@ -105,6 +106,16 @@ func TestImportCommandDetectsHTML(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "imported 1 of 1 rows") {
 		t.Errorf("printed %q", out.String())
+	}
+
+	// The mirror image: a Raindrop CSV that happens to be called bookmarks.html.
+	csvPath := writeImportFile(t, "bookmarks.html", importCSV)
+	out.Reset()
+	if err := run(context.Background(), []string{"import", csvPath, "--dry-run"}, exportEnv(t, t.TempDir()), &out); err != nil {
+		t.Fatalf("CSV named bookmarks.html: %v", err)
+	}
+	if !strings.Contains(out.String(), "would import 2 of 2 rows") {
+		t.Errorf("a CSV named bookmarks.html printed %q", out.String())
 	}
 }
 
