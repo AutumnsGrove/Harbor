@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -71,6 +74,10 @@ func importCommand(ctx context.Context, getenv func(string) string, args []strin
 	}
 	defer file.Close()
 
+	sum, err := fileSHA256(file)
+	if err != nil {
+		return err
+	}
 	source, err := openImportSource(file, filepath.Base(path))
 	if err != nil {
 		return err
@@ -86,16 +93,69 @@ func importCommand(ctx context.Context, getenv func(string) string, args []strin
 	}
 	defer library.Close()
 
-	report, err := importer.Run(ctx, library, source, importer.Options{
-		DryRun:   *dryRun,
-		NoEnrich: *noEnrich,
-		Limit:    *limit,
-	})
-	// A report is printed even when the run failed halfway: the counts are how
-	// a human finds out how far it got.
-	if err := writeImportReport(stdout, report, *dryRun); err != nil {
+	// A dry run writes nothing, import_runs included: it reports what the rest
+	// of the file would do and leaves no trace.
+	if *dryRun {
+		report, err := importer.Run(ctx, library, source, importer.Options{DryRun: true, Limit: *limit})
+		if err := writeImportReport(stdout, report, true); err != nil {
+			return err
+		}
+		if *reportPath != "" {
+			if err := writeImportReportJSON(*reportPath, report); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "report written to %s\n", *reportPath)
+		}
 		return err
 	}
+
+	run, resumed, err := library.StartImportRun(ctx, sum, "{}")
+	if err != nil {
+		return err
+	}
+	skip := 0
+	if resumed {
+		skip = run.Checkpoint
+		fmt.Fprintf(stdout, "resuming the cancelled run of this file from record %d\n", skip)
+	}
+
+	checkpoint := func(records int, report importer.Report) error {
+		encoded, err := json.Marshal(report)
+		if err != nil {
+			return fmt.Errorf("encoding the checkpoint: %w", err)
+		}
+		return library.CheckpointImportRun(ctx, run.ID, records, string(encoded))
+	}
+
+	report, err := importer.Run(ctx, library, source, importer.Options{
+		NoEnrich:        *noEnrich,
+		Limit:           *limit,
+		SkipRows:        skip,
+		CheckpointEvery: 100,
+		OnCheckpoint:    checkpoint,
+	})
+
+	// A report is printed even when the run stopped early: the counts are how a
+	// human finds out how far it got.
+	if err := writeImportReport(stdout, report, false); err != nil {
+		return err
+	}
+
+	// Close the run: done if we reached the end, cancelled if the operator
+	// stopped it, so the next attempt resumes rather than restarts.
+	final := store.ImportDone
+	if errors.Is(err, context.Canceled) {
+		final = store.ImportCancelled
+		fmt.Fprintf(stdout, "stopped at record %d; run the same command again to resume\n", skip+report.Total)
+	}
+	encoded, encodeErr := json.Marshal(report)
+	if encodeErr != nil {
+		return fmt.Errorf("encoding the report: %w", encodeErr)
+	}
+	if finishErr := library.FinishImportRun(ctx, run.ID, final, skip+report.Total, string(encoded)); finishErr != nil {
+		return finishErr
+	}
+
 	if *reportPath != "" {
 		if err := writeImportReportJSON(*reportPath, report); err != nil {
 			return err
@@ -167,6 +227,19 @@ func writeImportReport(stdout io.Writer, report importer.Report, dryRun bool) er
 		fmt.Fprintln(stdout, "nothing was written; run again without --dry-run to import")
 	}
 	return nil
+}
+
+// fileSHA256 is the import run's key: the same file resumes, different content
+// starts a fresh run, and the path is irrelevant.
+func fileSHA256(file *os.File) (string, error) {
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("hashing the file: %w", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewinding the file: %w", err)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func writeImportReportJSON(path string, report importer.Report) error {

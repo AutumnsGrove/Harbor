@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -183,4 +185,120 @@ func TestImportCommandUsesTheDataDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, store.DBFile)); err != nil {
 		t.Errorf("the import did not write to the configured data directory: %v", err)
 	}
+}
+
+// plans/05 test 6 at the command level: a cancelled run of the same file
+// resumes from its checkpoint, so the rows it already applied are not re-read.
+func TestImportCommandResumesACancelledRun(t *testing.T) {
+	dataDir := t.TempDir()
+	path := writeImportFile(t, "export.csv", importCSV)
+
+	// Seed the state a Ctrl-C leaves behind: the first row applied, and a
+	// cancelled run whose checkpoint says so.
+	library, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	first := "https://example.com/sourdough"
+	if _, err := library.CreateItem(context.Background(), store.ItemInput{
+		ID: "row-1", URL: &first, Title: "Sourdough", Note: "feed it daily", Source: model.SourceImport,
+	}); err != nil {
+		t.Fatalf("CreateItem: %v", err)
+	}
+	sum := sha256File(t, path)
+	run, _, err := library.StartImportRun(context.Background(), sum, "{}")
+	if err != nil {
+		t.Fatalf("StartImportRun: %v", err)
+	}
+	if err := library.FinishImportRun(context.Background(), run.ID, store.ImportCancelled, 1, "{}"); err != nil {
+		t.Fatalf("FinishImportRun: %v", err)
+	}
+	_ = library.Close()
+
+	var out bytes.Buffer
+	if err := run2(t, []string{"import", path}, exportEnv(t, dataDir), &out); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if !strings.Contains(out.String(), "resuming the cancelled run of this file from record 1") {
+		t.Errorf("printed %q, want the resume notice", out.String())
+	}
+	if !strings.Contains(out.String(), "imported 1 of 1 rows") {
+		t.Errorf("printed %q, want only the row after the checkpoint", out.String())
+	}
+
+	library, err = store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer library.Close()
+	finished, err := library.ImportRunByID(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("ImportRunByID: %v", err)
+	}
+	if finished.State != store.ImportDone || finished.Checkpoint != 2 {
+		t.Errorf("run = %+v, want done at record 2", finished)
+	}
+	if n := len(mustLibrary(t, library).Items); n != 2 {
+		t.Errorf("%d items after the resume, want 2", n)
+	}
+}
+
+// A finished run is not resumed: importing the same file again is a fresh run
+// whose rows all merge.
+func TestImportCommandStartsFreshAfterAFinishedRun(t *testing.T) {
+	dataDir := t.TempDir()
+	path := writeImportFile(t, "export.csv", importCSV)
+
+	var first bytes.Buffer
+	if err := run2(t, []string{"import", path, "--no-enrich"}, exportEnv(t, dataDir), &first); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	if strings.Contains(first.String(), "resuming") {
+		t.Fatalf("the first import claimed to resume: %q", first.String())
+	}
+
+	var second bytes.Buffer
+	if err := run2(t, []string{"import", path}, exportEnv(t, dataDir), &second); err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if strings.Contains(second.String(), "resuming") {
+		t.Errorf("a finished run was resumed: %q", second.String())
+	}
+	if !strings.Contains(second.String(), "imported 0 of 2 rows") || !strings.Contains(second.String(), "2 merged") {
+		t.Errorf("second import printed %q, want everything merged", second.String())
+	}
+}
+
+// The dry run leaves no import_run behind, so a preview cannot make the real
+// run resume from a checkpoint it never wrote.
+func TestImportCommandDryRunLeavesNoRun(t *testing.T) {
+	dataDir := t.TempDir()
+	path := writeImportFile(t, "export.csv", importCSV)
+	if err := run2(t, []string{"import", path, "--dry-run"}, exportEnv(t, dataDir), &bytes.Buffer{}); err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	library, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer library.Close()
+	if _, err := library.LatestImportRun(context.Background()); err == nil {
+		t.Error("the dry run left an import run behind")
+	}
+}
+
+// run2 is run with the test's context, kept out of the way of the other tests.
+func run2(t *testing.T, args []string, env func(string) string, stdout *bytes.Buffer) error {
+	t.Helper()
+	return run(context.Background(), args, env, stdout)
+}
+
+func sha256File(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }

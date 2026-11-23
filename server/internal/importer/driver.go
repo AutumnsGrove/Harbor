@@ -55,6 +55,15 @@ type Options struct {
 	NoEnrich bool
 	// Limit stops after this many rows; zero means the whole file.
 	Limit int
+
+	// SkipRows is a resume: this many rows were already read by an earlier run
+	// of the same file, so they are skipped and the merge rule handles the rest.
+	SkipRows int
+
+	// CheckpointEvery asks for OnCheckpoint every N rows. The highlights read so
+	// far are flushed first, so a checkpoint never gets ahead of the data.
+	CheckpointEvery int
+	OnCheckpoint    func(records int, report Report) error
 }
 
 // RowError is one row that could not become an item, with the record number a
@@ -97,7 +106,21 @@ func Run(ctx context.Context, s *store.Store, src Source, opts Options) (Report,
 		return r.report, fmt.Errorf("the seeded Favourites Space is missing: %w", r.err)
 	}
 
+	// A resume re-reads nothing it has already applied: import is idempotent by
+	// canonical URL, but re-merging 1,400 rows to reach row 1,401 is wasteful.
+	for skipped := 0; skipped < opts.SkipRows; skipped++ {
+		if _, err := src.Next(); err != nil {
+			break
+		}
+	}
+
 	for opts.Limit <= 0 || r.report.Total < opts.Limit {
+		if err := r.ctx.Err(); err != nil {
+			// Stop where we are and keep what was written: the checkpoint says
+			// how far, and the next run starts from there.
+			r.flush()
+			return r.report, err
+		}
 		row, err := src.Next()
 		switch {
 		case errors.Is(err, io.EOF):
@@ -109,6 +132,9 @@ func Run(ctx context.Context, s *store.Store, src Source, opts Options) (Report,
 		}
 		r.report.Total++
 		r.row(row)
+		if err := r.checkpoint(); err != nil {
+			return r.report, err
+		}
 	}
 	r.flush()
 	r.report.FileWarnings = append(r.report.FileWarnings, src.Warnings()...)
@@ -313,6 +339,20 @@ func (r *runner) accumulate(canonical string, row Row) {
 		}
 		p.quotes = append(p.quotes, quote)
 	}
+}
+
+// checkpoint flushes what has been read and reports how far the run got. The
+// flush comes first: a checkpoint that ran ahead of the highlights would let a
+// resume skip the rows whose highlights were never written.
+func (r *runner) checkpoint() error {
+	if r.opts.CheckpointEvery <= 0 || r.opts.OnCheckpoint == nil {
+		return nil
+	}
+	if r.report.Total%r.opts.CheckpointEvery != 0 {
+		return nil
+	}
+	r.flush()
+	return r.opts.OnCheckpoint(r.opts.SkipRows+r.report.Total, r.report)
 }
 
 // flush writes each item's highlights once the whole file has been read. An
