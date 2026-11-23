@@ -436,7 +436,15 @@ func (r *runner) flush() error {
 				continue
 			}
 			item, found, err := r.existing(canonical)
-			if err != nil || !found {
+			if err != nil {
+				// A dead context here must not be mistaken for "nothing to do":
+				// the caller records the run as done when flush returns nil.
+				if ctxErr := r.ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				continue
+			}
+			if !found {
 				continue
 			}
 			p.itemID = item.ID
