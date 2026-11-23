@@ -156,10 +156,35 @@ the seeded Read later Space case-insensitively, which is the intended behaviour.
   cannot drift on the three things that lose rows: resume from the checkpoint, write it on a context
   an interrupt cannot kill, and close the run as done or cancelled.
 
-The exit demo proper (on the potato, from the UI) has not been run.
+## The exit demo, run on the potato (2026-11-23)
 
-The exit demo has not been run, nothing has been imported into the potato, and this phase is **not**
-ticked in [README.md](README.md).
+Run from **Settings → Import** in a real browser over the tailnet, on the box, with the export S9
+measured (`3cad2d1c-….csv`, 931 kB). Before it: the box updated itself from `r197` to `r206` through
+its own update path (check → start, 22 s, snapshot kept), and a backup was taken.
+
+| Exit criterion | Result |
+|---|---|
+| 1. Dry run read first | 1,476 rows, 0 merges, 23 Spaces to create, 268 highlights, 6 favourites, no warnings, no unknown columns |
+| 2. Real run matches the dry run; dates kept | 1,476 imported, 0 merged, 23 Spaces created, 268 highlights, 6 favourites; dates run 2024-03-21 → 2026-11-14 |
+| 3. The same import again | 0 new, 1,476 merged, 0 Spaces, same item count, same tags and highlights |
+| 4. Five random items by hand | titles, notes, tags, source and saved date all render; each sits in its collection-Space; highlights are stored (268 rows) but the item page cannot list them until phase 8 |
+| 5. Netscape HTML twin | `harbor export --format netscape` of the imported library, imported: 0 new, 1,476 merged, and the 268 highlights were **not** cleared |
+| 6. Cancel and resume | cancelled after 131 records; the same file resumed and merged the remaining 1,345, finishing at checkpoint 1,476 |
+| 7. Search before enrichment | cannot be run: search is phase 10 |
+
+The library afterwards: 1,476 items (all `source=import`, all `state=ready`, kinds still the default
+`article`), 25 Spaces, 1,482 memberships, 268 highlights, 2,051 canonical tags, 7,412 item tags. The
+second import left every one of those numbers unchanged, which is the property the whole phase is
+about.
+
+Two exit criteria in the list above are **not this phase's to prove**, and the plan was wrong to put
+them here: "highlights listed" needs phase 8's item-page highlights, and "search … before enrichment"
+needs phase 10. They belong to those phases' demos; this phase's page can only show that the rows
+exist, which the database does.
+
+The imports are **not enriched**. Everything landed `state=ready` under the documented `--no-enrich`
+default, at ~$2 for the whole file if it is ever queued. That decision is Autumn's, and it is the next
+thing this phase's data wants.
 
 ## Exit criteria
 

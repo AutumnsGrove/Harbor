@@ -141,6 +141,7 @@ once phases 6, 8 and 10 have landed.
 |---|---|---|---|---|
 | 2026-11-22 | fixture, 300 & 2000 items | this MacBook Air | 0.06 s / 0.12 s restore | `make drill`, procedure only |
 | 2026-11-22 | the potato's `pre-update.db` (real schema, real box) | this MacBook Air | 0.05 s backup, 0.05 s restore | see below |
+| 2026-11-23 | **the potato's library with 1,476 real saves in it** (912 KiB `.zst`) | **the potato itself** | 0.1 s backup, 0.1 s restore of a 3.7 MB database | the real one, below |
 
 The second row is the real one, with two things it is honest to record:
 
@@ -153,8 +154,16 @@ The second row is the real one, with two things it is honest to record:
   soft-deleted) before the backup. Everything after that was real: 39 live items and 1 in Recently
   deleted came back, `harbor export` agreed with the file, and the whole round trip was 0.1 s.
 
-The first genuinely real drill — the potato's own library, with the owner's own saves in it — still
-needs saves to exist. That is the last thing this table is waiting for.
+The first genuinely real drill ran on **2026-11-23**, after the Raindrop import put 1,476 saves on the
+box: `harbor backup` (911.7 KiB `.zst`, integrity check 272 ms), the container stopped, `restore
+--dry-run`, `restore --yes` (integrity check 245 ms, the current database kept as
+`pre-restore-20261123T192435Z.db`), container up. The library came back identical — 1,476 items, 268
+highlights, 25 Spaces, 1,482 memberships, 7,412 item tags, 2,051 tags — and `/api/status` agreed
+5.7 s after the restart. The restore drill on the same box is the one that matters, because it is the
+recovery a bad update would actually need.
+
+What is still outstanding is the *other* half of the milestone: a restore **from R2 on a clean box**,
+which needs the Worker's R2 credential the `/presign` route is waiting for.
 
 ---
 

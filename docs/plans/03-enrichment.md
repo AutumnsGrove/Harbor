@@ -263,6 +263,12 @@ Still open: the scored fixture set.
 
 What was checked and what it showed, because these are the three questions that needed a real key:
 
+- **The model is the cheap one (re-checked 2026-11-23).** `deepseek/deepseek-v4.1-flash-1017` is
+  $0.03/M in and $0.20/M out on OpenRouter. The older dated snapshot
+  `deepseek/deepseek-v4-flash-0731` costs **more** on every axis — $0.0434/M in, $0.30/M out, and
+  $0.035/M for a cache read against $0.001 — so "the newer flash must be dearer" is backwards here and
+  a 1,476-save import would cost about $3.20 on it instead of $2.20. Nothing changed. The levers that
+  do matter are the ones already in the code: `MaxTokens: 800` on the write call and the 8k input cap.
 - **Model slugs are current.** `typesafe/jev-1.14` is accepted by the Decisions endpoint and is
   served as `typesafe/jev-1.14-20261014`; `deepseek/deepseek-v4.1-flash-1017` and
   `perplexity/pplx-embed-v1-0.6b` are served under the names requested. The usage log records both
