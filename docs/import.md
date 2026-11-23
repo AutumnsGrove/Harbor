@@ -45,7 +45,9 @@ harbor import ~/Downloads/<export>.csv --dry-run --report /tmp/import.json
 harbor import ~/Downloads/<export>.csv --no-enrich
 
 # 4. Enrichment is a backlog, so let it drain when you want the bill.
-#    (interactive saves are enriched ahead of it)
+harbor enrich --dry-run     # how many items the model has never read
+harbor enrich               # queue them; the running serve loop drains them
+#    (interactive saves are enriched ahead of the backlog: it queues at -1)
 ```
 
 `--no-enrich` is the documented default for a bulk import: 1,500 items through the model is a real
@@ -69,6 +71,24 @@ round) by giving it the same file.
 *Queue these for the model afterwards* is `--enrich`, off by default for the reason above. Both
 surfaces write the library the same way; the CLI is still the safer one for a file large enough that
 the laptop might sleep.
+
+## Enriching a library you imported `--no-enrich`
+
+The import default leaves every row `ready` and unread by the model: no summary, no AI tags, kind
+still the default. `harbor enrich` queues the rows whose `prompt_version` is empty — the ones no
+prompt has ever written — at priority `-1`, and the server's own enrichment loop drains them behind
+anything you save by hand. It does not call the model itself, so it is instant and safe to run while
+the container is up.
+
+```bash
+harbor enrich --dry-run          # how many are waiting, write nothing
+harbor enrich --limit 50         # a slice first, to look at the tags before the bill
+harbor enrich                    # the whole backlog
+```
+
+It refuses to run without `OPENROUTER_API_KEY`: without a key the loop only marks rows ready, which
+would look like enrichment and be none. An item the model has already read is never queued again —
+re-enriching after a prompt change is a deliberate, separate job.
 
 ## What the dry run printed
 

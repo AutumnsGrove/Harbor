@@ -265,3 +265,57 @@ func (s *Store) MarkReady(ctx context.Context, id string) error {
 	// those is an error to the caller.
 	return nil
 }
+
+// QueueUnenriched puts every item that has never been enriched back in the
+// queue, so a bulk import that landed under `--no-enrich` can be enriched later
+// as the separate, watched run the plan describes.
+//
+// It is deliberately narrow: state must be `ready` (so nothing already queued,
+// enriching or failed is disturbed), prompt_version must be empty (only
+// ApplyEnrichment writes one, and the pipeline refuses to run without a prompt
+// version, so an item the model has read is never re-read — a prompt upgrade is a
+// different, deliberate job), and a soft-deleted row stays
+// in the bin. `enriched_at` is not the marker: `MarkReady` stamps it, because
+// that column records when the stage closed, which `--no-enrich` closes without
+// the model seeing anything.
+//
+// priority is the caller's: the import backlog runs at -1 so a link saved by
+// hand is still enriched first (design.md §5). limit <= 0 means all of them.
+func (s *Store) QueueUnenriched(ctx context.Context, priority, limit int) (queued, remaining int, err error) {
+	if limit <= 0 {
+		limit = -1
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE items SET
+		state = 'queued', priority = ?, attempts = 0, next_attempt_at = NULL, last_error = ''
+		WHERE seq IN (
+			SELECT seq FROM items
+			WHERE state = 'ready' AND prompt_version = '' AND deleted_at IS NULL
+			ORDER BY saved_at ASC, seq ASC
+			LIMIT ?
+		)`, priority, limit)
+	if err != nil {
+		return 0, 0, fmt.Errorf("queueing unenriched items: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, 0, fmt.Errorf("queueing unenriched items: %w", err)
+	}
+	remaining, err = s.UnenrichedCount(ctx)
+	if err != nil {
+		return int(affected), 0, err
+	}
+	return int(affected), remaining, nil
+}
+
+// UnenrichedCount is how many items are still waiting for their first pass, in
+// any state other than the queue — which is what a bulk import leaves behind and
+// what the operator wants before (and after) spending on a drain.
+func (s *Store) UnenrichedCount(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM items
+		WHERE state = 'ready' AND prompt_version = '' AND deleted_at IS NULL`).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("counting unenriched items: %w", err)
+	}
+	return n, nil
+}
