@@ -32,6 +32,7 @@ var goldenKeys = []goldenKey{
 	{"japanese host", "https://日本語.jp/", "https://xn--wgv71a119e.jp/"},
 	{"japanese host with unicode path and query", "https://例え.jp/パス?クエリ=値", "https://xn--r8jz45g.jp/%E3%83%91%E3%82%B9?クエリ=値"},
 	{"cyrillic host", "https://пример.example/", "https://xn--e1afmkfd.example/"},
+	{"long japanese label", "https://ドメイン名例え.example/", "https://xn--r8j4j0d1dzdp15t1ug.example/"},
 
 	// ASCII passes through byte-for-byte: no mapping, no case folding beyond
 	// the lowercase above, no trailing dot or empty label removed.
@@ -126,6 +127,40 @@ func TestGoldenKeysOverlongNames(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("CanonicalURL(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// Two inputs that used to produce a key and are now refused. Neither is a key
+// move: CanonicalURL returns an error, nothing is stored, so no saved page can
+// split or merge by accident. They are here because issue #20 asked for every
+// input whose treatment changed to be recorded with what it used to be.
+//
+// Both were punycoded whole by the hand-rolled encoder, which produced an
+// address no resolver would ever emit:
+//
+//	xn--bücher (a non-ASCII label with the ACE prefix) -> xn--xn--bcher-u9a
+//	U+FFFD (not a domain character)                    -> xn--zn7c
+//
+// idna treats the first as an A-label and decodes its suffix (a different key,
+// not an error), and refuses the second outright. The guard in toASCIILabel
+// turns the first into a refusal too, so the only direction either can move is
+// to "not saved".
+func TestRefusedThatUsedToBeAKey(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		oldKey string
+	}{
+		{"non-ASCII label with the ACE prefix", "https://xn--bücher.example/", "https://xn--xn--bcher-u9a.example/"},
+		{"replacement character in the host", "https://\uFFFD.example/", "https://xn--zn7c.example/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CanonicalURL(tt.raw)
+			if err == nil {
+				t.Fatalf("CanonicalURL(%q) = %q, want an error (the pre-#20 key was %q)", tt.raw, got, tt.oldKey)
 			}
 		})
 	}
