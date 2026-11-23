@@ -64,6 +64,11 @@ type Options struct {
 	// far are flushed first, so a checkpoint never gets ahead of the data.
 	CheckpointEvery int
 	OnCheckpoint    func(records int, report Report) error
+
+	// OnStart is called by RunTracked once the run row is open and before the
+	// first record, so a caller that waits on a long file can say it is resuming
+	// rather than looking stuck. Run itself never calls it.
+	OnStart func(resumed bool, from int)
 }
 
 // RowError is one row that could not become an item, with the record number a

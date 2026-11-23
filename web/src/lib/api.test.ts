@@ -94,4 +94,72 @@ describe('the API client', () => {
 		expect(init.method).toBe('POST');
 		expect(init.body).toBeUndefined();
 	});
+
+	it('uploads the import file as the body, not as multipart', async () => {
+		const fetch = vi.fn(async () => respond({ running: true, resumable: false, run: null }, { status: 202 }));
+		vi.stubGlobal('fetch', fetch);
+
+		const file = new Blob(['id,url\n'], { type: 'text/csv' });
+		await api.import.start(file);
+
+		const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(path).toBe('/api/import');
+		expect(init.method).toBe('POST');
+		// The file is the request: no FormData, no field name, nothing a browser
+		// has to spell right.
+		expect(init.body).toBe(file);
+		expect((init.headers as Record<string, string>)['content-type']).toBe('application/octet-stream');
+	});
+
+	it('asks for enrichment only when it is wanted', async () => {
+		const fetch = vi.fn(async () => respond({ running: true, resumable: false, run: null }, { status: 202 }));
+		vi.stubGlobal('fetch', fetch);
+
+		await api.import.start(new Blob(['x']), { enrich: true });
+
+		expect((fetch.mock.calls[0] as unknown as [string])[0]).toBe('/api/import?enrich=1');
+	});
+
+	it('dry-runs through the same upload without starting a run', async () => {
+		const fetch = vi.fn(async () =>
+			respond({ dryRun: true, bytesTotal: 9, report: { total: 2, imported: 2 } })
+		);
+		vi.stubGlobal('fetch', fetch);
+
+		const answer = await api.import.dryRun(new Blob(['id,url\n']));
+
+		expect((fetch.mock.calls[0] as unknown as [string])[0]).toBe('/api/import?dryRun=1');
+		expect(answer.dryRun).toBe(true);
+		expect(answer.report.total).toBe(2);
+	});
+
+	it('reads the poll, including a run left behind by a restart', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () =>
+				respond({
+					running: false,
+					resumable: true,
+					run: { id: 'r1', state: 'running', checkpoint: 500, startedAt: '2026-11-22T10:00:00Z' }
+				})
+			)
+		);
+
+		const status = await api.import.status();
+
+		expect(status.running).toBe(false);
+		expect(status.resumable).toBe(true);
+		expect(status.run?.checkpoint).toBe(500);
+	});
+
+	it('cancels with a POST and nothing else', async () => {
+		const fetch = vi.fn(async () => respond({ status: 'cancelling' }, { status: 202 }));
+		vi.stubGlobal('fetch', fetch);
+
+		await expect(api.import.cancel()).resolves.toEqual({ status: 'cancelling' });
+
+		const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(path).toBe('/api/import/cancel');
+		expect(init.method).toBe('POST');
+	});
 });

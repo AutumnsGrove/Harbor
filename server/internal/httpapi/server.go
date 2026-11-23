@@ -70,6 +70,9 @@ type Server struct {
 	// pending is nil when no Worker is configured. /api/pending then answers an
 	// empty list, which is true: there is no queue to show.
 	pending PendingSource
+
+	// imports owns the one import the process is running (Settings → Import).
+	imports *importManager
 }
 
 // PendingSource is the Worker's read-only pending list (design.md §5). It is an
@@ -108,6 +111,7 @@ func New(cfg build.Config, log *slog.Logger, assets fs.FS, opts ...Option) *Serv
 		started:      time.Now(),
 		now:          time.Now,
 	}
+	s.imports = newImportManager(s.log)
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -128,6 +132,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/items/", s.itemByPath)
 	mux.HandleFunc("/api/pending", s.only(http.MethodGet, s.pendingJobs))
 	mux.HandleFunc("/api/attention", s.only(http.MethodGet, s.attention))
+	mux.HandleFunc("/api/import", s.only(http.MethodPost, s.importStart))
+	mux.HandleFunc("/api/import/status", s.only(http.MethodGet, s.importStatus))
+	mux.HandleFunc("/api/import/cancel", s.only(http.MethodPost, s.importCancel))
 	mux.HandleFunc("/api/update/check", s.only(http.MethodPost, s.updateCheck))
 	mux.HandleFunc("/api/update/available", s.only(http.MethodGet, s.updateAvailable))
 	mux.HandleFunc("/api/update/start", s.only(http.MethodPost, s.updateStart))

@@ -104,9 +104,11 @@ is a typed error naming the columns it expected, never a positional guess.
       enrichment drains afterwards behind anything interactive.
 - [x] Collections → `spaces.kind='manual'`, `space_items` membership; an existing Space with the same
       name is reused (case-insensitive) rather than duplicated.
-- [ ] Settings → Import: file drop, dry-run, run with a progress bar, cancel, and a downloadable
+- [x] Settings → Import: file drop, dry-run, run with a progress bar, cancel, and a downloadable
       report. Progress is polled, not streamed — simpler and enough.
-- [ ] First-run screen now offers Import; it is the first real use of the empty state.
+- [x] First-run screen now offers Import; it is the first real use of the empty state. It is the home
+      feed's empty state rather than a `/first-run` route: design.md §9 is one surface, not two, and
+      an empty library already *is* the first run.
 - [x] A `docs/import.md` with: how to export from Raindrop, the exact expected filename, what is
       preserved, what is not, and how to verify the result.
 - [x] Record the mapping decisions in design.md §5 (same PR as the S9 verdict).
@@ -143,8 +145,18 @@ the seeded Read later Space case-insensitively, which is the intended behaviour.
   finished run is a fresh run (whose rows all merge). The checkpoint flushes the highlights it has
   read first, so resuming can never skip past a row whose highlights were never written.
 
-Still to build: Settings → Import and first-run wiring. The exit demo proper (on the potato, from the
-UI) has not been run.
+- **Settings → Import** — `POST /api/import` takes the file as the body (dry run or a background
+  run), `GET /api/import/status` polls the run from `import_runs` plus the bytes read, and
+  `POST /api/import/cancel` stops it at the next record. One run at a time; a cancel that arrives
+  before the run row is open is remembered rather than lost; `/api/busy` reports a running import so
+  an update does not restart mid-file. `web/src/routes/settings/import/+page.svelte` is the page:
+  drop the file, read the dry run, import, watch, stop, download the report. The home feed's empty
+  state now links to it.
+- **Shared run protocol** — `importer.RunTracked` and `importer.NewSource`, so the CLI and the API
+  cannot drift on the three things that lose rows: resume from the checkpoint, write it on a context
+  an interrupt cannot kill, and close the run as done or cancelled.
+
+The exit demo proper (on the potato, from the UI) has not been run.
 
 The exit demo has not been run, nothing has been imported into the potato, and this phase is **not**
 ticked in [README.md](README.md).

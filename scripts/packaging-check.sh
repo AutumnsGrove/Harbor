@@ -121,6 +121,16 @@ else
 	fail "unsafe-inline appears in the server or the frontend"
 fi
 
+# style-src is 'self', so an inline style attribute is blocked in the browser on
+# the potato — the layout quietly loses it and no test notices. Catch it in the
+# source, where it can still be fixed.
+expect
+if ! grep -rEq 'style="|style=\{' web/src; then
+	pass "no inline style attributes in the frontend (style-src is 'self')"
+else
+	fail "an inline style attribute appears in web/src, and style-src 'self' blocks it"
+fi
+
 # ── a pull request can never publish ────────────────────────────────────────
 # The publish job is the one job that can put an untested image where the potato
 # will pull it, so the gate is asserted here rather than trusted.

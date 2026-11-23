@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -78,9 +77,9 @@ func importCommand(ctx context.Context, getenv func(string) string, args []strin
 	if err != nil {
 		return err
 	}
-	source, err := openImportSource(file, filepath.Base(path))
+	source, err := importer.NewSource(file)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s is not a bookmark file: %w", filepath.Base(path), err)
 	}
 
 	cfg, err := build.Load(getenv)
@@ -109,53 +108,30 @@ func importCommand(ctx context.Context, getenv func(string) string, args []strin
 		return err
 	}
 
-	run, resumed, err := library.StartImportRun(ctx, sum, "{}")
-	if err != nil {
-		return err
-	}
-	skip := 0
-	if resumed {
-		skip = run.Checkpoint
-		fmt.Fprintf(stdout, "resuming the cancelled run of this file from record %d\n", skip)
-	}
-
-	// Bookkeeping writes must survive the interrupt that stops the import:
-	// Ctrl-C cancels ctx, and a checkpoint (or the final state) written on it
-	// would fail, leaving the row saying "running" at an older position than
-	// the one the operator was told.
-	bookkeeping := context.WithoutCancel(ctx)
-	checkpoint := func(records int, report importer.Report) error {
-		encoded, err := json.Marshal(report)
-		if err != nil {
-			return fmt.Errorf("encoding the checkpoint: %w", err)
-		}
-		return library.CheckpointImportRun(bookkeeping, run.ID, records, string(encoded))
-	}
-
-	report, err := importer.Run(ctx, library, source, importer.Options{
+	report, tracked, err := importer.RunTracked(ctx, library, sum, source, importer.Options{
 		NoEnrich:        *noEnrich,
 		Limit:           *limit,
-		SkipRows:        skip,
 		CheckpointEvery: 100,
-		OnCheckpoint:    checkpoint,
+		OnStart: func(resumed bool, from int) {
+			if resumed {
+				fmt.Fprintf(stdout, "resuming the cancelled run of this file from record %d\n", from)
+			}
+		},
 	})
 
 	// A report is printed even when the run stopped early: the counts are how a
 	// human finds out how far it got.
-	if err := writeImportReport(stdout, report, false); err != nil {
+	if writeErr := writeImportReport(stdout, report, false); writeErr != nil {
+		return writeErr
+	}
+	if err != nil {
 		return err
 	}
 
-	// Close the run: done if we reached the end, cancelled if the operator
-	// stopped it, so the next attempt resumes rather than restarts. A Ctrl-C is
-	// a controlled stop, not a failure — it has already been reported.
-	stopped := errors.Is(err, context.Canceled)
-	if err := finishImportRun(ctx, library, run.ID, skip+report.Total, report, stopped); err != nil {
-		return err
-	}
-	if stopped {
-		fmt.Fprintf(stdout, "stopped at record %d; run the same command again to resume\n", skip+report.Total)
-		err = nil
+	// A Ctrl-C is a controlled stop, not a failure: RunTracked has already
+	// closed the run as cancelled, so the same command resumes it.
+	if tracked.Stopped {
+		fmt.Fprintf(stdout, "stopped at record %d; run the same command again to resume\n", tracked.From+report.Total)
 	}
 
 	if *reportPath != "" {
@@ -165,34 +141,6 @@ func importCommand(ctx context.Context, getenv func(string) string, args []strin
 		fmt.Fprintf(stdout, "report written to %s\n", *reportPath)
 	}
 	return err
-}
-
-// openImportSource picks the reader from the file's first bytes rather than its
-// name: browsers name their export bookmarks.html, Raindrop names it a uuid, and
-// a renamed file is still the same file.
-func openImportSource(file *os.File, name string) (importer.Source, error) {
-	head := make([]byte, 512)
-	n, err := file.Read(head)
-	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("reading %s: %w", name, err)
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("rewinding %s: %w", name, err)
-	}
-
-	trimmed := strings.TrimLeft(string(head[:n]), "\ufeff \t\r\n")
-	if strings.HasPrefix(trimmed, "<") || strings.Contains(trimmed, "<!DOCTYPE NETSCAPE") {
-		source, err := importer.NewHTMLSource(file)
-		if err != nil {
-			return nil, fmt.Errorf("%s is not a bookmark file: %w", name, err)
-		}
-		return source, nil
-	}
-	source, err := importer.NewCSVSource(file)
-	if err != nil {
-		return nil, fmt.Errorf("%s is not a Raindrop export: %w", name, err)
-	}
-	return source, nil
 }
 
 // writeImportReport is the human summary. The dry run says so, because the
@@ -229,21 +177,6 @@ func writeImportReport(stdout io.Writer, report importer.Report, dryRun bool) er
 		fmt.Fprintln(stdout, "nothing was written; run again without --dry-run to import")
 	}
 	return nil
-}
-
-// finishImportRun writes the run's final state on a context that survives the
-// interrupt: finishImportRun is reached *because* the run was cancelled, so the
-// cancelled context is the one thing it cannot use.
-func finishImportRun(ctx context.Context, library *store.Store, id string, records int, report importer.Report, stopped bool) error {
-	encoded, err := json.Marshal(report)
-	if err != nil {
-		return fmt.Errorf("encoding the report: %w", err)
-	}
-	final := store.ImportDone
-	if stopped {
-		final = store.ImportCancelled
-	}
-	return library.FinishImportRun(context.WithoutCancel(ctx), id, final, records, string(encoded))
 }
 
 // fileSHA256 is the import run's key: the same file resumes, different content

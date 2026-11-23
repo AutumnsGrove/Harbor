@@ -262,6 +262,10 @@ a {
 	gap: 18px;
 }
 
+.stack.spaced {
+	margin-top: 18px;
+}
+
 .row {
 	display: flex;
 	align-items: center;
@@ -791,6 +795,120 @@ input.switch:checked::after {
 	margin-top: 2px;
 	color: var(--mute);
 	font-size: var(--t-s);
+}
+
+/* ── import (Settings → Import) ─────────────────────────────────────────────── */
+
+.drop {
+	position: relative;
+	display: grid;
+	gap: 6px;
+	justify-items: center;
+	margin-top: 16px;
+	padding: 30px 22px;
+	border-radius: var(--r-l);
+	background: var(--surf2);
+	text-align: center;
+	cursor: pointer;
+	outline: 2px dashed transparent;
+	outline-offset: -6px;
+	transition:
+		background var(--dur),
+		outline-color var(--dur);
+}
+
+.drop:hover,
+.drop.dragging {
+	background: var(--surf3);
+}
+
+.drop.dragging,
+.drop:focus-within {
+	outline-color: var(--acc);
+}
+
+.drop em {
+	font-style: normal;
+	font-size: var(--t-s);
+}
+
+/* Focusable for a keyboard, invisible for everyone else: the label is the
+   control, the input is what makes Tab and the picker work. */
+.drop input {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+}
+
+.report {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-top: 16px;
+}
+
+.report > div {
+	display: grid;
+	gap: 2px;
+	min-width: 96px;
+	padding: 12px 14px;
+	border-radius: var(--r-m);
+	background: var(--surf2);
+}
+
+.report strong {
+	font: 600 var(--t-l) / 1.2 var(--font);
+}
+
+.report span {
+	color: var(--mute);
+	font-size: var(--t-xs);
+}
+
+.check {
+	display: flex;
+	gap: 10px;
+	align-items: flex-start;
+	margin-top: 16px;
+	color: var(--mute);
+	font-size: var(--t-s);
+	line-height: 1.5;
+}
+
+.check input {
+	margin-top: 2px;
+	accent-color: var(--acc);
+}
+
+/* The run's progress: bytes read over bytes there are, because the checkpoint
+   only moves every hundred records. A native <progress>, because style-src is
+   'self' — an inline width attribute would be blocked on the potato. */
+.bar {
+	appearance: none;
+	width: 100%;
+	height: 8px;
+	margin-top: 16px;
+	border: 0;
+	border-radius: var(--pill);
+	background: var(--surf2);
+	overflow: hidden;
+}
+
+.bar::-webkit-progress-bar {
+	border-radius: var(--pill);
+	background: var(--surf2);
+}
+
+.bar::-webkit-progress-value {
+	border-radius: var(--pill);
+	background: var(--acc);
+	transition: width var(--dur) var(--ease);
+}
+
+.bar::-moz-progress-bar {
+	border-radius: var(--pill);
+	background: var(--acc);
 }
 
 /* ── item page ─────────────────────────────────────────────────────────────── */
