@@ -93,22 +93,3 @@ func TestCanonicalURLRejects(t *testing.T) {
 		})
 	}
 }
-
-// Known IDNA vectors, so the hand-written encoder is checked against values
-// that did not come from itself.
-func TestPunycodeKnownVectors(t *testing.T) {
-	tests := map[string]string{
-		"münchen": "xn--mnchen-3ya",
-		"bücher":  "xn--bcher-kva",
-		"日本語":     "xn--wgv71a119e",
-		"例え":      "xn--r8jz45g",
-		"ドメイン名例え": "xn--r8j4j0d1dzdp15t1ug",
-		"пример":  "xn--e1afmkfd",
-	}
-	for in, want := range tests {
-		got, err := toASCIILabel(in)
-		if err != nil || got != want {
-			t.Errorf("toASCIILabel(%q) = %q, %v; want %q", in, got, err, want)
-		}
-	}
-}

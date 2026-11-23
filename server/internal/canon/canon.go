@@ -9,6 +9,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/net/idna"
 )
 
 // CanonicalURL returns the key for the page raw points at.
@@ -117,6 +120,48 @@ func canonicalHost(host string) (string, error) {
 		labels[i] = ascii
 	}
 	return strings.Join(labels, "."), nil
+}
+
+// toASCIILabel converts one already-lowercased host label to its ASCII form.
+// ASCII labels — including ones that already start with "xn--" — pass through
+// untouched, so the conversion is idempotent and an A-label is never decoded or
+// double-encoded.
+//
+// A non-ASCII label that starts with "xn--" is refused. idna treats any label
+// with that prefix as an A-label and decodes it before re-encoding, which for
+// these labels returns a different key rather than an error; the hand-rolled
+// encoder used to punycode the whole label instead. Neither result is an
+// address anyone can resolve, so refusing is the one option that cannot move a
+// key silently.
+//
+// The profile is idna.Punycode: raw RFC 3492 encoding with no UTS 46 mapping,
+// which is what this package did by hand before issue #20. idna.Lookup is the
+// easier recommendation to justify, but it moves keys — it maps "faß" to
+// "fass", fullwidth letters to ASCII, and NFC-normalises combining sequences —
+// and a moved key is either a duplicate item or a silently merged one
+// (design.md §5). golden_test.go is what chose the profile, by test.
+func toASCIILabel(label string) (string, error) {
+	if isASCII(label) {
+		return label, nil
+	}
+	// idna would fold invalid UTF-8 into U+FFFD and refuse it as a disallowed
+	// rune; the message here says what is actually wrong.
+	if !utf8.ValidString(label) {
+		return "", errors.New("label is not valid UTF-8")
+	}
+	if strings.HasPrefix(label, "xn--") {
+		return "", errors.New("label starts with xn-- but is not ASCII")
+	}
+	return idna.Punycode.ToASCII(label)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // stripTracking removes tracking parameters without re-encoding anything else,
