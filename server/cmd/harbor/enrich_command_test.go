@@ -118,6 +118,34 @@ func TestEnrichCommandDryRunWritesNothing(t *testing.T) {
 	}
 }
 
+// The dry run has to answer what the real run would do, --limit included: a
+// batch is checked with `--dry-run --limit N` before it is paid for.
+func TestEnrichCommandDryRunHonoursLimit(t *testing.T) {
+	dataDir := t.TempDir()
+	library := seedImportBacklog(t, dataDir)
+	defer library.Close()
+
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"enrich", "--dry-run", "--limit", "1"}, enrichEnv(t, dataDir, "test-key"), &out); err != nil {
+		t.Fatalf("enrich --dry-run --limit 1: %v", err)
+	}
+	if !strings.Contains(out.String(), "would queue 1 item(s)") {
+		t.Errorf("printed %q, want one item, the same as the real run", out.String())
+	}
+	if !strings.Contains(out.String(), "2 waiting in total") {
+		t.Errorf("printed %q, want the size of the whole backlog too", out.String())
+	}
+	for _, id := range []string{"one", "two"} {
+		item, err := library.GetItem(context.Background(), id)
+		if err != nil {
+			t.Fatalf("GetItem(%s): %v", id, err)
+		}
+		if item.State != model.StateReady {
+			t.Errorf("%s = %q after a dry run, want ready", id, item.State)
+		}
+	}
+}
+
 // Without a key the loop would mark rows ready in a second and enrich nothing,
 // so the command refuses rather than filling the library with a lie.
 func TestEnrichCommandRefusesWithoutAKey(t *testing.T) {

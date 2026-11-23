@@ -73,7 +73,17 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	}
 
 	if *dryRun {
-		fmt.Fprintf(stdout, "would queue %d item(s) for enrichment at priority %d\n", waiting, enrichPriority)
+		// The dry run answers the same question the real run does, so it has to
+		// honour --limit: `--dry-run --limit 50` is how a batch gets checked
+		// before it is paid for.
+		would := waiting
+		if *limit > 0 && *limit < would {
+			would = *limit
+		}
+		fmt.Fprintf(stdout, "would queue %d item(s) for enrichment at priority %d\n", would, enrichPriority)
+		if would < waiting {
+			fmt.Fprintf(stdout, "  %d waiting in total; run again for the next batch\n", waiting)
+		}
 		fmt.Fprintln(stdout, "nothing was written")
 		return nil
 	}
