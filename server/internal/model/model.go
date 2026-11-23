@@ -93,6 +93,19 @@ type Highlight struct {
 	CreatedAt  time.Time      `db:"created_at"`
 }
 
+// ImportRun is one import's progress. The canonical URL is the idempotence key,
+// so the checkpoint is where the file was read to, not which rows landed: a
+// resume skips that many records and lets the merge rule do the rest.
+type ImportRun struct {
+	ID         string     `db:"id"`
+	FileSHA256 string     `db:"file_sha256"`
+	State      string     `db:"state"` // running|cancelled|done
+	Checkpoint int        `db:"checkpoint"`
+	CountsJSON string     `db:"counts_json"`
+	StartedAt  time.Time  `db:"started_at"`
+	FinishedAt *time.Time `db:"finished_at"`
+}
+
 // Space is a Smart Space: auto (rule-driven), saved (explicit query) or
 // manual (hand-curated, including Read later).
 type Space struct {

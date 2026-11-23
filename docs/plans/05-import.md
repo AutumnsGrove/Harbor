@@ -138,8 +138,12 @@ and merged 1,476, created no Spaces and left the library identical, so idempoten
 file and not only under `rapid`. 23 Spaces rather than 24 folders is the `Read Later` folder reusing
 the seeded Read later Space case-insensitively, which is the intended behaviour.
 
-Still to build: `import_runs` checkpoint/resume (a cancelled run is safe to repeat, but it restarts
-from the top), Settings → Import and first-run wiring. The exit demo proper (on the potato, from the
+- **Resume** — `import_runs` is keyed by the file's sha256, so a cancelled run resumes from its
+  checkpoint instead of re-reading rows it already applied; a dry run leaves no run behind, and a
+  finished run is a fresh run (whose rows all merge). The checkpoint flushes the highlights it has
+  read first, so resuming can never skip past a row whose highlights were never written.
+
+Still to build: Settings → Import and first-run wiring. The exit demo proper (on the potato, from the
 UI) has not been run.
 
 The exit demo has not been run, nothing has been imported into the potato, and this phase is **not**

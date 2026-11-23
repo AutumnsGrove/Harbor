@@ -55,6 +55,15 @@ type Options struct {
 	NoEnrich bool
 	// Limit stops after this many rows; zero means the whole file.
 	Limit int
+
+	// SkipRows is a resume: this many rows were already read by an earlier run
+	// of the same file, so they are skipped and the merge rule handles the rest.
+	SkipRows int
+
+	// CheckpointEvery asks for OnCheckpoint every N rows. The highlights read so
+	// far are flushed first, so a checkpoint never gets ahead of the data.
+	CheckpointEvery int
+	OnCheckpoint    func(records int, report Report) error
 }
 
 // RowError is one row that could not become an item, with the record number a
@@ -97,7 +106,25 @@ func Run(ctx context.Context, s *store.Store, src Source, opts Options) (Report,
 		return r.report, fmt.Errorf("the seeded Favourites Space is missing: %w", r.err)
 	}
 
+	// A resume does not re-apply the rows an earlier run wrote, but it does read
+	// them: the file is the truth for a URL's highlights, and a URL can appear on
+	// both sides of the checkpoint. Skipping the bytes without remembering their
+	// quotes would let flush() delete what the first pass wrote.
+	for skipped := 0; skipped < opts.SkipRows; skipped++ {
+		row, err := src.Next()
+		if err != nil {
+			break
+		}
+		r.rememberSkipped(row)
+	}
+
 	for opts.Limit <= 0 || r.report.Total < opts.Limit {
+		if err := r.ctx.Err(); err != nil {
+			// Stop where we are and keep what was written: the checkpoint says
+			// how far, and the next run starts from there.
+			r.flush()
+			return r.report, err
+		}
 		row, err := src.Next()
 		switch {
 		case errors.Is(err, io.EOF):
@@ -109,6 +136,9 @@ func Run(ctx context.Context, s *store.Store, src Source, opts Options) (Report,
 		}
 		r.report.Total++
 		r.row(row)
+		if err := r.checkpoint(); err != nil {
+			return r.report, err
+		}
 	}
 	r.flush()
 	r.report.FileWarnings = append(r.report.FileWarnings, src.Warnings()...)
@@ -147,6 +177,10 @@ type pendingImport struct {
 	record int
 	url    string
 	quotes []string
+	// fromSkipped marks an entry whose only contributions were rows a resumed
+	// run skipped: its item has to be looked up at flush time, because nothing
+	// in this run wrote it.
+	fromSkipped bool
 }
 
 // row turns one record into an item, or explains why it could not.
@@ -192,6 +226,20 @@ func (r *runner) row(row Row) {
 	r.report.Highlights += len(row.Highlights)
 	if row.Favorite {
 		r.report.Favourites++
+	}
+}
+
+// rememberSkipped keeps a resumed run's view of the file complete without
+// applying it: the quotes are accumulated, the row is not written. A row that
+// could not have been imported the first time is ignored here too.
+func (r *runner) rememberSkipped(row Row) {
+	canonical, err := canon.CanonicalURL(row.URL)
+	if err != nil {
+		return
+	}
+	r.accumulate(canonical, row)
+	if p, ok := r.pending[canonical]; ok {
+		p.fromSkipped = true
 	}
 }
 
@@ -315,6 +363,20 @@ func (r *runner) accumulate(canonical string, row Row) {
 	}
 }
 
+// checkpoint flushes what has been read and reports how far the run got. The
+// flush comes first: a checkpoint that ran ahead of the highlights would let a
+// resume skip the rows whose highlights were never written.
+func (r *runner) checkpoint() error {
+	if r.opts.CheckpointEvery <= 0 || r.opts.OnCheckpoint == nil {
+		return nil
+	}
+	if r.report.Total%r.opts.CheckpointEvery != 0 {
+		return nil
+	}
+	r.flush()
+	return r.opts.OnCheckpoint(r.opts.SkipRows+r.report.Total, r.report)
+}
+
 // flush writes each item's highlights once the whole file has been read. An
 // error is attributed to the first row that contributed to that URL.
 //
@@ -322,12 +384,24 @@ func (r *runner) accumulate(canonical string, row Row) {
 // store here: it is imported over a library that already has them, and clearing
 // them would destroy the one thing the owner cannot recreate.
 func (r *runner) flush() {
-	if !r.carriesHighlights {
+	// A dry run writes nothing, highlights included: its pending entries are the
+	// preview, and filling in an item id here would let it overwrite a real item.
+	if r.opts.DryRun || !r.carriesHighlights {
 		return
 	}
-	for _, p := range r.pending {
+	for canonical, p := range r.pending {
 		if p.itemID == "" {
-			continue
+			// Only rows this run skipped can leave an entry without an item: look
+			// it up rather than let the URL go unwritten. Anything else is a row
+			// whose write failed, and that is already in the report.
+			if !p.fromSkipped {
+				continue
+			}
+			item, found, err := r.existing(canonical)
+			if err != nil || !found {
+				continue
+			}
+			p.itemID = item.ID
 		}
 		if err := r.store.ReplaceImportedHighlights(r.ctx, p.itemID, p.quotes); err != nil {
 			r.fail(Row{Record: p.record, URL: p.url}, err)

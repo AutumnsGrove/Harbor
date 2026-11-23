@@ -673,3 +673,160 @@ func TestRunImportsTheHTMLTwinOverTheCSV(t *testing.T) {
 		t.Errorf("spaces = %v, want Recipes and Favourites kept", names)
 	}
 }
+
+// plans/05 test 6: a cancelled run resumes from its checkpoint rather than
+// starting over, and the rows it skips were already applied.
+func TestRunResumesFromTheCheckpoint(t *testing.T) {
+	e := newEnv(t)
+	body := `1,One,H1,,"https://example.com/1",A,,"2020-01-01T00:00:00Z",,Highlight:one,false
+2,Two,H2,,"https://example.com/2",A,,"2020-01-01T00:00:00Z",,Highlight:two,false
+3,Three,H3,,"https://example.com/3",A,,"2020-01-01T00:00:00Z",,Highlight:three,false
+`
+	// The first run got through two rows and was cancelled at its checkpoint.
+	src, err := NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checkpoints []int
+	first, err := Run(e.ctx, e.store, src, Options{
+		Limit:           2,
+		CheckpointEvery: 1,
+		OnCheckpoint: func(records int, _ Report) error {
+			checkpoints = append(checkpoints, records)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if first.Imported != 2 || len(checkpoints) != 2 || checkpoints[1] != 2 {
+		t.Fatalf("first run = %+v, checkpoints = %v", first, checkpoints)
+	}
+	// The checkpoint flush wrote the highlights for the rows it had read.
+	if got, err := e.store.HighlightsForItem(e.ctx, e.item(t, "https://example.com/1").ID); err != nil || len(got) != 1 {
+		t.Fatalf("row 1 highlights = %+v, %v; the checkpoint got ahead of them", got, err)
+	}
+
+	// The resume skips those two rows by checkpoint and imports the third.
+	src, err = NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Run(e.ctx, e.store, src, Options{SkipRows: 2})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if second.Total != 1 || second.Imported != 1 {
+		t.Errorf("resume = %+v, want the one remaining row", second)
+	}
+	if n := len(e.library(t).Items); n != 3 {
+		t.Errorf("%d items after the resume, want 3", n)
+	}
+}
+
+// A cancelled context stops the run where it is, without losing what it wrote.
+func TestRunStopsOnCancellation(t *testing.T) {
+	e := newEnv(t)
+	ctx, cancel := context.WithCancel(e.ctx)
+	body := `1,One,,,"https://example.com/1",A,,"2020-01-01T00:00:00Z",,,false
+2,Two,,,"https://example.com/2",A,,"2020-01-01T00:00:00Z",,,false
+`
+	src, err := NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(ctx, e.store, src, Options{
+		CheckpointEvery: 1,
+		OnCheckpoint: func(records int, _ Report) error {
+			if records == 1 {
+				cancel()
+			}
+			return nil
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if report.Imported != 1 {
+		t.Errorf("report = %+v, want the one row that was written", report)
+	}
+}
+
+// A URL that appears on both sides of a checkpoint keeps every quote it has: a
+// resumed run must not flush a partial set over what the first pass wrote.
+func TestRunResumeKeepsHighlightsFromBothSidesOfTheCheckpoint(t *testing.T) {
+	e := newEnv(t)
+	body := `1,First,H1,,"https://example.com/same",A,,"2020-01-01T00:00:00Z",,Highlight:one,false
+2,Other,H2,,"https://example.com/other",A,,"2020-01-01T00:00:00Z",,Highlight:other,false
+3,Third,H3,,"https://example.com/same",A,,"2020-01-01T00:00:00Z",,Highlight:three,false
+`
+	// A single pass keeps both quotes.
+	src, err := NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(e.ctx, e.store, src, Options{}); err != nil {
+		t.Fatalf("single pass: %v", err)
+	}
+	single, err := e.store.HighlightsForItem(e.ctx, e.item(t, "https://example.com/same").ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(single) != 2 {
+		t.Fatalf("single pass kept %d quotes, want 2", len(single))
+	}
+
+	// Now the same file through a checkpoint at row 2 and a resume: the same two
+	// quotes, in the same order.
+	e2 := newEnv(t)
+	src, err = NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(e2.ctx, e2.store, src, Options{Limit: 2}); err != nil {
+		t.Fatalf("first half: %v", err)
+	}
+	src, err = NewCSVSource(strings.NewReader(header + body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(e2.ctx, e2.store, src, Options{SkipRows: 2}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	resumed, err := e2.store.HighlightsForItem(e2.ctx, e2.item(t, "https://example.com/same").ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resumed) != 2 {
+		t.Fatalf("the resume left %d quotes, want 2 (the first pass's must survive)", len(resumed))
+	}
+	for i := range single {
+		if resumed[i].Quote != single[i].Quote {
+			t.Errorf("quote %d = %q, want %q", i, resumed[i].Quote, single[i].Quote)
+		}
+	}
+}
+
+// A dry run writes nothing, highlights included — not even the fallback that a
+// resumed run uses to fill in an item it never wrote.
+func TestRunDryRunDoesNotTouchHighlights(t *testing.T) {
+	e := newEnv(t)
+	e.runCSV(t, `1,Seed,,,"https://example.com/a",,,"2020-01-01T00:00:00Z",,Highlight:old,false
+`, Options{})
+	item := e.item(t, "https://example.com/a")
+
+	// The file now says something different; the preview must not apply it.
+	dry := e.runCSV(t, `2,Seed,,,"https://example.com/a",,,"2020-01-01T00:00:00Z",,Highlight:new,false
+`, Options{DryRun: true})
+	if dry.Imported != 0 || dry.Merged != 1 {
+		t.Fatalf("dry run = %+v, want one merge", dry)
+	}
+
+	got, err := e.store.HighlightsForItem(e.ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Quote != "old" {
+		t.Errorf("highlights = %+v, want the stored one untouched by the dry run", got)
+	}
+}
