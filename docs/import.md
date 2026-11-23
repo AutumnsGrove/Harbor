@@ -98,8 +98,9 @@ created, 268 highlights, 6 favourites. The same file a second time: **0 new, 1,4
 count in the library unchanged. The Netscape export of the result re-imported as 1,476 merges with the
 highlights intact, and a run cancelled after 131 records resumed and finished the remaining 1,345.
 
-The saves landed **without enrichment**: usable, searchable by their own text, but every kind is the
-default `article` and the only tags are the ones Raindrop carried. Enriching them is a separate,
+The saves landed **without enrichment**: usable, and their own text is already in the full-text index,
+but every kind is the default `article` and the only tags are the ones Raindrop carried. There is no
+search box yet — that is phase 10 — so "find it by its text" today means the database, not the UI. Enriching them is a separate,
 costed decision.
 
 ## Verifying the result

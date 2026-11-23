@@ -128,6 +128,9 @@ Demo:
 6. Kill the vector cache (restart with a rebuild forced) → search still works during the rebuild.
 7. On the potato: `docker stats` during a search burst; RSS and latency recorded. 10k synthetic
    items: p95 latency and peak RSS in the exit note.
+8. **An item that only exists in the old library** (imported by phase 5, never enriched) is found by
+   its own text before any model call: the import wrote the FTS row, so this is the test that the
+   import and the search index agree.
 
 ## Risks
 

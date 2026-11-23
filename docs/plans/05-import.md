@@ -177,10 +177,10 @@ The library afterwards: 1,476 items (all `source=import`, all `state=ready`, kin
 second import left every one of those numbers unchanged, which is the property the whole phase is
 about.
 
-Two exit criteria in the list above are **not this phase's to prove**, and the plan was wrong to put
-them here: "highlights listed" needs phase 8's item-page highlights, and "search … before enrichment"
-needs phase 10. They belong to those phases' demos; this phase's page can only show that the rows
-exist, which the database does.
+Two exit criteria used to be listed here and were unmeetable at this phase: "highlights listed" needs
+phase 8's item-page highlights, and "search … before enrichment" needs phase 10. They have moved to
+those plans' demos (criterion 8 in each), and this phase is ticked on the five criteria it can prove —
+all of which ran above.
 
 The imports are **not enriched**. Everything landed `state=ready` under the documented `--no-enrich`
 default, at ~$2 for the whole file if it is ever queued. That decision is Autumn's, and it is the next
@@ -198,11 +198,16 @@ Demo, with the real subscription data:
 2. Run the import for real. Total item count matches the dry run; the oldest items keep their original
    dates when sorted by created.
 3. Run the same import a second time → zero new items, zero duplicates, same tag count.
-4. Open five random imported items: notes intact, tags intact, highlights listed, collection present
-   as a manual Space.
+4. Open five random imported items: notes intact, tags intact, collection present as a manual Space.
 5. Netscape HTML export of the same library imports into the same items (merge, not duplicate).
 6. Cancel mid-import and resume; the final count is correct.
-7. Search for an item that only exists in the old library → found, before enrichment has finished.
+
+Moved out of this phase, because the build order puts them after it and a criterion cannot gate a
+phase that cannot reach it:
+
+- "highlights listed on the item page" → [phase 8](08-reader.md) (criterion 8 there).
+- "search for an item that only exists in the old library → found, before enrichment" →
+  [phase 10](10-search.md) (criterion 8 there).
 
 ## Risks
 

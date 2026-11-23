@@ -162,8 +162,16 @@ highlights, 25 Spaces, 1,482 memberships, 7,412 item tags, 2,051 tags — and `/
 5.7 s after the restart. The restore drill on the same box is the one that matters, because it is the
 recovery a bad update would actually need.
 
-What is still outstanding is the *other* half of the milestone: a restore **from R2 on a clean box**,
-which needs the Worker's R2 credential the `/presign` route is waiting for.
+What is still outstanding is the *other* half of the milestone: a restore **from R2 on a clean box**.
+It needs two things, and the credential is only one of them:
+
+1. The Worker's R2 secret (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) — `/presign`
+   answers "not configured" without it.
+2. **The presign route extended to backup keys.** `presignKeyAllowed` (`worker/src/presign.ts`) allows
+   only `incoming|media|archives`, and `knownKey` (`worker/src/queue.ts`) proves a key by looking it up
+   in D1's `blobs` — so `backups/harbor-<UTC>.db.zst` is a 400 before the credential is even consulted.
+   The bucket is private and the Worker has no read-back route by design, so the download has to be a
+   presigned GET: that route needs the prefix and its own key validation, not a D1 row.
 
 ---
 
