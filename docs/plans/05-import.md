@@ -179,7 +179,7 @@ about.
 
 Two exit criteria used to be listed here and were unmeetable at this phase: "highlights listed" needs
 phase 8's item-page highlights, and "search … before enrichment" needs phase 10. They have moved to
-those plans' demos (criterion 8 in each), and this phase is ticked on the five criteria it can prove —
+those plans' demos (criterion 8 in each), and this phase is ticked on the six criteria it can prove —
 all of which ran above.
 
 The imports are **not enriched**. Everything landed `state=ready` under the documented `--no-enrich`
