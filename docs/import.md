@@ -51,6 +51,25 @@ harbor import ~/Downloads/<export>.csv --no-enrich
 `--no-enrich` is the documented default for a bulk import: 1,500 items through the model is a real
 cost and a long drain, and the links, notes, tags, Spaces and highlights are what you came for.
 
+## From Settings → Import
+
+**Settings → Import** is the same run from the browser, and the same `import_runs` row: the file is
+hashed the same way, so a run started in the UI can be continued with the CLI (and the other way
+round) by giving it the same file.
+
+1. Choose or drop the export. The page reads it and shows the dry-run summary — the numbers above,
+   before anything is written.
+2. **Import N rows** starts the run. It keeps going if the tab closes; nothing else can start an
+   import while it is going, and Settings → Import is the only place to watch it.
+3. Progress is bytes read, because a checkpoint only moves every hundred records. **Stop** ends the
+   run at the next record and closes it as cancelled.
+4. Choose the same file again to resume from the checkpoint. The summary afterwards is downloadable
+   as JSON.
+
+*Queue these for the model afterwards* is `--enrich`, off by default for the reason above. Both
+surfaces write the library the same way; the CLI is still the safer one for a file large enough that
+the laptop might sleep.
+
 ## What the dry run printed
 
 - **imported / merged** — new items vs items already in the library. A URL that appears twice in the

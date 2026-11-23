@@ -206,6 +206,60 @@ export type SaveItemResponse = {
 	merged: boolean;
 };
 
+/**
+ * One import's accounting, as the server's importer.Report serialises it. The
+ * counts add up (imported + merged + skipped + failed = total), so the page
+ * shows them rather than re-deriving them.
+ */
+export type ImportReport = {
+	total: number;
+	imported: number;
+	merged: number;
+	skipped: number;
+	failed: number;
+	/** Dry run only: what the real run would create. */
+	spaces_to_create?: number;
+	spaces_created?: number;
+	favourites: number;
+	highlights: number;
+	unknown_columns?: string[];
+	file_warnings?: string[];
+	errors?: { record: number; url: string; reason: string }[];
+};
+
+/** running|cancelled|done — a cancelled run is resumable, a done one is not. */
+export type ImportRunState = 'running' | 'cancelled' | 'done';
+
+export type ImportRun = {
+	id: string;
+	state: ImportRunState;
+	/** Records read, which is where a resume starts. */
+	checkpoint: number;
+	startedAt: string;
+	finishedAt?: string | null;
+	report?: ImportReport;
+};
+
+/**
+ * The poll, and the answer to starting one. Bytes are the honest progress: the
+ * file is read once, front to back, and the checkpoint only moves every hundred
+ * records.
+ */
+export type ImportStatusResponse = {
+	running: boolean;
+	/** The last run says running and nothing is doing it: a restart mid-import. */
+	resumable: boolean;
+	bytesRead?: number;
+	bytesTotal?: number;
+	run: ImportRun | null;
+};
+
+export type ImportDryRunResponse = {
+	dryRun: boolean;
+	bytesTotal: number;
+	report: ImportReport;
+};
+
 export type LookupResponse = {
 	exists: boolean;
 	item?: Item;
@@ -273,5 +327,29 @@ export const api = {
 		/** Asks the watcher to apply the pinned digest. Never names an image. */
 		start: () => request<UpdateActionResponse>('/api/update/start', { method: 'POST' }),
 		status: () => request<UpdateStatusResponse>('/api/update/status')
+	},
+
+	import: {
+		/**
+		 * The upload is the file itself: no multipart, no field name. The dry run
+		 * reads the whole file and writes nothing, which is what gets run against
+		 * the real export before anything is committed (plans/05).
+		 */
+		dryRun: (file: Blob) =>
+			request<ImportDryRunResponse>('/api/import?dryRun=1', {
+				method: 'POST',
+				headers: { 'content-type': 'application/octet-stream' },
+				body: file
+			}),
+		/** Answers as soon as the run has started; poll status for the rest. */
+		start: (file: Blob, options: { enrich?: boolean } = {}) =>
+			request<ImportStatusResponse>(`/api/import${options.enrich ? '?enrich=1' : ''}`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/octet-stream' },
+				body: file
+			}),
+		status: () => request<ImportStatusResponse>('/api/import/status'),
+		/** Stops at the next record; uploading the same file resumes it. */
+		cancel: () => request<{ status: string }>('/api/import/cancel', { method: 'POST' })
 	}
 };

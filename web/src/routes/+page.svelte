@@ -159,8 +159,8 @@
 		<button class="btn" onclick={load}><Icon name="refresh" /> Try again</button>
 	</div>
 {:else if items.length === 0 && pending.length === 0}
-	<!-- The real first-run screen from the mockup. Import is a stub until
-	     phase 5; the composer works now, so it is a button, not a promise. -->
+	<!-- The real first-run screen from the mockup. Both paths are live now: import
+	     is phase 5's, and the composer works, so neither is a promise. -->
 	<header class="pagehead">
 		<h1 class="h1">Bring something in.</h1>
 		<p class="lead">
@@ -170,19 +170,20 @@
 
 	<div class="firstrun">
 		<section class="path">
-			<span class="pill amb badge">not yet</span>
+			<span class="pill acc badge">ready</span>
 			<h2 class="h3">Import your Raindrop library</h2>
 			<p>
-				CSV and Netscape HTML, merged by canonical link, so importing twice is safe. Lands with
-				phase&nbsp;5.
+				CSV and Netscape HTML, merged by canonical link, so importing twice is safe. Collections become
+				Spaces, and your highlights come with them.
 			</p>
+			<a class="btn pri" href="/settings/import"><Icon name="plus" /> Import a file</a>
 		</section>
 
 		<section class="path">
 			<span class="pill acc badge">ready</span>
 			<h2 class="h3">Paste a first link</h2>
 			<p>Saved in one motion. A note is enough, too — the composer takes either.</p>
-			<button class="btn pri" onclick={() => (composing = true)}>
+			<button class="btn" onclick={() => (composing = true)}>
 				<Icon name="plus" /> Save something
 			</button>
 		</section>

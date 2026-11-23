@@ -155,7 +155,7 @@
 	<h1 class="h1">Settings</h1>
 	<p class="lead">
 		The library settings arrive with their phases. What exists now is the deployment: the version,
-		the update path, and what the watcher last did.
+		the update path, the import, and what the watcher last did.
 	</p>
 </header>
 
@@ -228,6 +228,19 @@
 	</section>
 
 	<section class="panel">
+		<div class="row wrap">
+			<div class="grow">
+				<div class="h3">Import</div>
+				<p class="note">
+					Move your Raindrop library, or a browser's bookmarks, into Harbor. Merged by canonical link,
+					so importing the same file twice is safe.
+				</p>
+			</div>
+			<a class="btn" href="/settings/import">Open</a>
+		</div>
+	</section>
+
+	<section class="panel">
 		<h2 class="h3">Recently deleted</h2>
 		{#if deletedProblem}
 			<p class="callout amb" role="status">{deletedProblem}</p>
@@ -253,8 +266,8 @@
 	<section class="panel">
 		<h2 class="h3">Not built yet</h2>
 		<p class="note">
-			Tags, Spaces, import, Sources and tokens, Search, Status, Export and backup. Each one lands
-			with its phase; none of them is faked here.
+			Tags, Spaces, Sources and tokens, Search, Status, Export and backup. Each one lands with its
+			phase; none of them is faked here.
 		</p>
 	</section>
 </div>

@@ -37,14 +37,14 @@ func (s *Server) version(w http.ResponseWriter, _ *http.Request) {
 }
 
 // busyResponse answers "is the app in the middle of something a restart would
-// interrupt?". Phase 0 has nothing to interrupt; the queue and importer fill
-// this in.
+// interrupt?". The queue has not landed yet; an import has, and an update that
+// restarts mid-file would stop it — resumably, but there is no hurry.
 type busyResponse struct {
 	Busy bool `json:"busy"`
 }
 
 func (s *Server) busy(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, busyResponse{Busy: false})
+	writeJSON(w, http.StatusOK, busyResponse{Busy: s.imports.running()})
 }
 
 // statusResponse is the header-less exemption: counts only, never content. It

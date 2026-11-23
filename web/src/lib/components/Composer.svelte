@@ -105,9 +105,9 @@
 	>
 		<form onsubmit={save}>
 		<h2 class="h2" id="composer-title">Save to Harbor</h2>
-		<p class="note" style="margin-top: 4px">A link, a thought, or both. Enrichment arrives behind it.</p>
+		<p class="note">A link, a thought, or both. Enrichment arrives behind it.</p>
 
-		<div class="stack" style="margin-top: 18px">
+		<div class="stack spaced">
 			<div class="field">
 				<label for="composer-url">Link</label>
 				<input
