@@ -141,6 +141,9 @@ Demo, on a phone and a desktop:
 6. Open a PDF item → no highlight affordance, view-only, clearly stated.
 7. Delete a highlight → gone everywhere; undo is not offered (deletion of a highlight is cheap and
    explicitly confirmed) — if that feels wrong, that is a design change, record it.
+8. **An item imported by phase 5** lists the highlights the import stored (268 of them in the potato's
+   2026-11-23 import): quote rendered, no colour invented, no annotation invented, and nothing to
+   anchor against until the item has a reader.
 
 ## Risks
 

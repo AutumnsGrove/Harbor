@@ -91,6 +91,18 @@ command picks up where it stopped: `resuming the cancelled run of this file from
 different file is a different run, a dry run leaves no record behind, and a *finished* run is not
 resumed — importing the same file again is a fresh run whose rows all merge.
 
+## What the real library did (2026-11-23)
+
+The measured run, on the potato, through Settings → Import: 1,476 rows imported, 0 merges, 23 Spaces
+created, 268 highlights, 6 favourites. The same file a second time: **0 new, 1,476 merged**, and every
+count in the library unchanged. The Netscape export of the result re-imported as 1,476 merges with the
+highlights intact, and a run cancelled after 131 records resumed and finished the remaining 1,345.
+
+The saves landed **without enrichment**: usable, and their own text is already in the full-text index,
+but every kind is the default `article` and the only tags are the ones Raindrop carried. There is no
+search box yet — that is phase 10 — so "find it by its text" today means the database, not the UI. Enriching them is a separate,
+costed decision.
+
 ## Verifying the result
 
 ```bash

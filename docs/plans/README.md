@@ -203,14 +203,14 @@ happened, and `make check` is green on `main`.
 | 2 | Core library | ◐ store, Worker ingest, items API, pending window and the library UI are in the tree and green; the potato demo and scheduler skeleton outstanding |
 | 3 | Enrichment | ◐ code complete and merged, 95.1% kind accuracy on the 41-case scored set; the potato demo is outstanding |
 | 4 | Front doors | ☐ |
-| 5 | Import | ◐ S9 answered and the real export imported on a throwaway database 2026-11-22 (1,476 items, twice, and a resumed pass); parser, store, driver, CLI, resume and the CLI dry run are merged; Settings → Import and the potato demo are outstanding |
+| 5 | Import | ✅ **the real library imported on the potato 2026-11-23, from Settings → Import**: 1,476 items, twice (second pass all merges), the HTML twin, and a cancelled-then-resumed pass. The two criteria that need phases 8 and 10 moved to those plans' demos |
 | 6 | Images + documents | ☐ |
 | 7 | Transcripts | ☐ |
 | 8 | Reader + highlights | ☐ |
 | 9 | Tags + Spaces | ☐ |
 | 10 | Hybrid search | ☐ |
 | 11 | Archive + link rot | ☐ |
-| 12a | Backup, restore drill, export (before first real import) | ◐ code complete and merged; the potato drill with a real library is outstanding |
+| 12a | Backup, restore drill, export (before first real import) | ◐ code complete and merged; **the real drill ran on the potato 2026-11-23** (1,476 saves, backup → restore → identical counts); the clean-box-from-R2 half waits on the Worker's R2 secret **and** on the presign route learning `backups/` |
 | 12b | Status page, maintenance, runbook | ☐ |
 
 ---
