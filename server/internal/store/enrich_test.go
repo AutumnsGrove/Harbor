@@ -301,3 +301,90 @@ func TestSaveEmbeddingRoundTripsAndReplaces(t *testing.T) {
 		t.Errorf("GetEmbedding(missing) = %v, want ErrNotFound", err)
 	}
 }
+
+// A bulk import lands under --no-enrich, which leaves rows ready and unread by
+// the model. QueueUnenriched is how that backlog becomes the enrichment loop's
+// work (plans/05, "Volume vs the enrichment queue"), and it must touch nothing
+// else: not an item the model already read, not one waiting in the queue, not a
+// row in the bin.
+func TestQueueUnenrichedQueuesOnlyTheFirstPass(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	base := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+
+	imported := mustCreate(t, s, ItemInput{ID: "imported", Note: "from the export", SavedAt: base})
+	older := mustCreate(t, s, ItemInput{ID: "older", Note: "also from the export", SavedAt: base.Add(-24 * time.Hour)})
+	read := mustCreate(t, s, ItemInput{ID: "read", Note: "the model has seen this", SavedAt: base})
+	queued := mustCreate(t, s, ItemInput{ID: "queued", Note: "already waiting", SavedAt: base})
+	deleted := mustCreate(t, s, ItemInput{ID: "deleted", Note: "in the bin", SavedAt: base})
+
+	// The import's own shape: ready, never enriched.
+	for _, id := range []string{imported.ID, older.ID, deleted.ID} {
+		if err := s.MarkReady(ctx, id); err != nil {
+			t.Fatalf("MarkReady(%s): %v", id, err)
+		}
+	}
+	// One row the model has read, and one still in the queue.
+	if _, err := s.ApplyEnrichment(ctx, read.ID, Enrichment{
+		Summary: "done", Kind: model.KindArticle, Tags: []string{"x"}, PromptVersion: "tag.v1",
+	}); err != nil {
+		t.Fatalf("ApplyEnrichment: %v", err)
+	}
+	if err := s.SoftDeleteItem(ctx, deleted.ID); err != nil {
+		t.Fatalf("SoftDeleteItem: %v", err)
+	}
+
+	// Two live rows have never met the model: the two imported ones. The
+	// enriched row and the deleted one are not part of the backlog, and the
+	// already-queued one is not waiting for its *first* pass.
+	if n, err := s.UnenrichedCount(ctx); err != nil || n != 2 {
+		t.Fatalf("UnenrichedCount = %d, %v; want 2", n, err)
+	}
+
+	queuedCount, remaining, err := s.QueueUnenriched(ctx, -1, 1)
+	if err != nil {
+		t.Fatalf("QueueUnenriched: %v", err)
+	}
+	if queuedCount != 1 || remaining != 1 {
+		t.Fatalf("queued %d, remaining %d; want 1 and 1 (oldest first)", queuedCount, remaining)
+	}
+
+	// Oldest saved first: the backlog drains in the order it was built.
+	got, err := s.GetItem(ctx, older.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if got.State != model.StateQueued || got.Priority != -1 {
+		t.Errorf("older = state %q priority %d, want queued at -1", got.State, got.Priority)
+	}
+
+	if _, _, err := s.QueueUnenriched(ctx, -1, 0); err != nil {
+		t.Fatalf("QueueUnenriched (all): %v", err)
+	}
+
+	for _, id := range []string{imported.ID, older.ID} {
+		item, err := s.GetItem(ctx, id)
+		if err != nil {
+			t.Fatalf("GetItem(%s): %v", id, err)
+		}
+		if item.State != model.StateQueued {
+			t.Errorf("%s = %q, want queued", id, item.State)
+		}
+	}
+	// Untouched: the enriched row stays ready with its summary, the already
+	// queued row is not re-stamped, and the bin stays in the bin.
+	if item, err := s.GetItem(ctx, read.ID); err != nil || item.State != model.StateReady || item.Summary != "done" {
+		t.Errorf("read = %+v, %v; want it ready and unchanged", item, err)
+	}
+	if item, err := s.GetItem(ctx, queued.ID); err != nil || item.State != model.StateQueued {
+		t.Errorf("queued = %+v, %v; want it still queued", item, err)
+	}
+	if item, err := s.GetItem(ctx, deleted.ID); err != nil || item.State != model.StateReady || item.DeletedAt == nil {
+		t.Errorf("deleted = %+v, %v; want it ready and still in the bin", item, err)
+	}
+
+	// Nothing is left for a second run to pick up.
+	if n, err := s.UnenrichedCount(ctx); err != nil || n != 0 {
+		t.Errorf("UnenrichedCount after queueing = %d, %v; want 0", n, err)
+	}
+}

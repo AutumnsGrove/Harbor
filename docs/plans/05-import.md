@@ -182,9 +182,10 @@ phase 8's item-page highlights, and "search … before enrichment" needs phase 1
 those plans' demos (criterion 8 in each), and this phase is ticked on the six criteria it can prove —
 all of which ran above.
 
-The imports are **not enriched**. Everything landed `state=ready` under the documented `--no-enrich`
-default, at ~$2 for the whole file if it is ever queued. That decision is Autumn's, and it is the next
-thing this phase's data wants.
+The imports landed `state=ready` under the documented `--no-enrich` default. `harbor enrich` is the
+missing half of that choice — it queues the rows no prompt has written (`prompt_version` empty) at
+priority `-1`, so the backlog is a separate, watched run and not a second import. It refuses to run
+without `OPENROUTER_API_KEY`, because the loop without one would mark rows ready and enrich nothing.
 
 ## Exit criteria
 

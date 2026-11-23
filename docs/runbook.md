@@ -55,6 +55,22 @@ deleting it by hand: it may be the only one that opens.
 
 ---
 
+## Enrich a library that was imported without the model
+
+An import defaults to `--no-enrich` (plans/05): the links, notes, tags and highlights land, and the
+model never sees them. Queue that backlog when you are ready to pay for it:
+
+```bash
+docker compose exec harbor /app/harbor enrich --dry-run    # how many are waiting
+docker compose exec harbor /app/harbor enrich --limit 50    # a slice first
+docker compose exec harbor /app/harbor enrich               # all of it
+```
+
+Queueing is a row update, not a model call: it returns in a second and the `serve` loop drains at its
+own pace, behind anything saved by hand. `docker compose logs -f harbor` shows each failed item; the
+home page's needs-attention strip shows the ones that gave up. It refuses to run without
+`OPENROUTER_API_KEY`, and an item the model has already read is never queued again.
+
 ## Restore from a backup
 
 **Stop the container first.** The restore refuses to run while another Harbor holds `data/.lock`, and
