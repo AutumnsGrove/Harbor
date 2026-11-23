@@ -65,8 +65,12 @@ cost and a long drain, and the links, notes, tags, Spaces and highlights are wha
 
 Import is idempotent: the canonical URL is the key, so a second run merges into what the first wrote.
 Notes are not appended twice, tags are unioned, highlights are left exactly as they were (same ids and
-timestamps), and membership is a set. A cancelled run is safe to repeat — it restarts from the top
-rather than resuming, which is slower but never wrong.
+timestamps), and membership is a set.
+
+**Ctrl-C is safe.** A run records how far it has read, keyed by the file's own SHA-256, so the same
+command picks up where it stopped: `resuming the cancelled run of this file from record 1,203`. A
+different file is a different run, a dry run leaves no record behind, and a *finished* run is not
+resumed — importing the same file again is a fresh run whose rows all merge.
 
 ## Verifying the result
 

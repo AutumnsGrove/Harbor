@@ -96,18 +96,18 @@ is a typed error naming the columns it expected, never a positional guess.
 
 ## Tasks
 
-- [ ] Parser first, CLI second, UI last. The CLI is the real interface for a big file.
-- [ ] `--dry-run` prints the full summary (counts, new vs merge, spaces to create, unknown columns) and
+- [x] Parser first, CLI second, UI last. The CLI is the real interface for a big file.
+- [x] `--dry-run` prints the full summary (counts, new vs merge, spaces to create, unknown columns) and
       writes nothing — this is what gets run against the *real* export before anything is committed.
-- [ ] Import writes items with `state='ready'` when `--no-enrich` (they are usable immediately) and
+- [x] Import writes items with `state='ready'` when `--no-enrich` (they are usable immediately) and
       otherwise queues them at `priority=-1`, but **does not block** on enrichment: the run finishes,
       enrichment drains afterwards behind anything interactive.
-- [ ] Collections → `spaces.kind='manual'`, `space_items` membership; an existing Space with the same
+- [x] Collections → `spaces.kind='manual'`, `space_items` membership; an existing Space with the same
       name is reused (case-insensitive) rather than duplicated.
 - [ ] Settings → Import: file drop, dry-run, run with a progress bar, cancel, and a downloadable
       report. Progress is polled, not streamed — simpler and enough.
 - [ ] First-run screen now offers Import; it is the first real use of the empty state.
-- [ ] A `docs/import.md` with: how to export from Raindrop, the exact expected filename, what is
+- [x] A `docs/import.md` with: how to export from Raindrop, the exact expected filename, what is
       preserved, what is not, and how to verify the result.
 - [x] Record the mapping decisions in design.md §5 (same PR as the S9 verdict).
 
