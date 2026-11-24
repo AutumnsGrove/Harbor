@@ -245,7 +245,7 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		page, err := e.Fetcher.Fetch(ctx, *item.URL)
 		if err != nil {
 			cause := classifyFetchError(err)
-			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
+			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
 				return handled
 			}
 			return cause
@@ -254,7 +254,7 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 
 		if !IsHTML(page.ContentType) {
 			cause := permanent(fmt.Errorf("content type %q is not HTML", page.ContentType))
-			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
+			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
 				return handled
 			}
 			return cause
@@ -266,7 +266,7 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		extracted, err = extract.HTML(page.Body, base)
 		if err != nil {
 			cause := permanent(err)
-			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
+			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
 				return handled
 			}
 			return cause
@@ -277,12 +277,12 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		// the old path stays.
 		if strings.TrimSpace(extracted.Text) == "" {
 			cause := permanent(errors.New("the page carried no readable text"))
-			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
+			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
 				return handled
 			}
-			// A video that has neither a page nor an answer from the metadata
-			// endpoint has nothing to read. Handing the model an empty string
-			// would produce a summary of nothing and lose the real reason.
+			// A video that has neither a page nor a metadata source has nothing
+			// to read. Handing the model an empty string would produce a
+			// summary of nothing and lose the real reason.
 			if _, isVideo := youtube.VideoID(*item.URL); isVideo {
 				return cause
 			}
@@ -365,9 +365,15 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 // metadata still carries a title, a channel and a still, and an item with those
 // is usable before phase 7 fetches the transcript.
 //
-// It reports whether it handled the item. False means nothing was written and
-// the caller's own failure stands, which is what happens for a non-video URL, a
-// pipeline with no video source, or an endpoint that cannot answer either.
+// The two return values separate three outcomes, and the caller needs all three:
+//
+//   - handled: the row was written (or the write failed, which is the error).
+//   - not a video, or no video source: (false, nil) — the caller's own failure
+//     stands.
+//   - a video whose metadata the endpoint could not answer: (false, err) with
+//     err classified. A definitive answer is permanent; a timeout or a 429 is
+//     not, and must keep the retry schedule the page's own failure would have
+//     given it.
 func (e *Enricher) tryVideoMetadata(ctx context.Context, item model.Item, cause error) (bool, error) {
 	if e.Videos == nil || !hasURL(item) {
 		return false, nil
@@ -378,11 +384,11 @@ func (e *Enricher) tryVideoMetadata(ctx context.Context, item model.Item, cause 
 
 	meta, err := e.Videos.Metadata(ctx, *item.URL)
 	if err != nil {
-		// The endpoint could not answer either. The page's failure is the one
-		// that explains the item, so it is the one that is kept; this line is
-		// for whoever is reading the log.
 		e.Log.Warn("video metadata unavailable", "item", item.ID, "error", err)
-		return false, nil
+		if errors.Is(err, youtube.ErrNoMetadata) {
+			return false, permanent(err)
+		}
+		return false, err
 	}
 
 	_, err = e.Store.ApplyVideoMetadata(ctx, item.ID, store.VideoMetadata{

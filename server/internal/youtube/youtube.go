@@ -15,6 +15,7 @@ package youtube
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,16 @@ const (
 	// enrichment pass that has its own budget.
 	defaultTimeout = 10 * time.Second
 )
+
+// ErrNoMetadata is the definitive answer: the endpoint knows this id and has
+// nothing for it (deleted, private, age-gated) or answers an empty document.
+// Retrying will not change it, so a caller can park the item on it.
+//
+// Everything else — a timeout, a 429, a 5xx, a body that is not JSON — is
+// transient by nature and must stay retryable: harbor's first drain asked this
+// endpoint 371 times in a burst, and a rate limit on one of those is not a
+// reason to give up on a video forever.
+var ErrNoMetadata = errors.New("youtube: no metadata for this video")
 
 // videoIDLength is YouTube's id length, and its alphabet is base64-url without
 // padding. Both are checked so a path segment like "playlist" cannot pass.
@@ -171,9 +182,13 @@ func (c *Client) Metadata(ctx context.Context, raw string) (Metadata, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		// 401 and 404 both mean "no metadata for this id": a private, deleted or
-		// age-gated video. The message says so without a body dump.
-		return Metadata{}, fmt.Errorf("youtube: oEmbed answered %d for %s", response.StatusCode, id)
+		// 401 and 404 mean "this id has nothing": a private, deleted or
+		// age-gated video, and no retry will change it. 429 and 5xx are the
+		// endpoint being busy or broken, which is worth another attempt.
+		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
+			return Metadata{}, fmt.Errorf("youtube: oEmbed answered %d for %s", response.StatusCode, id)
+		}
+		return Metadata{}, fmt.Errorf("%w: oEmbed answered %d for %s", ErrNoMetadata, response.StatusCode, id)
 	}
 
 	answer, err := io.ReadAll(io.LimitReader(response.Body, maxAnswerBytes))
@@ -204,12 +219,12 @@ func parseAnswer(id string, body []byte) (Metadata, error) {
 	title := strings.TrimSpace(answer.Title)
 	if title == "" {
 		// An answer without a title is not metadata; it is a page that happened
-		// to parse. Treating it as success would overwrite a good title with
-		// nothing.
-		return Metadata{}, fmt.Errorf("youtube: the oEmbed answer has no title for %s", id)
+		// to parse. The endpoint answered, so this is definitive: retrying would
+		// ask the same question and get the same nothing.
+		return Metadata{}, fmt.Errorf("%w: the oEmbed answer has no title for %s", ErrNoMetadata, id)
 	}
 	if answer.Type != "" && answer.Type != "video" {
-		return Metadata{}, fmt.Errorf("youtube: oEmbed answered type %q for %s", answer.Type, id)
+		return Metadata{}, fmt.Errorf("%w: oEmbed answered type %q for %s", ErrNoMetadata, answer.Type, id)
 	}
 	return Metadata{
 		VideoID:   id,

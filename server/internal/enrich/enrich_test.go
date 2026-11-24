@@ -619,8 +619,14 @@ func TestProcessDoesNotSendAnEmptyVideoToTheModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetItem: %v", err)
 	}
-	if !strings.Contains(after.LastError, "no readable text") {
-		t.Errorf("last_error = %q, want the page's own reason", after.LastError)
+	// Which of the two reasons is kept depends on the endpoint: its own when it
+	// answered, the page's when it did not (see the two tests above). What must
+	// never happen is a model call on an empty string.
+	if after.State == model.StateReady {
+		t.Errorf("state = %q, want the item left for a retry", after.State)
+	}
+	if after.LastError == "" {
+		t.Error("last_error is empty; the item does not say why it is not enriched")
 	}
 }
 
@@ -643,12 +649,12 @@ func TestProcessKeepsTheFailureForANonVideo(t *testing.T) {
 	}
 }
 
-// If the metadata endpoint cannot answer either, the page's own failure is what
-// the row keeps.
-func TestProcessKeepsThePageFailureWhenMetadataFails(t *testing.T) {
+// A definitive answer from the endpoint — this id has nothing — parks the item:
+// no retry will change a deleted video.
+func TestProcessFailsAVideoTheEndpointHasNoMetadataFor(t *testing.T) {
 	s := openStore(t)
 	en := newTestEnricher(t, s, blockedFetcher(), &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{})
-	en.Videos = &fakeVideos{err: errors.New("oEmbed answered 404")}
+	en.Videos = &fakeVideos{err: fmt.Errorf("%w: oEmbed answered 404", youtube.ErrNoMetadata)}
 
 	item := createItem(t, s, store.ItemInput{
 		ID: "gone", URL: ptr("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), Source: model.SourceImport,
@@ -660,10 +666,54 @@ func TestProcessKeepsThePageFailureWhenMetadataFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetItem: %v", err)
 	}
-	if after.State == model.StateReady {
-		t.Errorf("state = %q, want it to stay a failure", after.State)
+	if after.State != model.StateFailed {
+		t.Errorf("state = %q, want failed: the endpoint answered definitively", after.State)
 	}
-	if !strings.Contains(after.LastError, "blocked") && !strings.Contains(after.LastError, "sorry") {
-		t.Errorf("last_error = %q, want the page's reason, not the metadata's", after.LastError)
+	if after.NextAttemptAt != nil {
+		t.Errorf("next attempt = %v, want none", after.NextAttemptAt)
+	}
+	if !strings.Contains(after.LastError, "404") {
+		t.Errorf("last_error = %q, want the reason", after.LastError)
+	}
+}
+
+// A transport error or a rate limit is the endpoint being busy, not the video
+// being gone — that keeps the retry schedule, on every hook. A burst of 371
+// retries against a keyless endpoint is exactly when a 429 happens.
+func TestProcessRetriesWhenTheMetadataEndpointIsBusy(t *testing.T) {
+	tests := []struct {
+		name string
+		body string // page the fetcher returns; "" means the fetch itself fails
+	}{
+		{"the page was blocked", ""},
+		{"the page carried no text", `<html><body></body></html>`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openStore(t)
+			fetcher := blockedFetcher()
+			if tc.body != "" {
+				fetcher = &fakeFetcher{body: tc.body}
+			}
+			en := newTestEnricher(t, s, fetcher, &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{})
+			en.Videos = &fakeVideos{err: errors.New("youtube: oEmbed: context deadline exceeded")}
+
+			item := createItem(t, s, store.ItemInput{
+				ID: "busy", URL: ptr("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), Source: model.SourceImport,
+			})
+			if err := en.Process(context.Background(), item); err == nil {
+				t.Fatal("a busy endpoint was reported as enriched")
+			}
+			after, err := s.GetItem(context.Background(), item.ID)
+			if err != nil {
+				t.Fatalf("GetItem: %v", err)
+			}
+			if after.State != model.StateQueued {
+				t.Errorf("state = %q, want queued: the endpoint was busy, not definitive", after.State)
+			}
+			if after.NextAttemptAt == nil {
+				t.Error("next_attempt_at is nil; the row will never be tried again")
+			}
+		})
 	}
 }
