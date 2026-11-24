@@ -473,32 +473,44 @@ a {
 
 /* ── the feed (phase 2) ─────────────────────────────────────────────────────── */
 
+/* The grid reads left to right: item i lands in column i % N, so the top row is
+   the newest saves in save order. CSS multi-column layout cannot do that (it
+   fills each column top to bottom before starting the next), so +page.svelte
+   does the split. The breakpoints stay here, where the container query can see
+   them: --cols is the single source of truth, read back by a ResizeObserver, so
+   the column count is never duplicated in JavaScript. */
 .feed {
-	columns: 4;
-	column-gap: 26px;
+	--cols: 4;
+	--feed-gap: 26px;
+	display: flex;
+	align-items: flex-start;
+	gap: var(--feed-gap);
 }
 
-.feed > * {
-	break-inside: avoid;
-	margin-bottom: 26px;
+.feed .col {
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--feed-gap);
 }
 
 @container app (max-width: 1040px) {
 	.feed {
-		columns: 3;
+		--cols: 3;
 	}
 }
 
 @container app (max-width: 720px) {
 	.feed {
-		columns: 2;
-		column-gap: 16px;
+		--cols: 2;
+		--feed-gap: 16px;
 	}
 }
 
 @container app (max-width: 440px) {
 	.feed {
-		columns: 1;
+		--cols: 1;
 	}
 }
 
