@@ -62,6 +62,10 @@ web/src/routes/item/[id]/+page.svelte   transcript panel (collapsible, searchabl
 
 - [ ] Implement the S8 verdict exactly: whichever source won, with the fallback recorded in
       design.md §6 and the config that selects it.
+- [ ] **Re-enrich every `prompt_version='oembed.v1'` row**: those are the videos phase 3 could only
+      file from public metadata (371 of them on the potato at the first drain). The transcript is
+      what they are missing, and a `harbor enrich` after this phase is what fills them — the
+      fallback wrote no summary and no tags on purpose.
 - [ ] `transcripts` behind an interface, with a fake that serves the fixtures, so the pipeline tests are
       offline.
 - [ ] The transcript columns (`transcript_text`, `transcript_state`, `transcript_lang`,
