@@ -307,13 +307,19 @@ The imported library — 1,476 saves, none of them ever read by a model — was 
 `harbor enrich` and drained in about two hours for **$0.51** (Harbor's own OpenRouter key, $5/month).
 
 - **954 enriched by the model**: a kind, 3–6 tags, a two-sentence summary and an embedding each
-  (2,164 canonical tags, 10,626 assignments, 954 vectors). Kinds: article 1,160 · product 194 ·
-  video 51 · book 21 · movie 13 · paper 12 · image 11 · recipe 5 · podcast 4 · place 3 · tweet 2.
+  (2,164 canonical tags, 10,626 assignments, 954 vectors). The model's own split (`kind_source='ai'`):
+  article 638 · product 194 · video 51 · book 21 · movie 13 · paper 12 · image 11 · recipe 5 ·
+  podcast 4 · place 3 · tweet 2 = 954.
 - **522 failed**, and 371 of those were one cause: YouTube answers a datacenter fetch with Google's
   `/sorry/` wall. The oEmbed fallback (design §6) then filed **359 of them** from public metadata —
   real titles and channels, `kind=video`, the still as the cover, no model call, no tags — leaving
   **11 genuinely gone** (oEmbed 401/403/404: deleted, private, age-gated) and one broken affiliate
-  redirect.
+  redirect. Those 359 are the ones phase 7 re-enriches; the 12 that stayed failed have no captions to
+  fetch and no `oembed.v1` row at all.
+- **The whole library's kinds after the fallback** are article 801 · video 410 · product 194 · book 21
+  · movie 13 · paper 12 · image 11 · recipe 5 · podcast 4 · place 3 · tweet 2. That list is not the
+  model's: every imported row starts as the default `article`, so the failures sit inside it, and the
+  359 filed videos are `kind=video` from their host rather than from the classifier.
 - **163 in Needs attention afterwards**, down from 522: 151 non-video (PDF/JPEG/PNG links, a 5 MB
   fetch cap, Uniqlo/ASOS anti-bot, dead links — phases 6 and 11) and the 12 videos above.
 
