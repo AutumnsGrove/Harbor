@@ -5,6 +5,7 @@
 	import { onMount } from 'svelte';
 
 	import { api, isApiError, type Item, type PendingJob } from '#lib/api';
+	import { splitColumns } from '#lib/feed';
 
 	import Card from '../lib/components/Card.svelte';
 	import Composer from '../lib/components/Composer.svelte';
@@ -23,6 +24,23 @@
 	let failed = $state<Item[]>([]);
 	let attentionDismissed = $state(false);
 	let retrying = $state<string | null>(null);
+
+	// The grid is round-robin, not CSS columns: the top row is the newest saves in
+	// order, reading left to right (#51). --cols in app.css owns the breakpoints;
+	// the ResizeObserver below reads the resolved value back, so the media queries
+	// are not duplicated here.
+	type FeedEntry =
+		| { key: string; kind: 'pending'; job: PendingJob }
+		| { key: string; kind: 'item'; item: Item };
+
+	let cols = $state(4);
+	let feed = $state<HTMLDivElement | null>(null);
+
+	let entries = $derived<FeedEntry[]>([
+		...pending.map((job) => ({ key: job.id, kind: 'pending' as const, job })),
+		...items.map((item) => ({ key: item.id, kind: 'item' as const, item }))
+	]);
+	let columns = $derived(splitColumns(entries, cols));
 
 	let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -144,6 +162,24 @@
 		}, 30_000);
 		return () => clearInterval(timer);
 	});
+
+	// The feed only exists once the library has answered, so this re-attaches when
+	// it appears. --cols flips in app.css's container queries; reading the computed
+	// value is how that reaches the split without a second copy of the breakpoints.
+	$effect(() => {
+		const node = feed;
+		if (!node) return;
+
+		const read = () => {
+			const resolved = Number.parseInt(getComputedStyle(node).getPropertyValue('--cols'), 10);
+			if (Number.isFinite(resolved) && resolved >= 1 && resolved !== cols) cols = resolved;
+		};
+
+		read();
+		const observer = new ResizeObserver(read);
+		observer.observe(node.closest('.app') ?? node);
+		return () => observer.disconnect();
+	});
 </script>
 
 <svelte:head>
@@ -245,21 +281,28 @@
 		</p>
 	{/if}
 
-	<div class="feed">
-		{#each pending as job (job.id)}
-			<article class="card pending" aria-label={`${job.title} — saving`}>
-				<div class="cover">
-					<span class="kindmark"><Icon name="clock" size={20} /></span>
-				</div>
-				<div class="body">
-					<h3>{pendingTitle(job)}</h3>
-					<p class="sub"><span>{job.source}</span><span>· {pendingAge(job.createdAt)}</span></p>
-					<p class="more">Waiting for the potato to pull this save.</p>
-				</div>
-			</article>
-		{/each}
-		{#each items as item (item.id)}
-			<Card {item} />
+	<div class="feed" bind:this={feed}>
+		{#each columns as column, index (index)}
+			<div class="col">
+				{#each column as entry (entry.key)}
+					{#if entry.kind === 'pending'}
+						<article class="card pending" aria-label={`${entry.job.title} — saving`}>
+							<div class="cover">
+								<span class="kindmark"><Icon name="clock" size={20} /></span>
+							</div>
+							<div class="body">
+								<h3>{pendingTitle(entry.job)}</h3>
+								<p class="sub">
+									<span>{entry.job.source}</span><span>· {pendingAge(entry.job.createdAt)}</span>
+								</p>
+								<p class="more">Waiting for the potato to pull this save.</p>
+							</div>
+						</article>
+					{:else}
+						<Card item={entry.item} />
+					{/if}
+				{/each}
+			</div>
 		{/each}
 	</div>
 
