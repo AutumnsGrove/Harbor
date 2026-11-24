@@ -13,7 +13,7 @@ BIN     := bin/harbor
 VERSION ?= r$(shell git rev-list --count HEAD 2>/dev/null || echo 0).$(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X $(MODULE)/server/internal/build.version=$(VERSION)
 
-.PHONY: version web build dev test fuzz fmt-check vet web-check worker-check rsync-check watcher-check packaging docker docker-run docker-check deploy check clean drill enrich-score enrich-record
+.PHONY: version web build dev test fuzz fmt-check vet web-check web-e2e worker-check rsync-check watcher-check packaging docker docker-run docker-check deploy check clean drill enrich-score enrich-record
 
 version:
 	@echo $(VERSION)
@@ -80,6 +80,11 @@ vet:
 
 web-check:
 	cd web && $(PNPM) check && $(PNPM) test
+
+# Geometry the unit tests cannot see (#58): the feed's row-major order, the
+# breakpoints and a clean append, measured in a real browser against web/build.
+web-e2e:
+	cd web && $(PNPM) exec playwright test
 
 # The Worker is a second runtime with its own lockfile: typecheck plus the vitest
 # suite that runs in workerd against real D1 and R2.
