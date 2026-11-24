@@ -272,12 +272,19 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 			return cause
 		}
 		// A wall can answer 200 with a document that has no text at all. For a
-		// video that is still recoverable, and a page that yields nothing is not
-		// worth a model call.
+		// video that is still recoverable from its metadata; for anything else,
+		// the model may still file it from a title and OG tags (The Strand), so
+		// the old path stays.
 		if strings.TrimSpace(extracted.Text) == "" {
 			cause := permanent(errors.New("the page carried no readable text"))
 			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
 				return handled
+			}
+			// A video that has neither a page nor an answer from the metadata
+			// endpoint has nothing to read. Handing the model an empty string
+			// would produce a summary of nothing and lose the real reason.
+			if _, isVideo := youtube.VideoID(*item.URL); isVideo {
+				return cause
 			}
 		}
 	}

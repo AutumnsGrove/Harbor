@@ -397,10 +397,13 @@ func TestApplyVideoMetadata(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
 
+	// A details_json that came from somewhere else: the metadata pass merges into
+	// it rather than replacing what an earlier read found.
 	imported := mustCreate(t, s, ItemInput{
 		ID: "imported", URL: ptr("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
 		Title:  "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
 		Source: model.SourceImport, Tags: []string{"rain drop tag"},
+		DetailsJSON: `{"duration":"PT3M33S","embedUrl":"https://www.youtube.com/embed/dQw4w9WgXcQ"}`,
 	})
 	typed := mustCreate(t, s, ItemInput{
 		ID: "typed", URL: ptr("https://www.youtube.com/watch?v=aaaaaaaaaaa"),
@@ -458,10 +461,16 @@ func TestApplyVideoMetadata(t *testing.T) {
 	}
 
 	// details_json carries what the panel renders, and merges rather than
-	// replaces.
+	// replaces: the duration an earlier pass stored is still there.
 	if !strings.Contains(kept.DetailsJSON, `"author":["Rick Astley"]`) ||
 		!strings.Contains(kept.DetailsJSON, "hqdefault.jpg") {
 		t.Errorf("details = %s, want the channel and the still", kept.DetailsJSON)
+	}
+	if !strings.Contains(updated.DetailsJSON, `"duration":"PT3M33S"`) {
+		t.Errorf("details = %s, want the existing duration kept", updated.DetailsJSON)
+	}
+	if !strings.Contains(updated.DetailsJSON, `"embedUrl"`) {
+		t.Errorf("details = %s, want the existing embed URL kept", updated.DetailsJSON)
 	}
 
 	// The title it just gained is in the index, so the item is findable by it

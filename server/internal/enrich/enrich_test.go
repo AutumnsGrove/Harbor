@@ -597,6 +597,33 @@ func TestProcessFilesAVideoWhosePageHasNoText(t *testing.T) {
 	}
 }
 
+// A video with no page text and no metadata has nothing to read: it must not be
+// handed to the model as an empty string, and the row keeps the page's reason.
+func TestProcessDoesNotSendAnEmptyVideoToTheModel(t *testing.T) {
+	s := openStore(t)
+	f := &fakeFetcher{body: `<html><body></body></html>`}
+	d, w, em := &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{}
+	en := newTestEnricher(t, s, f, d, w, em)
+	en.Videos = &fakeVideos{err: errors.New("oEmbed answered 404")}
+
+	item := createItem(t, s, store.ItemInput{
+		ID: "empty-video", URL: ptr("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), Source: model.SourceImport,
+	})
+	if err := en.Process(context.Background(), item); err == nil {
+		t.Fatal("a video with nothing to read was reported as enriched")
+	}
+	if d.calls+w.calls+em.calls != 0 {
+		t.Errorf("model calls = decide %d, write %d, embed %d; want none", d.calls, w.calls, em.calls)
+	}
+	after, err := s.GetItem(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if !strings.Contains(after.LastError, "no readable text") {
+		t.Errorf("last_error = %q, want the page's own reason", after.LastError)
+	}
+}
+
 // Everything else behaves exactly as before: a non-video failure is a failure,
 // and the video endpoint is not even asked.
 func TestProcessKeepsTheFailureForANonVideo(t *testing.T) {
