@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -8,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -123,6 +126,260 @@ func (r *statusRecorder) statusCode() int {
 		return http.StatusOK
 	}
 	return r.status
+}
+
+// ── compress ────────────────────────────────────────────────────────────────
+
+// gzipMinBody is where compression starts paying for itself. The gzip header
+// and trailer are about 20 bytes and a small JSON answer gains nothing but a
+// broken Content-Length.
+const gzipMinBody = 1024
+
+// compress gzips text responses on the wire. It sits inside logging, so the
+// `bytes` in the request log is what actually crossed the link, and inside
+// securityHeaders, so the CSP and Cache-Control set there survive untouched.
+//
+// Everything a browser needs to paint the first screen is text (~169 KB of
+// JS/CSS/HTML in the phase-2 build gzips to ~64 KB), and the potato is behind a
+// relayed tailnet link where the bytes are the latency. Already-compressed
+// formats, small bodies, HEAD, Range and bodiless statuses pass through
+// untouched: compressing a partial body would corrupt it.
+func (s *Server) compress(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead || r.Header.Get("Range") != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		cw := &compressWriter{ResponseWriter: w, request: r}
+		// finish runs even if the handler panics, so a partly written gzip stream
+		// still gets its trailer instead of leaving a truncated body behind.
+		defer func() {
+			if err := cw.finish(); err != nil {
+				// A client that hung up mid-response is normal; the request log
+				// already recorded the bytes that made it. Not worth a warning.
+				s.log.Debug("compress: write failed",
+					"request_id", requestIDFrom(r),
+					"path", r.URL.Path,
+					"error", err,
+				)
+			}
+		}()
+		next.ServeHTTP(cw, r)
+	})
+}
+
+// compressWriter holds the status and body until it knows whether the response
+// is worth compressing: the Content-Type arrives with the headers and the size
+// only after the first writes. Until then it buffers, which is why the threshold
+// is one small body and not the whole response.
+type compressWriter struct {
+	http.ResponseWriter
+	request *http.Request
+
+	status  int
+	decided bool
+	pending bytes.Buffer
+
+	// writer is non-nil exactly when the body is being gzipped. err is sticky:
+	// once the stream is broken, every later write reports the same failure.
+	writer *gzip.Writer
+	err    error
+}
+
+func (w *compressWriter) WriteHeader(status int) {
+	// The real header is not sent yet; decide does that, once it knows whether
+	// Content-Length has to be dropped and Vary has to be added.
+	if w.status == 0 {
+		w.status = status
+	}
+}
+
+func (w *compressWriter) Write(body []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	if !w.decided {
+		w.pending.Write(body)
+		if w.pending.Len() < gzipMinBody {
+			// Too early to tell. The handler still gets the count it asked
+			// for; nothing has been written anywhere yet.
+			return len(body), nil
+		}
+		w.decide()
+		return len(body), w.err
+	}
+	return w.writeThrough(body)
+}
+
+func (w *compressWriter) writeThrough(body []byte) (int, error) {
+	if w.writer != nil {
+		n, err := w.writer.Write(body)
+		if err != nil {
+			w.err = err
+		}
+		return n, err
+	}
+	n, err := w.ResponseWriter.Write(body)
+	if err != nil {
+		w.err = err
+	}
+	return n, err
+}
+
+// decide commits the status and whatever is buffered, choosing between a
+// gzipped body and the handler's own bytes. It runs once.
+func (w *compressWriter) decide() {
+	if w.decided {
+		return
+	}
+	w.decided = true
+
+	status := w.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	headers := w.ResponseWriter.Header()
+
+	contentType := headers.Get("Content-Type")
+	if contentType == "" {
+		// Same rule net/http applies when a handler sets nothing.
+		contentType = http.DetectContentType(w.pending.Bytes())
+		headers.Set("Content-Type", contentType)
+	}
+
+	compressible := bodyAllowed(status) && compressibleType(contentType)
+	if compressible {
+		// Anything caching in front must keep the two encodings apart even
+		// when this client did not ask for gzip.
+		headers.Add("Vary", "Accept-Encoding")
+	}
+
+	if compressible && w.pending.Len() >= gzipMinBody && acceptsGzip(w.request) {
+		headers.Set("Content-Encoding", "gzip")
+		// The handler's length describes the body it wrote, not this one.
+		headers.Del("Content-Length")
+		w.ResponseWriter.WriteHeader(status)
+		w.writer = gzip.NewWriter(w.ResponseWriter)
+		if _, err := w.writer.Write(w.pending.Bytes()); err != nil {
+			w.err = err
+		}
+		w.pending.Reset()
+		return
+	}
+
+	w.ResponseWriter.WriteHeader(status)
+	if w.pending.Len() > 0 {
+		if _, err := w.ResponseWriter.Write(w.pending.Bytes()); err != nil {
+			w.err = err
+		}
+	}
+	w.pending.Reset()
+}
+
+// finish flushes a body that never reached the threshold and closes the gzip
+// stream so its trailer is written.
+//
+// A handler that wrote nothing and never set a status is left alone: committing
+// 200 here would run while a panic unwinds, and the outer recover would then be
+// writing its 500 into an already-committed response. Returning early lets
+// net/http send the implicit 200 on a normal return and keeps recover's 500
+// honest on a panic.
+func (w *compressWriter) finish() error {
+	if w.status == 0 && w.pending.Len() == 0 && w.writer == nil {
+		return w.err
+	}
+	w.decide()
+	if w.writer == nil {
+		return w.err
+	}
+	if err := w.writer.Close(); err != nil && w.err == nil {
+		w.err = err
+	}
+	return w.err
+}
+
+// Flush keeps http.ResponseController working for a handler that streams. The
+// buffered body is committed first, so a flush cannot arrive before its headers.
+func (w *compressWriter) Flush() {
+	w.decide()
+	if w.writer != nil {
+		_ = w.writer.Flush()
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the real writer, the same way
+// statusRecorder does.
+func (w *compressWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// bodyAllowed reports whether a status can carry a body at all: 1xx, 204 and
+// 304 must not be wrapped.
+func bodyAllowed(status int) bool {
+	if status < 200 {
+		return false
+	}
+	return status != http.StatusNoContent && status != http.StatusNotModified
+}
+
+// compressibleType refuses the formats where gzip can only make the response
+// bigger, and event streams, which must reach the client line by line.
+func compressibleType(contentType string) bool {
+	if i := strings.IndexByte(contentType, ';'); i >= 0 {
+		contentType = contentType[:i]
+	}
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+
+	switch {
+	case strings.HasPrefix(contentType, "image/"),
+		strings.HasPrefix(contentType, "video/"),
+		strings.HasPrefix(contentType, "audio/"):
+		return false
+	}
+
+	switch contentType {
+	case "font/woff2", "text/event-stream",
+		"application/zip", "application/zstd", "application/x-zstd",
+		"application/gzip", "application/x-gzip":
+		return false
+	}
+	return true
+}
+
+// acceptsGzip reads the header with RFC 9110 precedence: an explicit gzip entry
+// wins over the wildcard, so `gzip;q=0, *` refuses gzip even though `*` would
+// allow it. Only when gzip is not named at all does `*` decide.
+func acceptsGzip(r *http.Request) bool {
+	explicit, wildcard := -1.0, -1.0
+
+	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		name, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		weight := 1.0
+		if q, ok := strings.CutPrefix(strings.ReplaceAll(params, " ", ""), "q="); ok {
+			parsed, err := strconv.ParseFloat(q, 64)
+			if err != nil {
+				continue
+			}
+			weight = parsed
+		}
+		switch {
+		case strings.EqualFold(name, "gzip"):
+			if explicit < 0 {
+				explicit = weight
+			}
+		case name == "*":
+			if wildcard < 0 {
+				wildcard = weight
+			}
+		}
+	}
+
+	if explicit >= 0 {
+		return explicit > 0
+	}
+	return wildcard > 0
 }
 
 // securityHeaders is a strict, no-CORS policy. The frontend is same-origin by

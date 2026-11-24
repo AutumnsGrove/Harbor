@@ -120,7 +120,9 @@ func New(cfg build.Config, log *slog.Logger, assets fs.FS, opts ...Option) *Serv
 
 // Handler returns the whole middleware chain. Order matters and mirrors
 // design.md §3: recover → request id → structured log → security headers →
-// Host check → identity lock → handler.
+// compress → Host check → identity lock → handler. Compression sits inside the
+// log so its byte count is what crossed the wire, and inside the headers so the
+// CSP and Cache-Control are already set when the body is wrapped.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.only(http.MethodGet, s.healthz))
@@ -141,7 +143,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/update/status", s.only(http.MethodGet, s.updateStatus))
 	mux.HandleFunc("/", s.static)
 
-	return s.recover(s.requestID(s.logging(s.securityHeaders(s.hostCheck(s.identityLock(mux))))))
+	return s.chain(mux)
+}
+
+// chain is the middleware order itself, in one place. Handler hands it the mux;
+// tests hand it a handler they need to drive through the real stack (a panic,
+// say) without rebuilding the order and letting the copy drift.
+func (s *Server) chain(next http.Handler) http.Handler {
+	return s.recover(s.requestID(s.logging(s.securityHeaders(s.compress(s.hostCheck(s.identityLock(next)))))))
 }
 
 // only enforces the method itself instead of letting ServeMux answer 405 in
