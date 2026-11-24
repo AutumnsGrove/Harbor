@@ -90,6 +90,12 @@ It refuses to run without `OPENROUTER_API_KEY`: without a key the loop only mark
 would look like enrichment and be none. An item the model has already read is never queued again —
 re-enriching after a prompt change is a deliberate, separate job.
 
+On the real library (1,476 saves) it took about two hours and $0.51: 954 read by the model, 359 videos
+filed from their public metadata because YouTube walls a datacenter fetch, and 163 left in Needs
+attention — PDF and image links, retail anti-bot pages, dead links, and 12 videos that no longer exist.
+The 163 are phases 6 and 11's to fix; the 359 filed videos are phase 7's, which gives them transcripts.
+The saves themselves are all still there either way.
+
 ## What the dry run printed
 
 - **imported / merged** — new items vs items already in the library. A URL that appears twice in the
