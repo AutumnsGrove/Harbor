@@ -279,7 +279,16 @@ func (w *compressWriter) decide() {
 
 // finish flushes a body that never reached the threshold and closes the gzip
 // stream so its trailer is written.
+//
+// A handler that wrote nothing and never set a status is left alone: committing
+// 200 here would run while a panic unwinds, and the outer recover would then be
+// writing its 500 into an already-committed response. Returning early lets
+// net/http send the implicit 200 on a normal return and keeps recover's 500
+// honest on a panic.
 func (w *compressWriter) finish() error {
+	if w.status == 0 && w.pending.Len() == 0 && w.writer == nil {
+		return w.err
+	}
 	w.decide()
 	if w.writer == nil {
 		return w.err
@@ -339,21 +348,38 @@ func compressibleType(contentType string) bool {
 	return true
 }
 
-// acceptsGzip reads the header, including q=0, which means "not this one".
+// acceptsGzip reads the header with RFC 9110 precedence: an explicit gzip entry
+// wins over the wildcard, so `gzip;q=0, *` refuses gzip even though `*` would
+// allow it. Only when gzip is not named at all does `*` decide.
 func acceptsGzip(r *http.Request) bool {
+	explicit, wildcard := -1.0, -1.0
+
 	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
 		name, params, _ := strings.Cut(strings.TrimSpace(part), ";")
-		if !strings.EqualFold(name, "gzip") && !strings.EqualFold(name, "*") {
-			continue
-		}
+		weight := 1.0
 		if q, ok := strings.CutPrefix(strings.ReplaceAll(params, " ", ""), "q="); ok {
-			if weight, err := strconv.ParseFloat(q, 64); err == nil && weight <= 0 {
+			parsed, err := strconv.ParseFloat(q, 64)
+			if err != nil {
 				continue
 			}
+			weight = parsed
 		}
-		return true
+		switch {
+		case strings.EqualFold(name, "gzip"):
+			if explicit < 0 {
+				explicit = weight
+			}
+		case name == "*":
+			if wildcard < 0 {
+				wildcard = weight
+			}
+		}
 	}
-	return false
+
+	if explicit >= 0 {
+		return explicit > 0
+	}
+	return wildcard > 0
 }
 
 // securityHeaders is a strict, no-CORS policy. The frontend is same-origin by

@@ -314,3 +314,75 @@ func TestCompressUnwrapKeepsResponseControllerWorking(t *testing.T) {
 		t.Errorf("flushed body did not reach the client")
 	}
 }
+
+// pi-review on #56: a panic before the handler's first write must still reach
+// recover as a 500. finish used to commit 200 while the panic unwound, which
+// made the response an unchangeable 200 with the error body inside it.
+func TestPanicBeforeFirstWriteStaysA500(t *testing.T) {
+	s := compressServer(t)
+	h := s.chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("nil map write")
+	}))
+
+	rec := request(h, http.MethodGet, "/thing.json", map[string]string{
+		identityHeader: "autumn@grove.place",
+	})
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: compress committed the response before recover ran", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "internal error") {
+		t.Errorf("body = %q, want recover's JSON error", rec.Body.String())
+	}
+}
+
+// A handler that answers nothing at all still gets net/http's implicit 200, not
+// a status the middleware invented while deciding whether to compress.
+func TestCompressLeavesAnEmptyResponseAlone(t *testing.T) {
+	rec := serveCompressed(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), http.MethodGet, map[string]string{
+		"Accept-Encoding": "gzip",
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("body = %q, want empty", rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Errorf("Content-Encoding = %q, want none", got)
+	}
+}
+
+// pi-review on #56: an explicit gzip entry wins over the wildcard, even when the
+// wildcard comes first. RFC 9110 §12.5.3.
+func TestAcceptsGzipFollowsRFC9110Precedence(t *testing.T) {
+	cases := []struct {
+		header string
+		want   bool
+	}{
+		{"", false},
+		{"identity", false},
+		{"gzip", true},
+		{"deflate, gzip", true},
+		{"*", true},
+		{"gzip;q=0.5, *", true},
+		{"gzip;q=0, *", false},
+		{"*, gzip;q=0", false},
+		{"*;q=0, gzip", true},
+		{"*;q=0, gzip;q=0", false},
+		{"deflate, *;q=0, gzip;q=0.1", true},
+		{"gzip;q=bogus", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.header, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tc.header != "" {
+				r.Header.Set("Accept-Encoding", tc.header)
+			}
+			if got := acceptsGzip(r); got != tc.want {
+				t.Errorf("acceptsGzip(%q) = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+	}
+}
