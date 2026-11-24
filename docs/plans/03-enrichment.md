@@ -269,6 +269,14 @@ What was checked and what it showed, because these are the three questions that 
   $0.035/M for a cache read against $0.001 — so "the newer flash must be dearer" is backwards here and
   a 1,476-save import would cost about $3.20 on it instead of $2.20. Nothing changed. The levers that
   do matter are the ones already in the code: `MaxTokens: 800` on the write call and the 8k input cap.
+- **A walled video is filed, not failed.** YouTube answers a datacenter fetch with Google's
+  `/sorry/` wall (spike S8). The first real drain on the potato found it the hard way: 371 of 421
+  video saves failed with that exact reason. `internal/youtube` now reads the public, keyless oEmbed
+  endpoint for a video whose page could not be read, and the row is written with the video's title,
+  `kind=video`, channel and still — state `ready`, `prompt_version='oembed.v1'`, no model call and
+  no tags (there is no text to read, and phase 7 will redo those rows with a transcript). Tests:
+  `internal/youtube` (URL shapes, answers, a fuzz target) and `internal/enrich` (a walled video with
+  zero model calls; a non-video keeps its failure).
 - **Model slugs are current.** `typesafe/jev-1.14` is accepted by the Decisions endpoint and is
   served as `typesafe/jev-1.14-20261014`; `deepseek/deepseek-v4.1-flash-1017` and
   `perplexity/pplx-embed-v1-0.6b` are served under the names requested. The usage log records both

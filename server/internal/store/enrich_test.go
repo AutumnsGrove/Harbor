@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,5 +387,100 @@ func TestQueueUnenrichedQueuesOnlyTheFirstPass(t *testing.T) {
 	// Nothing is left for a second run to pick up.
 	if n, err := s.UnenrichedCount(ctx); err != nil || n != 0 {
 		t.Errorf("UnenrichedCount after queueing = %d, %v; want 0", n, err)
+	}
+}
+
+// The video metadata pass files a video the fetcher could not read. It must not
+// be able to overwrite what the owner typed, touch tags no model produced, or
+// claim a prompt version that never ran.
+func TestApplyVideoMetadata(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	imported := mustCreate(t, s, ItemInput{
+		ID: "imported", URL: ptr("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+		Title:  "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+		Source: model.SourceImport, Tags: []string{"rain drop tag"},
+	})
+	typed := mustCreate(t, s, ItemInput{
+		ID: "typed", URL: ptr("https://www.youtube.com/watch?v=aaaaaaaaaaa"),
+		Title: "My own name for this", Kind: model.KindVideo, KindSource: model.KindSourceManual,
+	})
+
+	meta := VideoMetadata{
+		Title:         "Never Gonna Give You Up",
+		Channel:       "Rick Astley",
+		Thumbnail:     "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+		PageURL:       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+		Reason:        "the page could not be read (blocked); filed from the video's public metadata",
+		PromptVersion: "oembed.v1",
+	}
+	updated, err := s.ApplyVideoMetadata(ctx, imported.ID, meta)
+	if err != nil {
+		t.Fatalf("ApplyVideoMetadata: %v", err)
+	}
+	// The title was the URL, which is a placeholder: the video's own replaces it.
+	if updated.Title != "Never Gonna Give You Up" {
+		t.Errorf("title = %q, want the video's", updated.Title)
+	}
+	if updated.Kind != model.KindVideo || updated.KindSource != model.KindSourceDefault {
+		t.Errorf("kind = %q/%q, want video/default", updated.Kind, updated.KindSource)
+	}
+	if updated.State != model.StateReady || updated.EnrichedAt == nil {
+		t.Errorf("state = %q enriched=%v, want ready and stamped", updated.State, updated.EnrichedAt)
+	}
+	if updated.PromptVersion != "oembed.v1" {
+		t.Errorf("prompt_version = %q, want the fallback's marker", updated.PromptVersion)
+	}
+	if !strings.Contains(updated.ExtractError, "could not be read") {
+		t.Errorf("extract_error = %q, want the reason kept", updated.ExtractError)
+	}
+	// The importer's own tags are untouched: no model ran, so none were earned
+	// and none may be dropped.
+	tags, err := s.TagsForItem(ctx, imported.ID)
+	if err != nil {
+		t.Fatalf("TagsForItem: %v", err)
+	}
+	if len(tags) != 1 || tags[0] != "rain drop tag" {
+		t.Errorf("tags = %v, want the imported one alone", tags)
+	}
+
+	// A typed title and a manually chosen kind survive.
+	kept, err := s.ApplyVideoMetadata(ctx, typed.ID, meta)
+	if err != nil {
+		t.Fatalf("ApplyVideoMetadata (typed): %v", err)
+	}
+	if kept.Title != "My own name for this" {
+		t.Errorf("title = %q, want the owner's", kept.Title)
+	}
+	if kept.KindSource != model.KindSourceManual {
+		t.Errorf("kind source = %q, want manual kept", kept.KindSource)
+	}
+
+	// details_json carries what the panel renders, and merges rather than
+	// replaces.
+	if !strings.Contains(kept.DetailsJSON, `"author":["Rick Astley"]`) ||
+		!strings.Contains(kept.DetailsJSON, "hqdefault.jpg") {
+		t.Errorf("details = %s, want the channel and the still", kept.DetailsJSON)
+	}
+
+	// The title it just gained is in the index, so the item is findable by it
+	// (search's UI is phase 10; the row is phase 2's).
+	var found int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM items_fts WHERE items_fts MATCH ?`, `"Never"`).Scan(&found); err != nil {
+		t.Fatalf("querying the index: %v", err)
+	}
+	if found != 1 {
+		t.Errorf("FTS found %d rows for the new title, want 1", found)
+	}
+}
+
+// A pass with no title is refused: the only reason to run it is the title.
+func TestApplyVideoMetadataRefusesAnEmptyTitle(t *testing.T) {
+	s := openTestStore(t)
+	item := mustCreate(t, s, ItemInput{ID: "v", URL: ptr("https://youtu.be/dQw4w9WgXcQ")})
+	if _, err := s.ApplyVideoMetadata(context.Background(), item.ID, VideoMetadata{Title: "  "}); err == nil {
+		t.Fatal("an empty title was accepted")
 	}
 }

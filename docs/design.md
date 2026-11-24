@@ -509,6 +509,16 @@ Per job:
    vector is unnormalized, so compare with cosine; store it as a BLOB.
 7. **Write** the row + FTS5 + vector, mark the D1 job done.
 
+**A video whose page will not open is filed, not failed.** YouTube answers a plain fetch from a
+datacenter IP with `/sorry/` — measured, spike S8, and it cost 371 of the potato's 421 video saves
+their whole pass. The public oEmbed endpoint is keyless and unblocked, so a YouTube URL whose fetch,
+extraction or text comes back empty is filed from it instead: the video's own title (only over a
+placeholder), `kind=video`, the channel as `author` and the still in `details_json`, state `ready`,
+and `prompt_version='oembed.v1'`. **No model call and no tags**: there is no text to read, and
+inventing either would be a lie the UI cannot take back. Phase 7 finds those rows by that marker and
+gives them a transcript and a real pass. Anything that is not a video URL keeps the normal failure
+path.
+
 **Items with no URL** (typed notes) skip fetch, extract, render and classification: `kind` is
 `note`, and they still get tags, a summary and an embedding. **Image items** take the image path
 below, where the vision call supplies the kind.

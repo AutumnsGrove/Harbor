@@ -23,12 +23,19 @@ import (
 	"github.com/AutumnsGrove/Harbor/server/internal/fetch"
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
+	"github.com/AutumnsGrove/Harbor/server/internal/youtube"
 )
 
 // Version constants. A change to either makes existing items re-enrichable;
 // prompt_version is stored per item so the scored set can tell which prompt
 // produced a row (design.md §6).
 const (
+	// VideoMetadataVersion is what a video's row records when the page could not
+	// be read and its public metadata was used instead. It is not a prompt, and
+	// saying so is the point: phase 7 finds these rows by it and gives them a
+	// transcript and a real pass.
+	VideoMetadataVersion = "oembed.v1"
+
 	DefaultPromptVersion  = "tag.v1"
 	DefaultExtractVersion = "extract.v1"
 
@@ -142,6 +149,13 @@ type Writer interface {
 	Write(ctx context.Context, input ContentInput) (Content, error)
 }
 
+// VideoSource is a video's public metadata: the title, channel and still that
+// the page would have carried if it had been readable. Nil disables the
+// fallback, which is what the phase-2 shell and most tests want.
+type VideoSource interface {
+	Metadata(ctx context.Context, url string) (youtube.Metadata, error)
+}
+
 // Embedder is Nova's embed surface.
 type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
@@ -152,6 +166,7 @@ type Embedder interface {
 // hard to reason about.
 type Store interface {
 	ApplyEnrichment(ctx context.Context, id string, e store.Enrichment) (model.Item, error)
+	ApplyVideoMetadata(ctx context.Context, id string, m store.VideoMetadata) (model.Item, error)
 	RecordEnrichmentFailure(ctx context.Context, id, message string, next *time.Time) (model.Item, error)
 	TagVocabulary(ctx context.Context, limit int) ([]string, error)
 }
@@ -171,6 +186,10 @@ type Enricher struct {
 	ExtractVersion string
 	EmbeddingModel string
 	Now            func() time.Time
+
+	// Videos is the public metadata fallback for a video whose page could not be
+	// read (spike S8: YouTube answers a datacenter fetch with /sorry/).
+	Videos VideoSource
 }
 
 // New wires the real dependencies with the current versions.
@@ -225,12 +244,20 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 	if hasURL(item) {
 		page, err := e.Fetcher.Fetch(ctx, *item.URL)
 		if err != nil {
-			return classifyFetchError(err)
+			cause := classifyFetchError(err)
+			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
+				return handled
+			}
+			return cause
 		}
 		defer page.Close()
 
 		if !IsHTML(page.ContentType) {
-			return permanent(fmt.Errorf("content type %q is not HTML", page.ContentType))
+			cause := permanent(fmt.Errorf("content type %q is not HTML", page.ContentType))
+			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
+				return handled
+			}
+			return cause
 		}
 		base := page.URL
 		if base == nil {
@@ -238,7 +265,20 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		}
 		extracted, err = extract.HTML(page.Body, base)
 		if err != nil {
-			return permanent(err)
+			cause := permanent(err)
+			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
+				return handled
+			}
+			return cause
+		}
+		// A wall can answer 200 with a document that has no text at all. For a
+		// video that is still recoverable, and a page that yields nothing is not
+		// worth a model call.
+		if strings.TrimSpace(extracted.Text) == "" {
+			cause := permanent(errors.New("the page carried no readable text"))
+			if done, handled := e.tryVideoMetadata(ctx, item, cause); done {
+				return handled
+			}
 		}
 	}
 
@@ -312,6 +352,61 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 	}
 	_, err = e.Store.ApplyEnrichment(ctx, item.ID, enrichment)
 	return err
+}
+
+// tryVideoMetadata files a video the page would not give up: its public
+// metadata still carries a title, a channel and a still, and an item with those
+// is usable before phase 7 fetches the transcript.
+//
+// It reports whether it handled the item. False means nothing was written and
+// the caller's own failure stands, which is what happens for a non-video URL, a
+// pipeline with no video source, or an endpoint that cannot answer either.
+func (e *Enricher) tryVideoMetadata(ctx context.Context, item model.Item, cause error) (bool, error) {
+	if e.Videos == nil || !hasURL(item) {
+		return false, nil
+	}
+	if _, ok := youtube.VideoID(*item.URL); !ok {
+		return false, nil
+	}
+
+	meta, err := e.Videos.Metadata(ctx, *item.URL)
+	if err != nil {
+		// The endpoint could not answer either. The page's failure is the one
+		// that explains the item, so it is the one that is kept; this line is
+		// for whoever is reading the log.
+		e.Log.Warn("video metadata unavailable", "item", item.ID, "error", err)
+		return false, nil
+	}
+
+	_, err = e.Store.ApplyVideoMetadata(ctx, item.ID, store.VideoMetadata{
+		Title:         meta.Title,
+		Channel:       meta.Author,
+		Thumbnail:     meta.Thumbnail,
+		PageURL:       youtube.WatchURL(meta.VideoID),
+		Reason:        videoReason(cause),
+		PromptVersion: VideoMetadataVersion,
+	})
+	if err != nil {
+		return true, err
+	}
+	e.Log.Info("filed a video from its public metadata", "item", item.ID, "page_error", cause)
+	return true, nil
+}
+
+// videoReason is what the row keeps about the page it could not read. Bounded,
+// because a fetch error can be long and this is shown to the owner one day.
+func videoReason(cause error) string {
+	reason := "the page could not be read; filed from the video's public metadata"
+	if cause != nil {
+		detail := strings.TrimSpace(cause.Error())
+		if len(detail) > 120 {
+			detail = detail[:117] + "…"
+		}
+		if detail != "" {
+			reason = "the page could not be read (" + detail + "); filed from the video's public metadata"
+		}
+	}
+	return reason
 }
 
 // fail advances the retry columns. A permanent error, or the third failure,

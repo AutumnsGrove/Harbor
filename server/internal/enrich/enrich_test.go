@@ -3,6 +3,7 @@ package enrich
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/AutumnsGrove/Harbor/server/internal/fetch"
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
+	"github.com/AutumnsGrove/Harbor/server/internal/youtube"
 )
 
 // plans/03 tests 6–10 and 14–18 at the pipeline level. The fetch, decide,
@@ -483,5 +485,158 @@ func TestAnUnconfiguredPipelineFailsLoudly(t *testing.T) {
 	}
 	if w.calls != 0 || em.calls != 0 {
 		t.Errorf("an unconfigured pipeline made calls: write %d, embed %d", w.calls, em.calls)
+	}
+}
+
+// --- the video fallback -----------------------------------------------------
+//
+// Spike S8 and the potato's first real drain: 371 of 421 YouTube saves failed
+// with Google's /sorry/ wall. A video whose page cannot be read is still a video
+// with a title, a channel and a still, and the item should be filed from those
+// rather than parked as a failure.
+
+type fakeVideos struct {
+	meta  youtube.Metadata
+	err   error
+	calls int
+	last  string
+}
+
+func (f *fakeVideos) Metadata(_ context.Context, rawURL string) (youtube.Metadata, error) {
+	f.calls++
+	f.last = rawURL
+	if f.err != nil {
+		return youtube.Metadata{}, f.err
+	}
+	return f.meta, nil
+}
+
+func blockedFetcher() *fakeFetcher {
+	return &fakeFetcher{err: fmt.Errorf("%w: https://www.google.com/sorry/index", fetch.ErrBlocked)}
+}
+
+// The wall costs the title nothing, and it must not cost a model call: there is
+// no text to summarise and phase 7 will redo the item with a transcript.
+func TestProcessFilesAWalledVideoFromPublicMetadata(t *testing.T) {
+	s := openStore(t)
+	f, d, w, em := blockedFetcher(), &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{}
+	en := newTestEnricher(t, s, f, d, w, em)
+	videos := &fakeVideos{meta: youtube.Metadata{
+		VideoID:   "dQw4w9WgXcQ",
+		Title:     "Never Gonna Give You Up",
+		Author:    "Rick Astley",
+		Thumbnail: "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+	}}
+	en.Videos = videos
+
+	item := createItem(t, s, store.ItemInput{
+		ID: "video", URL: ptr("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+		Title: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", Source: model.SourceImport,
+	})
+	if err := en.Process(context.Background(), item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	after, err := s.GetItem(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if after.State != model.StateReady {
+		t.Errorf("state = %q, want ready: the item is usable", after.State)
+	}
+	if after.Kind != model.KindVideo || after.KindSource != model.KindSourceDefault {
+		t.Errorf("kind = %q/%q, want video from the URL", after.Kind, after.KindSource)
+	}
+	if after.Title != "Never Gonna Give You Up" {
+		t.Errorf("title = %q, want the video's own", after.Title)
+	}
+	if after.PromptVersion != VideoMetadataVersion {
+		t.Errorf("prompt version = %q, want %q: no prompt ran", after.PromptVersion, VideoMetadataVersion)
+	}
+	if !strings.Contains(after.ExtractError, "could not be read") {
+		t.Errorf("extract_error = %q, want the page's failure kept", after.ExtractError)
+	}
+	if !strings.Contains(after.DetailsJSON, `"author":["Rick Astley"]`) ||
+		!strings.Contains(after.DetailsJSON, "hqdefault.jpg") ||
+		!strings.Contains(after.DetailsJSON, `"type":"VideoObject"`) {
+		t.Errorf("details = %s, want the channel, the still and the type", after.DetailsJSON)
+	}
+	if after.Summary != "" {
+		t.Errorf("summary = %q, want none: no model read this item", after.Summary)
+	}
+
+	// The point of the fallback: it costs nothing.
+	if d.calls+w.calls+em.calls != 0 {
+		t.Errorf("model calls = decide %d, write %d, embed %d; want none", d.calls, w.calls, em.calls)
+	}
+	if tags, err := s.TagsForItem(context.Background(), item.ID); err != nil || len(tags) != 0 {
+		t.Errorf("tags = %v, %v; want none invented", tags, err)
+	}
+}
+
+// A walled page that still parses to nothing is the same outcome as a walled
+// page: there is nothing to summarise.
+func TestProcessFilesAVideoWhosePageHasNoText(t *testing.T) {
+	s := openStore(t)
+	f := &fakeFetcher{body: `<html><head><title>YouTube</title></head><body></body></html>`}
+	en := newTestEnricher(t, s, f, &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{})
+	en.Videos = &fakeVideos{meta: youtube.Metadata{VideoID: "dQw4w9WgXcQ", Title: "A video"}}
+
+	item := createItem(t, s, store.ItemInput{
+		ID: "empty", URL: ptr("https://youtu.be/dQw4w9WgXcQ"), Source: model.SourceImport,
+	})
+	if err := en.Process(context.Background(), item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	after, err := s.GetItem(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if after.State != model.StateReady || after.Title != "A video" {
+		t.Errorf("item = %q %q, want it ready with the video's title", after.State, after.Title)
+	}
+}
+
+// Everything else behaves exactly as before: a non-video failure is a failure,
+// and the video endpoint is not even asked.
+func TestProcessKeepsTheFailureForANonVideo(t *testing.T) {
+	s := openStore(t)
+	en := newTestEnricher(t, s, blockedFetcher(), &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{})
+	videos := &fakeVideos{}
+	en.Videos = videos
+
+	item := createItem(t, s, store.ItemInput{
+		ID: "article", URL: ptr("https://example.com/walled"), Source: model.SourceImport,
+	})
+	if err := en.Process(context.Background(), item); err == nil {
+		t.Fatal("a walled article was reported as enriched")
+	}
+	if videos.calls != 0 {
+		t.Errorf("the video endpoint was asked %d times for an article", videos.calls)
+	}
+}
+
+// If the metadata endpoint cannot answer either, the page's own failure is what
+// the row keeps.
+func TestProcessKeepsThePageFailureWhenMetadataFails(t *testing.T) {
+	s := openStore(t)
+	en := newTestEnricher(t, s, blockedFetcher(), &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{})
+	en.Videos = &fakeVideos{err: errors.New("oEmbed answered 404")}
+
+	item := createItem(t, s, store.ItemInput{
+		ID: "gone", URL: ptr("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), Source: model.SourceImport,
+	})
+	if err := en.Process(context.Background(), item); err == nil {
+		t.Fatal("a video with no metadata was reported as enriched")
+	}
+	after, err := s.GetItem(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if after.State == model.StateReady {
+		t.Errorf("state = %q, want it to stay a failure", after.State)
+	}
+	if !strings.Contains(after.LastError, "blocked") && !strings.Contains(after.LastError, "sorry") {
+		t.Errorf("last_error = %q, want the page's reason, not the metadata's", after.LastError)
 	}
 }

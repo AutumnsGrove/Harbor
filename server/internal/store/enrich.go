@@ -8,9 +8,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
@@ -318,4 +320,119 @@ func (s *Store) UnenrichedCount(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("counting unenriched items: %w", err)
 	}
 	return n, nil
+}
+
+// VideoMetadata is the pass that files a video whose page could not be read.
+//
+// It exists because "the page is walled" is not the same as "there is nothing to
+// store": a video's public metadata still gives it a title, a channel and a
+// thumbnail, and an item with those is usable and findable even before phase 7
+// fetches its transcript.
+type VideoMetadata struct {
+	// Title is the video's own title. It only replaces a placeholder, so a title
+	// the owner typed is never overwritten (same rule as ApplyEnrichment).
+	Title string
+	// Channel is the uploader's name, stored as the video's author.
+	Channel string
+	// Thumbnail is the still image; it is the item's cover until phase 6.
+	Thumbnail string
+	// PageURL is the canonical watch page, kept in details_json so the kind
+	// panel can link back to it.
+	PageURL string
+	// Reason says why the page itself was not read. It is kept on the row so the
+	// item explains itself later instead of looking unfinished by accident.
+	Reason string
+	// PromptVersion is what wrote this row. It is not a prompt — no model ran —
+	// which is exactly why it has its own value: a later pass can find these
+	// rows by it (phase 7 re-enriches every `oembed.v1` video), and the
+	// enrichment loop will not mistake them for work a prompt has done.
+	PromptVersion string
+}
+
+// ApplyVideoMetadata records that pass in one transaction: the title if it was a
+// placeholder, the video kind, the cover and channel in details_json, the reason
+// in extract_error, and the row ready.
+//
+// It touches no tags and no summary: no model saw this item, so inventing either
+// would be a lie the UI cannot take back. An item whose kind is manual keeps it.
+func (s *Store) ApplyVideoMetadata(ctx context.Context, id string, m VideoMetadata) (model.Item, error) {
+	if strings.TrimSpace(m.Title) == "" {
+		return model.Item{}, fmt.Errorf("store: video metadata for %s has no title", id)
+	}
+	now := time.Now().UTC()
+
+	var out model.Item
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		item, err := getItemTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		before := item
+
+		if item.KindSource != model.KindSourceManual {
+			// The host decided this, not a model: the channel is a video page.
+			item.Kind = model.KindVideo
+			item.KindSource = model.KindSourceDefault
+		}
+		if item.Title == "" || (item.URL != nil && item.Title == *item.URL) {
+			item.Title = strings.TrimSpace(m.Title)
+		}
+		item.DetailsJSON = videoDetails(item.DetailsJSON, m)
+		item.PromptVersion = m.PromptVersion
+		item.ExtractError = m.Reason
+		item.State = model.StateReady
+		item.Attempts = 0
+		item.NextAttemptAt = nil
+		item.LastError = ""
+		item.EnrichedAt = &now
+
+		if err := updateItemRow(ctx, tx, item); err != nil {
+			return err
+		}
+		fresh, err := getItemTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		// The title is the only indexed value that changed, and FTS5 cannot
+		// update in place.
+		if before.DeletedAt == nil {
+			if err := ftsDelete(ctx, tx, before); err != nil {
+				return err
+			}
+			if err := ftsInsert(ctx, tx, fresh); err != nil {
+				return err
+			}
+		}
+		out = fresh
+		return nil
+	})
+	return out, err
+}
+
+// videoDetails merges the video's facts into details_json without dropping what
+// a JSON-LD pass already stored (the import wrote none, but a re-save might).
+func videoDetails(existing string, m VideoMetadata) string {
+	details := map[string]any{}
+	if strings.TrimSpace(existing) != "" && existing != "{}" {
+		if err := json.Unmarshal([]byte(existing), &details); err != nil {
+			details = map[string]any{}
+		}
+	}
+	details["type"] = "VideoObject"
+	details["name"] = strings.TrimSpace(m.Title)
+	if channel := strings.TrimSpace(m.Channel); channel != "" {
+		details["author"] = []string{channel}
+	}
+	if thumb := strings.TrimSpace(m.Thumbnail); thumb != "" {
+		details["image"] = thumb
+		details["thumbnailUrl"] = thumb
+	}
+	if page := strings.TrimSpace(m.PageURL); page != "" {
+		details["url"] = page
+	}
+	encoded, err := json.Marshal(details)
+	if err != nil {
+		return jsonOr(existing, "{}")
+	}
+	return string(encoded)
 }

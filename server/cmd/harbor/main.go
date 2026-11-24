@@ -24,6 +24,7 @@ import (
 	"github.com/AutumnsGrove/Harbor/server/internal/queue"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
 	"github.com/AutumnsGrove/Harbor/server/internal/workerclient"
+	"github.com/AutumnsGrove/Harbor/server/internal/youtube"
 	"github.com/AutumnsGrove/Harbor/web"
 )
 
@@ -107,6 +108,12 @@ func enrichmentProcessor(cfg build.Config, library *store.Store, log *slog.Logge
 	)
 	pipeline.PromptVersion = enrichnova.PromptVersion
 	pipeline.EmbeddingModel = enrichnova.EmbedModel
+	// A video's page is the one a datacenter IP cannot read (spike S8: Google's
+	// /sorry/), so the public metadata endpoint is the way such a save is still
+	// filed with a title, a channel and a still. No key: the endpoint is public.
+	pipeline.Videos = youtube.New(youtube.Config{
+		UserAgent: "Harbor/" + build.Version() + " (+https://github.com/AutumnsGrove/Harbor)",
+	})
 	return pipeline
 }
 
