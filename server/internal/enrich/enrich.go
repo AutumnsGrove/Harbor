@@ -356,7 +356,15 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		enrichment.ContentText = extracted.Text
 		enrichment.ContentMD = extracted.Markdown
 		enrichment.DetailsJSON = marshalOrEmpty(extracted.Details)
-		enrichment.OGJSON = marshalOrEmpty(extracted.OG)
+		// Store the cover the extractor resolved against the page it actually
+		// fetched, not the raw og:image. A relative image on a redirected page
+		// would otherwise be resolved later against the saved URL — the
+		// shortener's host — and never fetch (issue #63).
+		og := extracted.OG
+		if extracted.CoverURL != "" {
+			og.Image = extracted.CoverURL
+		}
+		enrichment.OGJSON = marshalOrEmpty(og)
 	}
 	if !hasURL(item) {
 		enrichment.ContentText = item.Note

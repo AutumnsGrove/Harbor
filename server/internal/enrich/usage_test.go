@@ -2,6 +2,8 @@ package enrich
 
 import (
 	"context"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
@@ -51,5 +53,44 @@ func TestProcessAttachesTheItemToTheUsageContext(t *testing.T) {
 func TestUsageItemIsEmptyWithoutThePipeline(t *testing.T) {
 	if got := UsageItem(context.Background()); got != "" {
 		t.Errorf("UsageItem(background) = %q, want empty", got)
+	}
+}
+
+// Issue #63: og:image is allowed to be relative, and the extractor resolves it
+// against the URL it actually fetched — after redirects. The pipeline stored the
+// raw value, so a later reader resolved it against the saved URL, and a
+// shortened link's cover never fetched.
+func TestEnrichmentStoresTheCoverResolvedAgainstTheFinalURL(t *testing.T) {
+	s := openStore(t)
+	item := createItem(t, s, store.ItemInput{
+		ID: "a", URL: ptr("https://short.example/abc"), Title: "A post",
+	})
+
+	final, err := url.Parse("https://blog.example/posts/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, d, w, em := happyFakes()
+	f.body = `<html><head><title>A post</title>
+		<meta property="og:image" content="/images/cover.png">
+		<meta property="og:site_name" content="Blog">
+		</head><body><article><p>Whisk the batter.</p></article></body></html>`
+	f.final = final
+
+	en := newTestEnricher(t, s, f, d, w, em)
+	if err := en.Process(context.Background(), item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	stored, err := s.GetItem(context.Background(), item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	want := "https://blog.example/images/cover.png"
+	if !strings.Contains(stored.OGJSON, want) {
+		t.Errorf("og_json = %q, want the cover resolved against the final URL %q", stored.OGJSON, want)
+	}
+	if strings.Contains(stored.OGJSON, `"/images/cover.png"`) {
+		t.Errorf("og_json = %q still holds the raw relative image", stored.OGJSON)
 	}
 }
