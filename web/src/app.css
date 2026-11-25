@@ -537,6 +537,17 @@ a {
 	transform: translateY(-2px);
 }
 
+/* The page's own image, same-origin through /api/items/{id}/cover. Explicit
+   dimensions on the element plus object-fit keep a late load from reflowing the
+   column (#49). */
+.card .coverimg {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
 .card .kindmark {
 	color: var(--dim);
 	display: grid;
@@ -953,6 +964,13 @@ input.switch:checked::after {
 	max-width: 860px;
 	min-width: 0;
 	margin: 0 auto;
+}
+
+.item-cover {
+	width: 100%;
+	aspect-ratio: 16 / 10;
+	object-fit: cover;
+	border-radius: 18px;
 }
 
 .item-source {

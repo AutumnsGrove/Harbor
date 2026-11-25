@@ -1,11 +1,17 @@
 <script lang="ts">
-	// One card in the masonry feed. The image cover is a placeholder until phase
-	// 6 lands media, so it is a surface with the kind on it, not a fake photo.
+	// One card in the masonry feed. The cover is the page's own og:image, proxied
+	// by this origin (issue #49); a card without one keeps the gradient and the
+	// kind glyph, which is the honest placeholder for a note or a failed fetch.
 	import type { Item } from '#lib/api';
 
 	import Icon from './Icon.svelte';
 
 	let { item }: { item: Item } = $props();
+
+	// A cover that fails to load is the same as no cover: one silent fallback,
+	// not a broken-image icon.
+	let coverFailed = $state(false);
+	const showCover = $derived(Boolean(item.cover) && !coverFailed);
 
 	const kindNames: Record<string, string> = {
 		article: 'Article',
@@ -67,9 +73,22 @@
 		</div>
 	{:else}
 		<div class="cover">
-			<span class="kindmark">
-				<Icon name={item.kind === 'video' ? 'image' : 'link'} size={22} />
-			</span>
+			{#if showCover}
+				<img
+					class="coverimg"
+					src={`/api/items/${item.id}/cover?v=${item.cover}`}
+					alt=""
+					width="640"
+					height="400"
+					loading="lazy"
+					decoding="async"
+					onerror={() => (coverFailed = true)}
+				/>
+			{:else}
+				<span class="kindmark">
+					<Icon name={item.kind === 'video' ? 'image' : 'link'} size={22} />
+				</span>
+			{/if}
 			{#if item.readLater}
 				<span class="rl" title="Read later"><Icon name="clock" size={14} /></span>
 			{/if}
