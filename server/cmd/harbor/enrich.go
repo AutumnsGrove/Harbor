@@ -20,8 +20,24 @@ default kind. This queues every one of those — state ready, never enriched —
 the enrichment loop the running server already owns. It does not run the model
 itself: queueing is instant and safe, the drain is the thing to watch.
 
+--refresh is a different selection for a different reason: it re-queues finished
+rows whose stored page image is not an absolute URL (a root-relative or
+protocol-relative og:image saved before the pipeline resolved it). Those rows
+have already been read by the model, and no other path will ever touch them, so
+this is the one deliberate re-read. Missing images are left alone: this fixes bad
+values, not absent ones (issue #67).
+
+Read the dry-run number as "stored values that are not absolute", which is not
+the same as "covers that fail today": the API resolves a relative image against
+the item's URL when it serves it, so most of these render. The ones that are
+actually broken came from a page that redirected. Two consequences: the number
+overstates the damage, and a row whose re-enrichment cannot change og_json — a
+walled video filed from public metadata — keeps matching, so run this once per
+deliberate pass rather than expecting the count to reach zero.
+
 Flags:
   --limit N     queue at most N items, oldest saved first (default: all)
+  --refresh     re-queue finished items whose stored cover is not an absolute URL
   --dry-run     report what would be queued and write nothing
 
 The queue is drained by ` + "`harbor serve`" + `, so the container must be running with
@@ -39,6 +55,7 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	flags.SetOutput(io.Discard)
 	limit := flags.Int("limit", 0, "queue at most N items (0: all)")
 	dryRun := flags.Bool("dry-run", false, "report and write nothing")
+	refresh := flags.Bool("refresh", false, "re-queue finished items whose stored cover is not an absolute URL")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("%s\n\n%s", err, enrichUsage)
 	}
@@ -64,10 +81,17 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	defer library.Close()
 
 	waiting, err := library.UnenrichedCount(ctx)
+	if *refresh {
+		waiting, err = library.RelativeCoverCount(ctx)
+	}
 	if err != nil {
 		return err
 	}
 	if waiting == 0 {
+		if *refresh {
+			fmt.Fprintln(stdout, "no finished item holds a cover that is not an absolute URL")
+			return nil
+		}
 		fmt.Fprintln(stdout, "no items are waiting for their first enrichment")
 		return nil
 	}
@@ -80,7 +104,11 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 		if *limit > 0 && *limit < would {
 			would = *limit
 		}
-		fmt.Fprintf(stdout, "would queue %d item(s) for enrichment at priority %d\n", would, enrichPriority)
+		if *refresh {
+			fmt.Fprintf(stdout, "would re-queue %d item(s) with a relative cover at priority %d\n", would, enrichPriority)
+		} else {
+			fmt.Fprintf(stdout, "would queue %d item(s) for enrichment at priority %d\n", would, enrichPriority)
+		}
 		if would < waiting {
 			fmt.Fprintf(stdout, "  %d waiting in total; run again for the next batch\n", waiting)
 		}
@@ -88,11 +116,23 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 		return nil
 	}
 
-	queued, remaining, err := library.QueueUnenriched(ctx, enrichPriority, *limit)
+	// Exactly one selection. Calling both would spend --limit twice and, with
+	// --refresh, quietly queue the whole never-enriched backlog as well — the
+	// bill the dry run was supposed to preview (pi-review on #68).
+	var queued, remaining int
+	if *refresh {
+		queued, remaining, err = library.QueueRelativeCovers(ctx, enrichPriority, *limit)
+	} else {
+		queued, remaining, err = library.QueueUnenriched(ctx, enrichPriority, *limit)
+	}
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "queued %d item(s) for enrichment\n", queued)
+	if *refresh {
+		fmt.Fprintf(stdout, "re-queued %d item(s) with a relative cover\n", queued)
+	} else {
+		fmt.Fprintf(stdout, "queued %d item(s) for enrichment\n", queued)
+	}
 	if remaining > 0 {
 		fmt.Fprintf(stdout, "  %d still waiting; run this again for the next batch\n", remaining)
 	}

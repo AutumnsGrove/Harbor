@@ -183,3 +183,134 @@ func TestEnrichCommandLimit(t *testing.T) {
 		t.Errorf("printed %q, want one queued and one still waiting", out.String())
 	}
 }
+
+// seedRelativeCovers writes finished rows the way they exist on the potato:
+// enriched once, with a root-relative og:image stored before the pipeline
+// resolved it (issue #67).
+func seedRelativeCovers(t *testing.T, dataDir string) *store.Store {
+	t.Helper()
+	library, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	ctx := context.Background()
+
+	for id, og := range map[string]string{
+		"relative": `{"image":"/images/og.png"}`,
+		"protocol": `{"image":"//cdn.example/og.png"}`,
+		"absolute": `{"image":"https://example.test/og.png"}`,
+		"importer": `{"cover":"images/og.png","excerpt":"x"}`,
+		"no-image": `{"excerpt":"words only"}`,
+	} {
+		item, err := library.CreateItem(ctx, store.ItemInput{ID: id, Note: id, OGJSON: og})
+		if err != nil {
+			t.Fatalf("CreateItem(%s): %v", id, err)
+		}
+		// Finished, and read by the model: the state QueueUnenriched ignores.
+		if _, err := library.ApplyEnrichment(ctx, item.ID, store.Enrichment{
+			Summary: "already read", Kind: "article", KindSource: "ai",
+			PromptVersion: "tag.v1", ExtractVersion: "extract.v1", OGJSON: og,
+		}); err != nil {
+			t.Fatalf("ApplyEnrichment(%s): %v", id, err)
+		}
+	}
+	// One row the model has never read. `--refresh` must leave it alone; the
+	// backlog is a different command's job (pi-review on #68).
+	backlog, err := library.CreateItem(ctx, store.ItemInput{ID: "backlog", Note: "never read"})
+	if err != nil {
+		t.Fatalf("CreateItem(backlog): %v", err)
+	}
+	if err := library.MarkReady(ctx, backlog.ID); err != nil {
+		t.Fatalf("MarkReady(backlog): %v", err)
+	}
+
+	return library
+}
+
+func TestEnrichRefreshCountsOnlyUnusableCovers(t *testing.T) {
+	dataDir := t.TempDir()
+	library := seedRelativeCovers(t, dataDir)
+	defer library.Close()
+
+	// The trick that keeps this honest: ApplyEnrichment rewrites og_json, so the
+	// relative value has to be written back after it to model a row that predates
+	// the fix.
+	ctx := context.Background()
+	for id, og := range map[string]string{
+		"relative": `{"image":"/images/og.png"}`,
+		"protocol": `{"image":"//cdn.example/og.png"}`,
+		"importer": `{"cover":"images/og.png","excerpt":"x"}`,
+	} {
+		if _, err := library.ApplyEnrichment(ctx, id, store.Enrichment{
+			Summary: "already read", Kind: "article", KindSource: "ai",
+			PromptVersion: "tag.v1", ExtractVersion: "extract.v1", OGJSON: og,
+		}); err != nil {
+			t.Fatalf("re-applying og_json for %s: %v", id, err)
+		}
+	}
+
+	var dry bytes.Buffer
+	if err := run(context.Background(), []string{"enrich", "--refresh", "--dry-run"}, enrichEnv(t, dataDir, "test-key"), &dry); err != nil {
+		t.Fatalf("enrich --refresh --dry-run: %v", err)
+	}
+	if !strings.Contains(dry.String(), "would re-queue 3 item(s)") {
+		t.Fatalf("dry run printed %q, want the three unusable covers", dry.String())
+	}
+	if !strings.Contains(dry.String(), "nothing was written") {
+		t.Errorf("dry run printed %q without saying nothing was written", dry.String())
+	}
+	// A dry run must not have touched anything.
+	count, err := library.RelativeCoverCount(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("after the dry run %d rows are still unusable, want 3", count)
+	}
+
+	var real bytes.Buffer
+	if err := run(context.Background(), []string{"enrich", "--refresh"}, enrichEnv(t, dataDir, "test-key"), &real); err != nil {
+		t.Fatalf("enrich --refresh: %v", err)
+	}
+	if !strings.Contains(real.String(), "re-queued 3 item(s)") {
+		t.Errorf("printed %q, want the count", real.String())
+	}
+
+	for _, id := range []string{"relative", "protocol", "importer"} {
+		item, err := library.GetItem(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item.State != model.StateQueued {
+			t.Errorf("%s = %q, want queued", id, item.State)
+		}
+	}
+	// The never-enriched row is still waiting for its first pass: --refresh must
+	// not have queued it, and must not have spent --limit on it.
+	backlogRow, err := library.GetItem(ctx, "backlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backlogRow.State != model.StateReady {
+		t.Errorf("backlog row = %q, want it left ready: --refresh queued the normal backlog too", backlogRow.State)
+	}
+
+	// An absolute cover and a page with no image are not this command's work.
+	for _, id := range []string{"absolute", "no-image"} {
+		item, err := library.GetItem(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item.State == model.StateQueued {
+			t.Errorf("%s was re-queued, but its cover is fine or absent", id)
+		}
+	}
+
+	var again bytes.Buffer
+	if err := run(context.Background(), []string{"enrich", "--refresh"}, enrichEnv(t, dataDir, "test-key"), &again); err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	if !strings.Contains(again.String(), "no finished item holds a cover") {
+		t.Errorf("second run printed %q, want nothing to do", again.String())
+	}
+}
