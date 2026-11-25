@@ -45,3 +45,7 @@ simple = { limit = 30, period = 60 }
 # The orphan window defaults to seven days in src/constants.ts. Override it at
 # deploy time when you want an early sweep: `wrangler deploy --var ORPHAN_AGE_SECONDS:60`.
 R2_BUCKET = "harbor-intake"
+# The BACKUPS binding's bucket name. A binding object does not expose the name it
+# points at, and /presign has to build a URL for the right bucket: a snapshot
+# signed against the intake bucket is a 404 that looks like a missing backup.
+R2_BACKUPS_BUCKET = "harbor-backups"

@@ -12,6 +12,7 @@ function configured(): Env {
 	return {
 		...(env as unknown as Env),
 		R2_ACCOUNT_ID: 'abc123account',
+		R2_BACKUPS_BUCKET: 'harbor-backups',
 		R2_ACCESS_KEY_ID: 'AKIDEXAMPLE',
 		R2_SECRET_ACCESS_KEY: 'secret-do-not-log',
 	} as Env;
@@ -47,7 +48,9 @@ describe('presign', () => {
 		});
 		expect(res.res.status, res.text).toBe(200);
 		const body = res.json<{ url: string; expires_at: number }>();
-		expect(new URL(body.url).pathname).toBe('/harbor-intake/backups/harbor-2026-11-24T03-10-00Z.db.zst');
+		// The snapshot's own bucket. Signing it against the intake bucket is a 404
+		// that looks like a missing backup (found while wiring #54's restore).
+		expect(new URL(body.url).pathname).toBe('/harbor-backups/backups/harbor-2026-11-24T03-10-00Z.db.zst');
 		expect(new URL(body.url).searchParams.get('X-Amz-Signature')).toBeTruthy();
 	});
 
