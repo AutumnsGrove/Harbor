@@ -88,6 +88,7 @@ HARBOR_ALLOWED_LOGIN=autumn@grove.place
 OPENROUTER_API_KEY=secret-value-that-must-survive
 EOF
 	chmod 600 "$WORK/.env"
+	OWNER_BEFORE="$(file_owner "$WORK/.env")"
 	cp "$WORK/.env" "$WORK/.env.original"
 	printf 'OLD-DB\n' >"$WORK/data/harbor.db"
 	touch "$STATE/healthy"
@@ -96,6 +97,17 @@ EOF
 }
 
 write_fakes() {
+	# chown is recorded rather than performed: the fixture and the temp file are
+	# both created by the test's own uid, so a real chown proves nothing about a
+	# root rewrite (pi-review on #69). The recorded call is what distinguishes
+	# the fix from its absence.
+	cat >"$WORK/bin/chown" <<'FAKE'
+#!/usr/bin/env bash
+printf 'chown %s\n' "$*" >>"$FAKE_STATE/chown_calls"
+exit 0
+FAKE
+	chmod +x "$WORK/bin/chown"
+
 	cat >"$WORK/bin/docker" <<'FAKE'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -158,6 +170,7 @@ run_watcher() {
 	: >"$STATE/calls"
 	: >"$STATE/health_calls"
 	: >"$STATE/systemctl_calls"
+	: >"$STATE/chown_calls"
 	FAKE_STATE="$STATE" \
 		FAKE_WORK="$WORK" \
 		FAKE_STATE_DIGEST="$NEW_DIGEST" \
@@ -182,6 +195,15 @@ file_mode() {
 		stat -c '%a' "$1"
 	else
 		stat -f '%Lp' "$1"
+	fi
+}
+
+# Numeric owner:uid, so the assertion does not depend on name resolution.
+file_owner() {
+	if stat -c '%u:%g' "$1" >/dev/null 2>&1; then
+		stat -c '%u:%g' "$1"
+	else
+		stat -f '%u:%g' "$1"
 	fi
 }
 
@@ -228,6 +250,17 @@ case_bare_start_updates_and_pins() {
 
 	assert_contains "$(status_json)" '"status":"ok"'
 	assert_eq "$(file_mode "$WORK/.env")" "600" "env stays mode 600"
+	# A rewrite must not hand .env back to root: the harbor uid has to keep
+	# reading it (pi-review on #69).
+	assert_eq "$(file_owner "$WORK/.env")" "$OWNER_BEFORE" "env keeps its owner"
+	# The owner survives because the rewrite chowns the mktemp file before the
+	# rename. The assertion above cannot see that: fixture and temp file are both
+	# created by the test's own uid, so it passes either way. The recorded call
+	# is the guard that fails when the line is deleted (pi-review on #69).
+	assert_eq "$(grep -c '\.env\.' "$STATE/chown_calls" 2>/dev/null || true)" "1" \
+		"the rewrite re-applies .env's owner"
+	assert_contains "$(grep '\.env\.' "$STATE/chown_calls")" "chown $OWNER_BEFORE " \
+		"the owner it re-applies is .env's"
 	teardown
 }
 

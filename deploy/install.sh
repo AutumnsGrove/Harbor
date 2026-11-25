@@ -73,7 +73,15 @@ gid="${gid:-1000}"
 install -d -m 755 "$ROOT/data" "$ROOT/data/backups" "$ROOT/update-signal"
 chown -R "$uid:$gid" "$ROOT/data"
 chown "$uid:$gid" "$ROOT/update-signal"
-log "data and update-signal are owned by $uid:$gid"
+# .env is owned by the harbor uid too. Everything that reads it runs as that
+# user: `docker compose` from the operator's shell, and Meridian's control
+# executor, which restarts the container through the same project directory.
+# Root can read a file owned by uid 1000; uid 1000 cannot read one owned by root,
+# and the first real press of Meridian's Restart button proved it — the action was
+# queued, ran, and failed with `open .env: permission denied` (#54).
+chown "$uid:$gid" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+log "data, update-signal and .env are owned by $uid:$gid"
 
 # ── 3. the port is free ─────────────────────────────────────────────────────
 
