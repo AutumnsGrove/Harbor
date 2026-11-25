@@ -201,8 +201,9 @@ func TestItemDTOSaysWhetherACoverExists(t *testing.T) {
 	with := decode(t, request(h, http.MethodGet, "/api/items/with", map[string]string{
 		identityHeader: "autumn@grove.place",
 	}))["item"].(map[string]any)
-	if with["cover"] != true {
-		t.Errorf("cover = %v, want true", with["cover"])
+	version, ok := with["cover"].(string)
+	if !ok || len(version) != 16 {
+		t.Errorf("cover = %v, want a 16-character version", with["cover"])
 	}
 	// The URL is never sent: the card asks this origin instead.
 	if _, leaked := with["ogImage"]; leaked {
@@ -217,10 +218,105 @@ func TestItemDTOSaysWhetherACoverExists(t *testing.T) {
 	}
 }
 
+// A different image hash is a different URL, so a re-enrichment cannot leave a
+// browser serving last month's cover (pi-review on #61).
+func TestCoverVersionChangesWithTheImage(t *testing.T) {
+	h, library := coverHandler(t, &stubFetcher{body: coverPNG, kind: "image/png"})
+	seedCovered(t, library, "a", `{"image":"https://example.test/one.png"}`)
+	seedCovered(t, library, "b", `{"image":"https://example.test/two.png"}`)
+
+	get := func(id string) string {
+		body := decode(t, request(h, http.MethodGet, "/api/items/"+id, map[string]string{
+			identityHeader: "autumn@grove.place",
+		}))["item"].(map[string]any)
+		version, _ := body["cover"].(string)
+		return version
+	}
+
+	first, second := get("a"), get("b")
+	if first == "" || second == "" {
+		t.Fatalf("cover versions = %q and %q, want both set", first, second)
+	}
+	if first == second {
+		t.Error("two different images produced the same cover version")
+	}
+}
+
+// `og:image` is legally relative or protocol-relative, and fetch only takes an
+// absolute http(s) URL (pi-review on #61).
+func TestCoverResolvesARelativeImageAgainstThePage(t *testing.T) {
+	h, library := coverHandler(t, &stubFetcher{body: coverPNG, kind: "image/png"})
+	if _, err := library.CreateItem(context.Background(), store.ItemInput{
+		ID:     "rel",
+		URL:    ptr("https://example.test/posts/one"),
+		Note:   "",
+		OGJSON: `{"image":"/images/og.png"}`,
+	}); err != nil {
+		t.Fatalf("CreateItem: %v", err)
+	}
+	if _, err := library.CreateItem(context.Background(), store.ItemInput{
+		ID:     "proto",
+		URL:    ptr("https://example.test/posts/two"),
+		Note:   "",
+		OGJSON: `{"image":"//cdn.example.test/og.png"}`,
+	}); err != nil {
+		t.Fatalf("CreateItem: %v", err)
+	}
+
+	for _, id := range []string{"rel", "proto"} {
+		rec := request(h, http.MethodGet, "/api/items/"+id+"/cover", map[string]string{
+			identityHeader: "autumn@grove.place",
+		})
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: GET cover = %d, want 200 (resolved against the page)", id, rec.Code)
+		}
+	}
+
+	// A relative image on an item with no page URL cannot be resolved, so it is
+	// honestly absent rather than a permanent 404 loop.
+	if _, err := library.CreateItem(context.Background(), store.ItemInput{
+		ID:     "note",
+		Note:   "a note",
+		OGJSON: `{"image":"/images/og.png"}`,
+	}); err != nil {
+		t.Fatalf("CreateItem: %v", err)
+	}
+	body := decode(t, request(h, http.MethodGet, "/api/items/note", map[string]string{
+		identityHeader: "autumn@grove.place",
+	}))["item"].(map[string]any)
+	if body["cover"] != nil {
+		t.Errorf("cover = %v, want absent for an unresolvable relative image", body["cover"])
+	}
+}
+
+// The URL is versioned, so immutable is now true — but the bytes are
+// owner-only, so the cache is private and a validator exists.
+func TestCoverHeadersArePrivateVersionedAndValidatable(t *testing.T) {
+	h, library := coverHandler(t, &stubFetcher{body: coverPNG, kind: "image/png"})
+	seedCovered(t, library, "a", `{"image":"https://example.test/a.png"}`)
+
+	rec := request(h, http.MethodGet, "/api/items/a/cover", map[string]string{
+		identityHeader: "autumn@grove.place",
+	})
+	cache := rec.Header().Get("Cache-Control")
+	if strings.Contains(cache, "public") {
+		t.Errorf("Cache-Control = %q: this is owner-only content", cache)
+	}
+	if !strings.Contains(cache, "private") || !strings.Contains(cache, "immutable") {
+		t.Errorf("Cache-Control = %q, want private and immutable", cache)
+	}
+	if got := rec.Header().Get("ETag"); got == "" {
+		t.Error("no ETag: a client cannot revalidate this cover")
+	}
+}
+
 // A cover response is not the shell, so it must not be compressed or wrapped
 // in the HTML policy: it is bytes with its own type.
 func TestCoverIsServedAsAnImageNotJSON(t *testing.T) {
-	h, library := coverHandler(t, &stubFetcher{body: coverPNG, kind: "image/png"})
+	// Over the gzip threshold, so the content-type rule is actually exercised
+	// rather than the size rule (pi-review on #61).
+	big := append(append([]byte{}, coverPNG...), bytes.Repeat([]byte("\x89"), 4096)...)
+	h, library := coverHandler(t, &stubFetcher{body: big, kind: "image/png"})
 	seedCovered(t, library, "e", `{"image":"https://example.test/a.png"}`)
 
 	rec := request(h, http.MethodGet, "/api/items/e/cover", map[string]string{
@@ -229,6 +325,9 @@ func TestCoverIsServedAsAnImageNotJSON(t *testing.T) {
 	})
 	if got := rec.Header().Get("Content-Encoding"); got != "" {
 		t.Errorf("Content-Encoding = %q: a cover is served untouched", got)
+	}
+	if len(rec.Body.Bytes()) != len(big) {
+		t.Errorf("body = %d bytes, want the %d fetched", rec.Body.Len(), len(big))
 	}
 }
 

@@ -122,8 +122,7 @@ func (s *Store) Get(ctx context.Context, imageURL string) (Stored, error) {
 		return Stored{}, ErrNoImage
 	}
 
-	sum := sha256.Sum256([]byte(imageURL))
-	name := hex.EncodeToString(sum[:])
+	name := Key(imageURL)
 	path := filepath.Join(s.dir, name+".bin")
 
 	release := s.lock(name)
@@ -228,6 +227,15 @@ func (s *Store) lock(name string) func() {
 		}
 		s.mu.Unlock()
 	}
+}
+
+// Key is the content-addressing of one image URL: the cache file name, the
+// ETag, and the version the card puts in its src. A re-enrichment that changes
+// the image URL changes all three together, so a cached browser copy cannot
+// outlive the bytes it was made from.
+func Key(imageURL string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(imageURL)))
+	return hex.EncodeToString(sum[:])
 }
 
 // mediaType drops the parameters from a content type, so "image/png; charset=x"

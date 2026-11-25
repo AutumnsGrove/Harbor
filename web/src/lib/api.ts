@@ -171,8 +171,12 @@ export type Item = {
 	/** details_json, filled for one item; the per-kind layout is built on it. */
 	details?: ItemDetails;
 	readLater?: boolean;
-	/** The item has a page image; ask this origin for /api/items/{id}/cover. */
-	cover?: boolean;
+	/**
+	 * The page image's version: ask this origin for /api/items/{id}/cover?v=…
+	 * The version changes when the image does, so a cached copy cannot outlive
+	 * the bytes it was made from.
+	 */
+	cover?: string;
 	createdAt: string;
 	savedAt: string;
 	updatedAt: string;

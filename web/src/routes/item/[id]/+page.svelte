@@ -180,7 +180,7 @@
 			     element rather than leaving a broken-image box. -->
 			<img
 				class="item-cover"
-				src={`/api/items/${item.id}/cover`}
+				src={`/api/items/${item.id}/cover?v=${item.cover}`}
 				alt=""
 				width="1200"
 				height="675"

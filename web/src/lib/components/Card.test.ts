@@ -30,11 +30,13 @@ function item(overrides: Partial<Item> = {}): Item {
 
 describe('Card', () => {
 	it('shows the proxied page image when the item has one', () => {
-		const { container } = render(Card, { item: item({ cover: true }) });
+		const { container } = render(Card, { item: item({ cover: '0123456789abcdef' }) });
 
 		const image = container.querySelector('img.coverimg');
 		expect(image).not.toBeNull();
-		expect(image?.getAttribute('src')).toBe('/api/items/item-1/cover');
+		// The version is in the URL, so a re-enrichment that changes the image is a
+		// different request rather than a year-old cached copy (pi-review on #61).
+		expect(image?.getAttribute('src')).toBe('/api/items/item-1/cover?v=0123456789abcdef');
 		// Same-origin, and the attributes the issue asks for: lazy, decoded off
 		// the main thread, and explicit dimensions so a late load does not reflow.
 		expect(image?.getAttribute('width')).toBe('640');
@@ -54,7 +56,7 @@ describe('Card', () => {
 	});
 
 	it('falls back to the placeholder when the image fails to load', async () => {
-		const { container } = render(Card, { item: item({ cover: true }) });
+		const { container } = render(Card, { item: item({ cover: '0123456789abcdef' }) });
 		const image = container.querySelector('img.coverimg');
 		expect(image).not.toBeNull();
 

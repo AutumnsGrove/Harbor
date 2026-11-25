@@ -76,7 +76,7 @@
 			{#if showCover}
 				<img
 					class="coverimg"
-					src={`/api/items/${item.id}/cover`}
+					src={`/api/items/${item.id}/cover?v=${item.cover}`}
 					alt=""
 					width="640"
 					height="400"
