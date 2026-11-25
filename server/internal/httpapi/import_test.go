@@ -82,7 +82,7 @@ func waitForImport(t *testing.T, h http.Handler) importStatusResponse {
 
 func itemCount(t *testing.T, library *store.Store) int {
 	t.Helper()
-	counts, err := library.Counts(context.Background())
+	counts, err := library.Counts(context.Background(), time.Now().UTC().AddDate(0, 0, -7))
 	if err != nil {
 		t.Fatalf("Counts: %v", err)
 	}
