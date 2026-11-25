@@ -91,6 +91,13 @@ rewrite_env_image() {
 		END { if (!found) print "HARBOR_IMAGE=" new }
 	' "$ENV_FILE" >"$tmp"
 	chmod 600 "$tmp"
+	# mktemp gives root:root, and this script runs as root. .env belongs to the
+	# harbor uid so the operator's compose and Meridian's control executor can
+	# read it; without this the first digest pin silently undoes that and the
+	# next Restart press fails with `permission denied` (pi-review on #69).
+	# `ls -nd` is the portable way to read a numeric owner: GNU chown has
+	# --reference, BSD chown does not, and this suite runs on both.
+	chown "$(ls -nd "$ENV_FILE" | awk '{print $3":"$4}')" "$tmp"
 	mv "$tmp" "$ENV_FILE"
 }
 

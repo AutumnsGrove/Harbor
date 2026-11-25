@@ -88,6 +88,7 @@ HARBOR_ALLOWED_LOGIN=autumn@grove.place
 OPENROUTER_API_KEY=secret-value-that-must-survive
 EOF
 	chmod 600 "$WORK/.env"
+	OWNER_BEFORE="$(file_owner "$WORK/.env")"
 	cp "$WORK/.env" "$WORK/.env.original"
 	printf 'OLD-DB\n' >"$WORK/data/harbor.db"
 	touch "$STATE/healthy"
@@ -185,6 +186,15 @@ file_mode() {
 	fi
 }
 
+# Numeric owner:uid, so the assertion does not depend on name resolution.
+file_owner() {
+	if stat -c '%u:%g' "$1" >/dev/null 2>&1; then
+		stat -c '%u:%g' "$1"
+	else
+		stat -f '%u:%g' "$1"
+	fi
+}
+
 image_line() { grep '^HARBOR_IMAGE=' "$WORK/.env"; }
 status_json() { cat "$WORK/update-signal/status.json" 2>/dev/null || printf ''; }
 calls() { cat "$STATE/calls" 2>/dev/null || printf ''; }
@@ -228,6 +238,9 @@ case_bare_start_updates_and_pins() {
 
 	assert_contains "$(status_json)" '"status":"ok"'
 	assert_eq "$(file_mode "$WORK/.env")" "600" "env stays mode 600"
+	# A rewrite must not hand .env back to root: the harbor uid has to keep
+	# reading it (pi-review on #69).
+	assert_eq "$(file_owner "$WORK/.env")" "$OWNER_BEFORE" "env keeps its owner"
 	teardown
 }
 
