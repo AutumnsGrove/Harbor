@@ -84,6 +84,13 @@ the container is up.
 harbor enrich --dry-run          # how many are waiting, write nothing
 harbor enrich --limit 50         # a slice first, to look at the tags before the bill
 harbor enrich                    # the whole backlog
+
+# After the cover fix (#67): finished rows whose stored page image is not an
+# absolute URL. `harbor enrich` will never touch those — it only queues rows the
+# model has never read — so this is the one deliberate re-read. Dry-run first to
+# see the number on the potato.
+harbor enrich --refresh --dry-run
+harbor enrich --refresh
 ```
 
 It refuses to run without `OPENROUTER_API_KEY`: without a key the loop only marks rows ready, which

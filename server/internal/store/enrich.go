@@ -436,3 +436,66 @@ func videoDetails(existing string, m VideoMetadata) string {
 	}
 	return string(encoded)
 }
+
+// relativeCoverWhere is the predicate for "this row's stored page image is not
+// something fetch can use": present, but not an absolute http(s) URL. Both keys
+// count, because the importer writes `cover` and enrichment writes `image`
+// (issue #49 measured them as disjoint).
+//
+// The CASE keeps json_extract away from a row whose og_json is not JSON at all;
+// SQLite does not promise to short-circuit AND.
+const relativeCoverWhere = `CASE WHEN json_valid(og_json) THEN (
+	(coalesce(json_extract(og_json, '$.image'), '') <> ''
+		AND json_extract(og_json, '$.image') NOT LIKE 'http://%'
+		AND json_extract(og_json, '$.image') NOT LIKE 'https://%')
+	OR (coalesce(json_extract(og_json, '$.cover'), '') <> ''
+		AND json_extract(og_json, '$.cover') NOT LIKE 'http://%'
+		AND json_extract(og_json, '$.cover') NOT LIKE 'https://%')
+) ELSE 0 END`
+
+// RelativeCoverCount is how many finished rows still hold a page image the
+// proxy cannot fetch: a root-relative or protocol-relative og:image stored
+// before the pipeline resolved it (issue #67).
+func (s *Store) RelativeCoverCount(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM items
+		WHERE state = 'ready' AND deleted_at IS NULL AND `+relativeCoverWhere).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("counting items with a relative cover: %w", err)
+	}
+	return n, nil
+}
+
+// QueueRelativeCovers re-queues finished rows whose stored image is relative, so
+// a re-enrichment can overwrite it with the resolved URL. It is separate from
+// QueueUnenriched on purpose: that one only ever touches rows the model has
+// never read, and these rows have been read — this is the one deliberate reason
+// to read them again.
+//
+// limit <= 0 means all of them, and the caller owns the priority so a hand-saved
+// link still goes first.
+func (s *Store) QueueRelativeCovers(ctx context.Context, priority, limit int) (queued, remaining int, err error) {
+	if limit <= 0 {
+		limit = -1
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE items SET
+		state = 'queued', priority = ?, attempts = 0, next_attempt_at = NULL, last_error = ''
+		WHERE seq IN (
+			SELECT seq FROM items
+			WHERE state = 'ready' AND deleted_at IS NULL AND `+relativeCoverWhere+`
+			ORDER BY saved_at ASC, seq ASC
+			LIMIT ?
+		)`, priority, limit)
+	if err != nil {
+		return 0, 0, fmt.Errorf("queueing items with a relative cover: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, 0, fmt.Errorf("queueing items with a relative cover: %w", err)
+	}
+	remaining, err = s.RelativeCoverCount(ctx)
+	if err != nil {
+		return int(affected), 0, err
+	}
+	return int(affected), remaining, nil
+}

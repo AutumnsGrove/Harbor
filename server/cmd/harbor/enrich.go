@@ -20,8 +20,16 @@ default kind. This queues every one of those — state ready, never enriched —
 the enrichment loop the running server already owns. It does not run the model
 itself: queueing is instant and safe, the drain is the thing to watch.
 
+--refresh is a different selection for a different reason: it re-queues finished
+rows whose stored page image is not an absolute URL (a root-relative or
+protocol-relative og:image saved before the pipeline resolved it). Those rows
+have already been read by the model, and no other path will ever touch them, so
+this is the one deliberate re-read. Missing images are left alone: this fixes bad
+values, not absent ones (issue #67).
+
 Flags:
   --limit N     queue at most N items, oldest saved first (default: all)
+  --refresh     re-queue finished items whose stored cover is not an absolute URL
   --dry-run     report what would be queued and write nothing
 
 The queue is drained by ` + "`harbor serve`" + `, so the container must be running with
@@ -39,6 +47,7 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	flags.SetOutput(io.Discard)
 	limit := flags.Int("limit", 0, "queue at most N items (0: all)")
 	dryRun := flags.Bool("dry-run", false, "report and write nothing")
+	refresh := flags.Bool("refresh", false, "re-queue finished items whose stored cover is not an absolute URL")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("%s\n\n%s", err, enrichUsage)
 	}
@@ -64,10 +73,17 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	defer library.Close()
 
 	waiting, err := library.UnenrichedCount(ctx)
+	if *refresh {
+		waiting, err = library.RelativeCoverCount(ctx)
+	}
 	if err != nil {
 		return err
 	}
 	if waiting == 0 {
+		if *refresh {
+			fmt.Fprintln(stdout, "no finished item holds a cover that is not an absolute URL")
+			return nil
+		}
 		fmt.Fprintln(stdout, "no items are waiting for their first enrichment")
 		return nil
 	}
@@ -80,7 +96,11 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 		if *limit > 0 && *limit < would {
 			would = *limit
 		}
-		fmt.Fprintf(stdout, "would queue %d item(s) for enrichment at priority %d\n", would, enrichPriority)
+		if *refresh {
+			fmt.Fprintf(stdout, "would re-queue %d item(s) with a relative cover at priority %d\n", would, enrichPriority)
+		} else {
+			fmt.Fprintf(stdout, "would queue %d item(s) for enrichment at priority %d\n", would, enrichPriority)
+		}
 		if would < waiting {
 			fmt.Fprintf(stdout, "  %d waiting in total; run again for the next batch\n", waiting)
 		}
@@ -89,10 +109,17 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	}
 
 	queued, remaining, err := library.QueueUnenriched(ctx, enrichPriority, *limit)
+	if *refresh {
+		queued, remaining, err = library.QueueRelativeCovers(ctx, enrichPriority, *limit)
+	}
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "queued %d item(s) for enrichment\n", queued)
+	if *refresh {
+		fmt.Fprintf(stdout, "re-queued %d item(s) with a relative cover\n", queued)
+	} else {
+		fmt.Fprintf(stdout, "queued %d item(s) for enrichment\n", queued)
+	}
 	if remaining > 0 {
 		fmt.Fprintf(stdout, "  %d still waiting; run this again for the next batch\n", remaining)
 	}
