@@ -10,6 +10,7 @@
 		type UsageResponse,
 		type VersionResponse
 	} from '#lib/api';
+	import { dailySeries } from '#lib/sparkline';
 
 	type UpdateState = 'idle' | 'checking' | 'available' | 'requesting' | 'requested' | 'uptodate';
 
@@ -30,7 +31,10 @@
 		usage && usage.budgetUsd > 0 ? Math.min(100, (usage.monthToDateUsd / usage.budgetUsd) * 100) : 0
 	);
 	const overBudget = $derived(monthPct >= 70);
-	const peakDay = $derived(usage ? Math.max(0, ...usage.byDay.map((day) => day.usd)) : 0);
+	// Filled from the server's sparse days, so the sparkline is time rather than
+	// the sequence of days that happened to have calls (issue #52).
+	const series = $derived(usage ? dailySeries(usage.byDay, usage.days) : []);
+	const peakDay = $derived(Math.max(0, ...series.map((day) => day.usd)));
 	const backlogEstimate = $derived(usage ? usage.backlogItems * usage.avgCostPerItem : 0);
 
 	function money(value: number): string {
@@ -334,12 +338,12 @@
 
 			<svg
 				class="spark"
-				viewBox={`0 0 ${Math.max(usage.byDay.length * 4, 4)} 24`}
+				viewBox={`0 0 ${Math.max(series.length * 4, 4)} 24`}
 				preserveAspectRatio="none"
 				role="img"
 				aria-label="Spend per day for the last month"
 			>
-				{#each usage.byDay as day, index (day.day)}
+				{#each series as day, index (day.day)}
 					<rect
 						x={index * 4 + 0.5}
 						y={peakDay > 0 ? 23 - Math.max(1, (day.usd / peakDay) * 21) : 22}
