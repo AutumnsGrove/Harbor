@@ -374,9 +374,14 @@ func TestStatusIsCountsOnly(t *testing.T) {
 		t.Fatalf("GET /api/status = %d, want 200", rec.Code)
 	}
 	body := decode(t, rec)
+	// The exemption is counts and the box's own vitals — nothing a library row
+	// could reach: no title, no URL, no tag, no path beyond the data directory's
+	// fill level and the newest snapshot's timestamp (issue #60).
 	for key := range body {
 		switch key {
-		case "status", "version", "uptimeSeconds", "items", "pending", "failed":
+		case "status", "version", "uptimeSeconds",
+			"items_total", "queue_depth", "failed", "saved_this_week",
+			"mirror_pending", "disk_used_pct", "last_backup", "last_link_check":
 		default:
 			t.Errorf("GET /api/status exposes %q; the header-less exemption is counts only", key)
 		}

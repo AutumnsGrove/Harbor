@@ -1,4 +1,5 @@
 import { AwsClient } from 'aws4fetch';
+import { validName } from './backups';
 import { PRESIGN_TTL_SECONDS } from './constants';
 import type { Env } from './types';
 
@@ -19,11 +20,21 @@ export function presignConfigured(env: Env): boolean {
 	return Boolean(env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY);
 }
 
-/** Only keys the queue knows about, and only under the prefixes this phase writes. */
-export function presignKeyAllowed(key: string): boolean {
-	if (!key || key.length > 512) return false;
-	if (key.includes('..') || key.startsWith('/')) return false;
-	return /^(incoming|media|archives)\/[A-Za-z0-9._\-/]+$/.test(key);
+/**
+ * A key is either a job blob, which D1 has to prove, or a backup, which its own
+ * name proves: the bucket holds snapshots the database never saw and must not
+ * need a row to be restorable (issue #60).
+ */
+export type KeyScope = 'job' | 'backup';
+
+/** Only the prefixes this Worker writes, and only keys that look like them. */
+export function presignKeyScope(key: string): KeyScope | null {
+	if (!key || key.length > 512) return null;
+	if (key.includes('..') || key.startsWith('/')) return null;
+	if (key.startsWith('backups/')) {
+		return validName(key.slice('backups/'.length)) ? 'backup' : null;
+	}
+	return /^(incoming|media|archives)\/[A-Za-z0-9._\-/]+$/.test(key) ? 'job' : null;
 }
 
 export async function presign(env: Env, key: string, now: number): Promise<PresignResult> {

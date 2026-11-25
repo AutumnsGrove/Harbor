@@ -144,7 +144,7 @@ stop_server() {
 }
 
 items_via_api() {
-	curl -sf "http://127.0.0.1:$PORT/api/status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items"])'
+	curl -sf "http://127.0.0.1:$PORT/api/status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["items_total"])'
 }
 
 # ── the drill ───────────────────────────────────────────────────────────────

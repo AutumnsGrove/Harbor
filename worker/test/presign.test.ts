@@ -40,6 +40,27 @@ describe('presign', () => {
 		expect(res.res.status).toBe(404);
 	});
 
+	it('signs a backup with no D1 row, because its name is the proof', async () => {
+		const res = await call('GET', '/presign?key=backups/harbor-2026-11-24T03-10-00Z.db.zst', {
+			token: TOKENS.potato,
+			env: configured(),
+		});
+		expect(res.res.status, res.text).toBe(200);
+		const body = res.json<{ url: string; expires_at: number }>();
+		expect(new URL(body.url).pathname).toBe('/harbor-intake/backups/harbor-2026-11-24T03-10-00Z.db.zst');
+		expect(new URL(body.url).searchParams.get('X-Amz-Signature')).toBeTruthy();
+	});
+
+	it('refuses a backup key whose name is not a snapshot', async () => {
+		for (const key of ['backups/x', 'backups/harbor.db.zip', 'backups/../etc/passwd', 'backups/']) {
+			const res = await call('GET', `/presign?key=${encodeURIComponent(key)}`, {
+				token: TOKENS.potato,
+				env: configured(),
+			});
+			expect(res.res.status, key).toBe(400);
+		}
+	});
+
 	it('refuses traversal and unknown prefixes before touching the bucket', async () => {
 		for (const key of ['../secrets', 'incoming/../../x', '/incoming/a/0', 'backups/x', '']) {
 			const res = await call('GET', `/presign?key=${encodeURIComponent(key)}`, {

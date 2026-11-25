@@ -14,7 +14,7 @@ import {
 	contentAllowed,
 } from './constants';
 import { doorLimit, doorLimitKey, pruneDoorLimits } from './limits';
-import { presign, presignConfigured, presignKeyAllowed } from './presign';
+import { presign, presignConfigured, presignKeyScope } from './presign';
 import {
 	claim,
 	insertUpload,
@@ -327,7 +327,9 @@ route('POST', '/jobs/:id/failed', 'potato', async (c) => {
 // ── backups ─────────────────────────────────────────────────────────────────
 // The potato holds no R2 credential (design.md §4), so the only copy that
 // survives the potato arrives here. Upload and retention only: there is no route
-// that reads a backup back out, and a restore pulls with a presigned GET.
+// that streams a backup back out. A restore pulls with the presigned GET at
+// /presign, which is the same capability media reads use — the bucket stays
+// private, and the Worker never becomes a read surface for the library.
 
 route('PUT', '/backups/:name', 'potato', async (c) => {
 	const name = c.req.param('name')!;
@@ -376,8 +378,12 @@ route('DELETE', '/backups/:name', 'potato', async (c) => {
 
 route('GET', '/presign', 'potato', async (c) => {
 	const key = c.req.query('key') ?? '';
-	if (!presignKeyAllowed(key)) return json({ error: 'key not allowed' }, 400);
-	if (!(await knownKey(c.env, key))) return json({ error: 'unknown key' }, 404);
+	const scope = presignKeyScope(key);
+	if (!scope) return json({ error: 'key not allowed' }, 400);
+	// A job blob is only readable if its row still exists. A backup is proved by
+	// its name: the snapshots have no D1 row, and adding one would make the
+	// database a prerequisite for restoring the database (issue #60).
+	if (scope === 'job' && !(await knownKey(c.env, key))) return json({ error: 'unknown key' }, 404);
 	if (!presignConfigured(c.env)) {
 		// No R2 credential yet: say so instead of signing something that will 403.
 		return json({ error: 'presign is not configured' }, 503);
