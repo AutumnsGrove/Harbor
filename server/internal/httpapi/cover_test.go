@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/cover"
+	"github.com/AutumnsGrove/Harbor/server/internal/model"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
 )
 
@@ -21,13 +22,19 @@ var coverPNG = []byte("\x89PNG\r\n\x1a\nharbor cover bytes")
 
 type stubFetcher struct {
 	calls atomic.Int32
-	body  []byte
 	kind  string
+	body  []byte
 	err   error
+
+	// asked is the URL the handler actually requested. It is the only way a test
+	// can tell a resolved image from an unresolved one, because a stub returns
+	// its body whatever it is given.
+	asked string
 }
 
-func (f *stubFetcher) Fetch(context.Context, string) ([]byte, string, error) {
+func (f *stubFetcher) Fetch(_ context.Context, rawURL string) ([]byte, string, error) {
 	f.calls.Add(1)
+	f.asked = rawURL
 	return f.body, f.kind, f.err
 }
 
@@ -219,33 +226,48 @@ func TestItemDTOSaysWhetherACoverExists(t *testing.T) {
 }
 
 // A different image hash is a different URL, so a re-enrichment cannot leave a
-// browser serving last month's cover (pi-review on #61).
-func TestCoverVersionChangesWithTheImage(t *testing.T) {
+// browser serving last month's cover (pi-review on #61). It has to re-enrich one
+// item: comparing two items passes for any per-item version.
+func TestCoverVersionChangesWhenTheImageDoes(t *testing.T) {
 	h, library := coverHandler(t, &stubFetcher{body: coverPNG, kind: "image/png"})
 	seedCovered(t, library, "a", `{"image":"https://example.test/one.png"}`)
-	seedCovered(t, library, "b", `{"image":"https://example.test/two.png"}`)
 
-	get := func(id string) string {
-		body := decode(t, request(h, http.MethodGet, "/api/items/"+id, map[string]string{
+	version := func() string {
+		body := decode(t, request(h, http.MethodGet, "/api/items/a", map[string]string{
 			identityHeader: "autumn@grove.place",
 		}))["item"].(map[string]any)
-		version, _ := body["cover"].(string)
-		return version
+		value, _ := body["cover"].(string)
+		return value
 	}
 
-	first, second := get("a"), get("b")
-	if first == "" || second == "" {
-		t.Fatalf("cover versions = %q and %q, want both set", first, second)
+	before := version()
+	if before == "" {
+		t.Fatal("no cover version before re-enrichment")
 	}
-	if first == second {
-		t.Error("two different images produced the same cover version")
+
+	// The same item with a new og:image, which is what a re-enrichment writes.
+	if _, err := library.ApplyEnrichment(context.Background(), "a", store.Enrichment{
+		OGJSON:     `{"image":"https://example.test/two.png"}`,
+		Kind:       model.KindArticle,
+		KindSource: model.KindSourceAI,
+	}); err != nil {
+		t.Fatalf("ApplyEnrichment: %v", err)
+	}
+
+	after := version()
+	if after == "" {
+		t.Fatal("no cover version after re-enrichment")
+	}
+	if after == before {
+		t.Errorf("cover version stayed %q after the image changed: a browser keeps the old cover", after)
 	}
 }
 
 // `og:image` is legally relative or protocol-relative, and fetch only takes an
 // absolute http(s) URL (pi-review on #61).
 func TestCoverResolvesARelativeImageAgainstThePage(t *testing.T) {
-	h, library := coverHandler(t, &stubFetcher{body: coverPNG, kind: "image/png"})
+	fetcher := &stubFetcher{body: coverPNG, kind: "image/png"}
+	h, library := coverHandler(t, fetcher)
 	if _, err := library.CreateItem(context.Background(), store.ItemInput{
 		ID:     "rel",
 		URL:    ptr("https://example.test/posts/one"),
@@ -263,12 +285,19 @@ func TestCoverResolvesARelativeImageAgainstThePage(t *testing.T) {
 		t.Fatalf("CreateItem: %v", err)
 	}
 
-	for _, id := range []string{"rel", "proto"} {
+	for id, want := range map[string]string{
+		"rel":   "https://example.test/images/og.png",
+		"proto": "https://cdn.example.test/og.png",
+	} {
+		fetcher.asked = ""
 		rec := request(h, http.MethodGet, "/api/items/"+id+"/cover", map[string]string{
 			identityHeader: "autumn@grove.place",
 		})
 		if rec.Code != http.StatusOK {
 			t.Errorf("%s: GET cover = %d, want 200 (resolved against the page)", id, rec.Code)
+		}
+		if fetcher.asked != want {
+			t.Errorf("%s: fetched %q, want %q", id, fetcher.asked, want)
 		}
 	}
 
