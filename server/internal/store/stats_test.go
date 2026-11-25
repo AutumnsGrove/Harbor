@@ -63,7 +63,11 @@ func TestCountsWindowExcludesOlderSaves(t *testing.T) {
 func TestCountsWindowIsExactAtTheBoundary(t *testing.T) {
 	s := openTestStore(t)
 	ctx := context.Background()
-	since := time.Now().UTC().AddDate(0, 0, -7).Truncate(time.Second)
+	// A fixed midday instant: with a `since` taken from the clock, a run between
+	// 00:00 and 02:00 UTC puts `outside` on the previous calendar date, where the
+	// old binding happens to be right — the test would pass with the bug present
+	// (pi-review on #62).
+	since := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
 
 	outside := since.Add(-2 * time.Hour)
 	inside := since.Add(time.Hour)
