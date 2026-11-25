@@ -149,6 +149,16 @@ func TestLoadRejects(t *testing.T) {
 			want: []string{EnvDataDir, "required"},
 		},
 		{
+			name: "a budget that is not a number JSON can encode",
+			env:  merged(dockerEnv(), map[string]string{EnvAIBudgetUSD: "NaN"}),
+			want: []string{EnvAIBudgetUSD, "positive"},
+		},
+		{
+			name: "an infinite budget",
+			env:  merged(dockerEnv(), map[string]string{EnvAIBudgetUSD: "+Inf"}),
+			want: []string{EnvAIBudgetUSD, "positive"},
+		},
+		{
 			name: "a budget that is not a positive number",
 			env:  merged(dockerEnv(), map[string]string{EnvAIBudgetUSD: "-3"}),
 			want: []string{EnvAIBudgetUSD, "positive"},

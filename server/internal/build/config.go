@@ -3,6 +3,7 @@ package build
 import (
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -146,7 +147,9 @@ func Load(getenv func(string) string) (Config, error) {
 	budget := float64(defaultAIBudgetUSD)
 	if raw := strings.TrimSpace(getenv(EnvAIBudgetUSD)); raw != "" {
 		parsed, err := strconv.ParseFloat(raw, 64)
-		if err != nil || parsed <= 0 {
+		// ParseFloat accepts NaN and Inf without complaint, and either would make
+		// every /api/usage response unencodable (issue #52).
+		if err != nil || parsed <= 0 || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
 			problems = append(problems, fmt.Errorf("%s must be a positive number, got %q", EnvAIBudgetUSD, raw))
 		} else {
 			budget = parsed

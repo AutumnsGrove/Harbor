@@ -150,11 +150,14 @@ func (c *Client) Decide(ctx context.Context, input enrich.ClassifyInput) (enrich
 	if err != nil {
 		return enrich.Classification{}, fmt.Errorf("nova classify: %w", err)
 	}
+	// Recorded before the answer is validated: the provider answered and billed,
+	// and a rejected answer is still a paid call (issue #52).
+	c.logUsage(ctx, "classify", classifyModel, resp.Model, resp.Usage)
+
 	answer, ok := resp.Answers["kind"]
 	if !ok || strings.TrimSpace(answer.Choice) == "" {
 		return enrich.Classification{}, fmt.Errorf("nova classify: no kind answer")
 	}
-	c.logUsage(ctx, "classify", classifyModel, resp.Model, resp.Usage)
 	return enrich.Classification{
 		Kind:      model.Kind(strings.ToLower(strings.TrimSpace(answer.Choice))),
 		Paywalled: resp.Answers["paywalled"].Noul >= 0.5,
@@ -212,10 +215,13 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nova embed: %w", err)
 	}
+	// Same rule as Decide and Write: the call is recorded before the shape of the
+	// answer is judged, because the bill does not depend on it (issue #52).
+	c.logUsage(ctx, "embed", EmbedModel, resp.Model, resp.Usage)
+
 	if len(resp.Vectors) != 1 {
 		return nil, fmt.Errorf("nova embed: got %d vectors for one input", len(resp.Vectors))
 	}
-	c.logUsage(ctx, "embed", EmbedModel, resp.Model, resp.Usage)
 	return resp.Vectors[0], nil
 }
 

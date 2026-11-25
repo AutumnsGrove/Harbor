@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AutumnsGrove/nova/decide"
+	novaembed "github.com/AutumnsGrove/nova/embed"
 	"github.com/AutumnsGrove/nova/provider"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/enrich"
@@ -90,4 +92,68 @@ func TestLogUsageSwallowsASinkFailure(t *testing.T) {
 func TestLogUsageWithNoSinkIsFine(t *testing.T) {
 	client := New(Config{APIKey: "test", Log: slog.New(slog.DiscardHandler)})
 	client.logUsage(context.Background(), "write", chatModel, chatModel, provider.Usage{CostUSD: 1})
+}
+
+// pi-review on #64: the row was written after the local answer checks, so a call
+// the provider answered and billed vanished when the answer was rejected. Both
+// surfaces are covered here.
+
+type billedDecider struct {
+	usage provider.Usage
+}
+
+func (d billedDecider) Decide(context.Context, decide.Request) (*decide.Response, error) {
+	// An answer with no "kind": the provider billed for this call.
+	return &decide.Response{Answers: map[string]decide.Answer{}, Usage: d.usage, Model: "typesafe/jev-1.14"}, nil
+}
+
+type billedEmbedder struct {
+	usage provider.Usage
+}
+
+func (e billedEmbedder) Embed(context.Context, novaembed.Request) (*novaembed.Response, error) {
+	// Zero vectors: the answer is unusable, but the call was paid for.
+	return &novaembed.Response{Usage: e.usage, Model: EmbedModel}, nil
+}
+
+func TestDecideRecordsABilledCallWhoseAnswerIsRejected(t *testing.T) {
+	sink := &recordingSink{}
+	client := &Client{
+		decider: billedDecider{usage: provider.Usage{PromptTokens: 10, CostUSD: 0.5}},
+		log:     slog.New(slog.DiscardHandler),
+		timeout: time.Second,
+		usage:   sink,
+		now:     time.Now,
+	}
+
+	if _, err := client.Decide(context.Background(), enrich.ClassifyInput{URL: "https://example.test"}); err == nil {
+		t.Fatal("Decide answered a response with no kind; want an error")
+	}
+	if len(sink.rows) != 1 {
+		t.Fatalf("recorded %d rows, want 1: the rejected answer was still billed", len(sink.rows))
+	}
+	if sink.rows[0].CostUSD != 0.5 || sink.rows[0].Surface != "classify" {
+		t.Errorf("row = %+v, want the classify call's 0.5", sink.rows[0])
+	}
+}
+
+func TestEmbedRecordsABilledCallWhoseAnswerIsRejected(t *testing.T) {
+	sink := &recordingSink{}
+	client := &Client{
+		embedder: billedEmbedder{usage: provider.Usage{PromptTokens: 7, CostUSD: 0.25}},
+		log:      slog.New(slog.DiscardHandler),
+		timeout:  time.Second,
+		usage:    sink,
+		now:      time.Now,
+	}
+
+	if _, err := client.Embed(context.Background(), "text"); err == nil {
+		t.Fatal("Embed answered zero vectors; want an error")
+	}
+	if len(sink.rows) != 1 {
+		t.Fatalf("recorded %d rows, want 1: the rejected answer was still billed", len(sink.rows))
+	}
+	if sink.rows[0].CostUSD != 0.25 || sink.rows[0].Surface != "embed" {
+		t.Errorf("row = %+v, want the embed call's 0.25", sink.rows[0])
+	}
 }
