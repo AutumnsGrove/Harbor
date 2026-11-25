@@ -53,9 +53,9 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	// The backlog is the same count /api/status reports, and a failure here must
 	// not cost the panel its numbers.
 	var backlog int
-	// Counts takes the week's window on the branch that carries #62; here the
-	// only field read is Pending, which the window does not touch.
-	if counts, err := s.library.Counts(r.Context()); err != nil {
+	// The window is only there for saved_this_week, which this handler does not
+	// read; Pending is the backlog and does not depend on it.
+	if counts, err := s.library.Counts(r.Context(), s.now().AddDate(0, 0, -7)); err != nil {
 		s.log.Warn("usage: backlog unavailable", "error", err)
 	} else {
 		backlog = counts.Pending
