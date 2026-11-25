@@ -27,6 +27,42 @@ export type AvailableResponse = {
 	version?: string;
 };
 
+/** One row of the per-surface or per-model split (issue #52). */
+export type UsageGroup = {
+	key: string;
+	calls: number;
+	promptTokens: number;
+	completionTokens: number;
+	usd: number;
+};
+
+export type UsageDay = {
+	/** YYYY-MM-DD, UTC. */
+	day: string;
+	calls: number;
+	usd: number;
+};
+
+/**
+ * Settings → AI usage. `budgetUsd` is the denominator for the month bar, so the
+ * panel never hardcodes it, and `backlogItems` lets it estimate what is left to
+ * spend before the money is spent.
+ */
+export type UsageResponse = {
+	month: string;
+	monthToDateUsd: number;
+	totalUsd: number;
+	calls: number;
+	bySurface: UsageGroup[];
+	byModel: UsageGroup[];
+	byDay: UsageDay[];
+	avgCostPerItem: number;
+	itemsWithUsage: number;
+	days: number;
+	backlogItems: number;
+	budgetUsd: number;
+};
+
 export type UpdateStatusResponse = {
 	status: string;
 	version?: string;
@@ -313,6 +349,10 @@ export const api = {
 	pending: {
 		/** Read-only: the Worker's queued + claimed jobs that are not items yet. */
 		list: () => request<PendingResponse>('/api/pending')
+	},
+
+	usage: {
+		get: (days = 30) => request<UsageResponse>(`/api/usage?days=${days}`)
 	},
 
 	attention: {

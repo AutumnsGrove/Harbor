@@ -101,7 +101,9 @@ func enrichmentProcessor(cfg build.Config, library *store.Store, log *slog.Logge
 		log.Warn("OPENROUTER_API_KEY is not set; enrichment will only mark items ready", "env", build.EnvOpenRouterAPIKey)
 		return nil
 	}
-	novaClient := enrichnova.New(enrichnova.Config{APIKey: cfg.OpenRouterAPIKey, Log: log})
+	// The same place that logs a `nova call` records its cost against the item,
+	// so the Settings panel and the log line reconcile (issue #52).
+	novaClient := enrichnova.New(enrichnova.Config{APIKey: cfg.OpenRouterAPIKey, Log: log, Usage: library})
 	pipeline := enrich.New(
 		enrich.HTTPFetcher{Client: fetch.New(fetch.WithUserAgent("Harbor/" + build.Version() + " (+https://github.com/AutumnsGrove/Harbor)"))},
 		novaClient, novaClient, novaClient, library, log,

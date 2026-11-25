@@ -7,6 +7,7 @@
 		type AvailableResponse,
 		type Item,
 		type UpdateStatusResponse,
+		type UsageResponse,
 		type VersionResponse
 	} from '#lib/api';
 
@@ -20,6 +21,37 @@
 	let deleted = $state<Item[]>([]);
 	let deletedProblem = $state<string | null>(null);
 	let restoring = $state<string | null>(null);
+	let usage = $state<UsageResponse | null>(null);
+	let usageProblem = $state<string | null>(null);
+
+	// Settings → AI usage (issue #52). The budget comes from the server so the
+	// bar has a denominator that is not hardcoded here.
+	const monthPct = $derived(
+		usage && usage.budgetUsd > 0 ? Math.min(100, (usage.monthToDateUsd / usage.budgetUsd) * 100) : 0
+	);
+	const overBudget = $derived(monthPct >= 70);
+	const peakDay = $derived(usage ? Math.max(0, ...usage.byDay.map((day) => day.usd)) : 0);
+	const backlogEstimate = $derived(usage ? usage.backlogItems * usage.avgCostPerItem : 0);
+
+	function money(value: number): string {
+		if (!Number.isFinite(value)) return '$0.00';
+		// A call costs a fraction of a cent, so two decimals would read as zero.
+		if (value > 0 && value < 0.01) return `$${value.toFixed(4)}`;
+		return `$${value.toFixed(2)}`;
+	}
+
+	function calls(count: number): string {
+		return `${count} call${count === 1 ? '' : 's'}`;
+	}
+
+	async function loadUsage() {
+		try {
+			usage = await api.usage.get(30);
+			usageProblem = null;
+		} catch (error) {
+			usageProblem = message(error);
+		}
+	}
 
 	function message(error: unknown): string {
 		if (isApiError(error)) {
@@ -144,7 +176,10 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => {
+		void load();
+		void loadUsage();
+	});
 </script>
 
 <svelte:head>
@@ -238,6 +273,99 @@
 			</div>
 			<a class="btn" href="/settings/import">Open</a>
 		</div>
+	</section>
+
+	<section class="panel">
+		<div class="row wrap">
+			<div class="grow">
+				<div class="h3">AI usage</div>
+				<p class="note">
+					What the model calls cost. A save makes three: the kind, the title and summary, and the
+					vector.
+				</p>
+			</div>
+			{#if usage && usage.calls > 0}
+				<span class="pill">{calls(usage.calls)} recorded</span>
+			{/if}
+		</div>
+
+		{#if usageProblem}
+			<p class="callout amb" role="status">{usageProblem}</p>
+		{:else if !usage}
+			<p class="note">Reading the usage table…</p>
+		{:else if usage.calls === 0}
+			<p class="note">
+				No calls recorded yet. The first save that reaches a model appears here; an empty table is not
+				the same claim as spending nothing.
+			</p>
+		{:else}
+			<div class="usage-month">
+				<div class="row">
+					<span class="grow">{money(usage.monthToDateUsd)} this month</span>
+					<span class="dim num" class:amb={overBudget}
+						>{usage.budgetUsd > 0 ? `of ${money(usage.budgetUsd)}` : 'no budget set'}</span
+					>
+				</div>
+				{#if usage.budgetUsd > 0}
+					<svg
+						class="usage-bar"
+						viewBox="0 0 100 6"
+						preserveAspectRatio="none"
+						role="img"
+						aria-label={`${monthPct.toFixed(0)} percent of the monthly budget`}
+					>
+						<rect class="track" width="100" height="6" />
+						<rect class="fill" class:warn={overBudget} width={monthPct} height="6" />
+					</svg>
+				{/if}
+				<p class="note">
+					{money(usage.totalUsd)} all time over {usage.itemsWithUsage}
+					{usage.itemsWithUsage === 1 ? 'item' : 'items'}
+					{#if usage.itemsWithUsage > 0}· about {money(usage.avgCostPerItem)} a save{/if}
+				</p>
+			</div>
+
+			{#if usage.backlogItems > 0}
+				<p class="note">
+					{usage.backlogItems} still queued ≈ {money(backlogEstimate)} at the recorded average. The
+					provider bills as the queue drains, not before.
+				</p>
+			{/if}
+
+			<svg
+				class="spark"
+				viewBox={`0 0 ${Math.max(usage.byDay.length * 4, 4)} 24`}
+				preserveAspectRatio="none"
+				role="img"
+				aria-label="Spend per day for the last month"
+			>
+				{#each usage.byDay as day, index (day.day)}
+					<rect
+						x={index * 4 + 0.5}
+						y={peakDay > 0 ? 23 - Math.max(1, (day.usd / peakDay) * 21) : 22}
+						width="3"
+						height={peakDay > 0 ? Math.max(1, (day.usd / peakDay) * 21) : 1}
+					/>
+				{/each}
+			</svg>
+
+			<div class="rows">
+				{#each usage.bySurface as group (group.key)}
+					<div>
+						<div class="grow">
+							<div class="t">{group.key}</div>
+							<div class="s">{calls(group.calls)}</div>
+						</div>
+						<span class="num dim">{money(group.usd)}</span>
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		<p class="note">
+			This is the OpenRouter side only. Cloudflare's D1, R2 and browser rendering have their own bill,
+			which the potato cannot see.
+		</p>
 	</section>
 
 	<section class="panel">

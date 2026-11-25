@@ -37,6 +37,7 @@ const (
 	EnvWorkerURL        = "HARBOR_WORKER_URL"
 	EnvWorkerToken      = "HARBOR_WORKER_TOKEN"
 	EnvOpenRouterAPIKey = "OPENROUTER_API_KEY"
+	EnvAIBudgetUSD      = "HARBOR_AI_BUDGET_USD"
 )
 
 // Dev defaults. They are the only defaults: docker mode insists on being told
@@ -50,6 +51,11 @@ const (
 	devDataDir      = "./data"
 	devUpdateDir    = "./update-signal"
 	devAllowedHosts = "localhost,127.0.0.1,[::1]"
+
+	// defaultAIBudgetUSD is the monthly OpenRouter budget on the key. It is only
+	// a denominator for the Settings → AI usage bar, never a limit Harbor
+	// enforces: the provider does that (issue #52).
+	defaultAIBudgetUSD = 5
 )
 
 // Config is the whole environment contract of the binary (design.md §3). Load
@@ -75,6 +81,10 @@ type Config struct {
 	WorkerURL        string
 	WorkerToken      string
 	OpenRouterAPIKey string
+
+	// AIBudgetUSD is what the key is allowed to spend in a calendar month. The
+	// usage panel divides by it; nothing here refuses a call.
+	AIBudgetUSD float64
 }
 
 // Load builds a Config from getenv: os.Getenv in main, a map lookup in tests.
@@ -133,6 +143,16 @@ func Load(getenv func(string) string) (Config, error) {
 		reject("%s: %v", EnvAllowedHosts, err)
 	}
 
+	budget := float64(defaultAIBudgetUSD)
+	if raw := strings.TrimSpace(getenv(EnvAIBudgetUSD)); raw != "" {
+		parsed, err := strconv.ParseFloat(raw, 64)
+		if err != nil || parsed <= 0 {
+			problems = append(problems, fmt.Errorf("%s must be a positive number, got %q", EnvAIBudgetUSD, raw))
+		} else {
+			budget = parsed
+		}
+	}
+
 	if len(problems) > 0 {
 		return Config{}, errors.Join(problems...)
 	}
@@ -150,6 +170,7 @@ func Load(getenv func(string) string) (Config, error) {
 		WorkerURL:        strings.TrimSpace(getenv(EnvWorkerURL)),
 		WorkerToken:      strings.TrimSpace(getenv(EnvWorkerToken)),
 		OpenRouterAPIKey: strings.TrimSpace(getenv(EnvOpenRouterAPIKey)),
+		AIBudgetUSD:      budget,
 	}, nil
 }
 

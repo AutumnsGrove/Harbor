@@ -93,6 +93,15 @@ not done until it has been deployed and its exit demo run on the potato. Playwri
 functional flows only — there is no screenshot comparison or visual-regression suite. See
 [docs/plans/testing.md](docs/plans/testing.md).
 
+## AI cost
+
+Every save makes up to three model calls through Nova on one OpenRouter key, and each call reports
+its own cost. Harbor records those rows (`usage_calls`) and Settings → AI usage shows month-to-date
+against `HARBOR_AI_BUDGET_USD` (default **5**), the split by surface and model, a per-day sparkline
+and what the enrichment backlog is estimated to cost. The budget is only a denominator — nothing in
+Harbor refuses a call because of it; the provider enforces its own limit. The OpenRouter side is all
+this counts: Cloudflare's D1, R2 and browser rendering have a separate bill.
+
 ## Deployment shape
 
 - `~/Harbor` on the potato, Compose project `harbor`, data in `~/Harbor/data`.

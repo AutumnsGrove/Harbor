@@ -129,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/version", s.only(http.MethodGet, s.version))
 	mux.HandleFunc("/api/busy", s.only(http.MethodGet, s.busy))
 	mux.HandleFunc("/api/status", s.only(http.MethodGet, s.status))
+	mux.HandleFunc("/api/usage", s.only(http.MethodGet, s.usage))
 	mux.HandleFunc("/api/items", s.items)
 	mux.HandleFunc("/api/items/lookup", s.only(http.MethodGet, s.lookupItem))
 	mux.HandleFunc("/api/items/", s.itemByPath)
