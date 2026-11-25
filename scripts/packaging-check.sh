@@ -147,7 +147,7 @@ fi
 expect
 needs_line="$(printf '%s' "$publish_block" | grep -m1 '^    needs:')"
 missing=""
-for job in check fuzz web watcher packaging image; do
+for job in check fuzz web e2e watcher packaging image; do
 	if ! printf '%s' "$needs_line" | grep -qE "(^|[^a-z-])${job}([^a-z-]|$)"; then
 		missing="$missing $job"
 	fi

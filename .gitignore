@@ -30,3 +30,7 @@ web/build/*
 !web/build/.gitkeep
 web/.svelte-kit/
 web/node_modules/
+
+# Playwright (#58): reports and traces are build output.
+web/test-results/
+web/playwright-report/
