@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
+	"github.com/AutumnsGrove/Harbor/server/internal/cover"
 	"github.com/AutumnsGrove/Harbor/server/internal/datalock"
 	"github.com/AutumnsGrove/Harbor/server/internal/enrich"
 	enrichnova "github.com/AutumnsGrove/Harbor/server/internal/enrich/nova"
@@ -161,6 +163,15 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 
 	go queue.NewEnricher(library, enrichmentProcessor(cfg, library, log), log).Run(workCtx)
 
+	// Covers are fetched lazily: a card nobody scrolls to costs nothing, and the
+	// page fetch has already spent its time (issue #49). A directory that cannot
+	// be created is a startup failure, not a silent placeholder for every card.
+	covers, err := cover.Open(filepath.Join(cfg.DataDir, "covers"),
+		cover.HTTP{Client: fetch.New(fetch.WithUserAgent("Harbor/" + build.Version() + " (+https://github.com/AutumnsGrove/Harbor)"))}, log)
+	if err != nil {
+		return err
+	}
+
 	// pending is what /api/pending shows: the saves still at the Worker. Nil is
 	// a valid state and answers an empty list.
 	var pending httpapi.PendingSource
@@ -180,7 +191,7 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.Port),
-		Handler:           httpapi.New(cfg, log, web.Assets(), httpapi.WithStore(library), httpapi.WithPending(pending)).Handler(),
+		Handler:           httpapi.New(cfg, log, web.Assets(), httpapi.WithStore(library), httpapi.WithPending(pending), httpapi.WithCovers(covers)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      120 * time.Second,

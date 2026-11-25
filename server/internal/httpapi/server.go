@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/build"
+	"github.com/AutumnsGrove/Harbor/server/internal/cover"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
 	"github.com/AutumnsGrove/Harbor/server/internal/workerclient"
 )
@@ -73,6 +74,10 @@ type Server struct {
 
 	// imports owns the one import the process is running (Settings → Import).
 	imports *importManager
+
+	// covers serves the stored page image. Nil answers 404 for every cover,
+	// which is the same thing a failed fetch does (issue #49).
+	covers *cover.Store
 }
 
 // PendingSource is the Worker's read-only pending list (design.md §5). It is an
@@ -89,6 +94,12 @@ type Option func(*Server)
 // same as not calling it.
 func WithStore(library *store.Store) Option {
 	return func(s *Server) { s.library = library }
+}
+
+// WithCovers lets /api/items/{id}/cover serve the page image. Without it every
+// card keeps its placeholder.
+func WithCovers(covers *cover.Store) Option {
+	return func(s *Server) { s.covers = covers }
 }
 
 // WithPending lets /api/pending show the saves that are still at the Worker.

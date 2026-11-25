@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -47,6 +48,11 @@ type itemDTO struct {
 	State       model.State      `json:"state"`
 	Attempts    int              `json:"attempts,omitempty"`
 	LastError   string           `json:"lastError,omitempty"`
+
+	// Cover says the item has a page image to ask for. The URL is not sent: the
+	// card asks this origin for /api/items/{id}/cover, so nothing tells a third
+	// party what is in the library (issue #49).
+	Cover bool `json:"cover,omitempty"`
 
 	// Filled for one item, left empty in a list so the grid is one query.
 	Tags      []string `json:"tags,omitempty"`
@@ -96,6 +102,7 @@ func toDTO(item model.Item) itemDTO {
 		State:       item.State,
 		Attempts:    item.Attempts,
 		LastError:   item.LastError,
+		Cover:       imageURL(item.OGJSON) != "",
 		CreatedAt:   item.CreatedAt,
 		SavedAt:     item.SavedAt,
 		UpdatedAt:   item.UpdatedAt,
@@ -289,6 +296,13 @@ func (s *Server) itemByPath(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Allow", "GET, PATCH, DELETE")
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
+	case "cover":
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.coverImage(w, r, id)
 	case "restore", "retry":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
@@ -523,4 +537,71 @@ func decodeCursor(raw string) (store.Cursor, error) {
 		return store.Cursor{}, errors.New("cursor has no seq")
 	}
 	return store.Cursor{SavedAt: savedAt.UTC(), Seq: seq}, nil
+}
+
+// imageURL reads the page image out of og_json. Two writers fill this field and
+// they never overlap: the Raindrop importer writes `cover`, enrichment writes
+// `image` (issue #49 measured 471 and 737 rows, zero with both).
+func imageURL(ogJSON string) string {
+	if strings.TrimSpace(ogJSON) == "" {
+		return ""
+	}
+	var og map[string]string
+	if err := json.Unmarshal([]byte(ogJSON), &og); err != nil {
+		return ""
+	}
+	for _, key := range []string{"image", "cover"} {
+		if value := strings.TrimSpace(og[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// coverImage serves the stored page image through this origin. A card whose
+// cover is missing, blocked, not an image or too large answers 404 and keeps
+// its placeholder: one debug line, no retry loop (issue #49).
+func (s *Server) coverImage(w http.ResponseWriter, r *http.Request, id string) {
+	if s.covers == nil {
+		writeError(w, http.StatusNotFound, "no cover")
+		return
+	}
+
+	item, err := s.library.GetItem(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no such item")
+		return
+	}
+	if err != nil {
+		s.log.Error("reading an item for its cover", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "could not read the item")
+		return
+	}
+
+	saved := imageURL(item.OGJSON)
+	if saved == "" {
+		writeError(w, http.StatusNotFound, "no cover")
+		return
+	}
+
+	stored, err := s.covers.Get(r.Context(), saved)
+	if err != nil {
+		s.log.Debug("cover unavailable", "id", id, "error", err)
+		writeError(w, http.StatusNotFound, "no cover")
+		return
+	}
+
+	file, err := os.Open(stored.Path)
+	if err != nil {
+		s.log.Warn("stored cover is unreadable", "id", id, "error", err)
+		writeError(w, http.StatusNotFound, "no cover")
+		return
+	}
+	defer func() { _ = file.Close() }()
+
+	// The bytes never change for this URL, so a browser may keep them forever.
+	// The name is the hash of the image URL, so a new cover is a new request.
+	w.Header().Set("Content-Type", stored.ContentType)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeContent(w, r, "", time.Time{}, file)
 }

@@ -175,6 +175,21 @@
 			</div>
 		{/if}
 
+		{#if item.cover}
+			<!-- The same stored cover the card uses (#49). A failure hides the
+			     element rather than leaving a broken-image box. -->
+			<img
+				class="item-cover"
+				src={`/api/items/${item.id}/cover`}
+				alt=""
+				width="1200"
+				height="675"
+				loading="lazy"
+				decoding="async"
+				onerror={(event) => ((event.currentTarget as HTMLImageElement).hidden = true)}
+			/>
+		{/if}
+
 		<textarea
 			class="in item-title"
 			bind:value={title}

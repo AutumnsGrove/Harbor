@@ -171,6 +171,8 @@ export type Item = {
 	/** details_json, filled for one item; the per-kind layout is built on it. */
 	details?: ItemDetails;
 	readLater?: boolean;
+	/** The item has a page image; ask this origin for /api/items/{id}/cover. */
+	cover?: boolean;
 	createdAt: string;
 	savedAt: string;
 	updatedAt: string;
