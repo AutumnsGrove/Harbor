@@ -148,6 +148,12 @@ func (c *Client) Decide(ctx context.Context, input enrich.ClassifyInput) (enrich
 		},
 	})
 	if err != nil {
+		// Nova answers with the usage alongside the error when the call itself
+		// completed badly (a mid-stream failure, a rejected answer). That call was
+		// billed, so it is recorded before the error is returned (issue #52).
+		if resp != nil {
+			c.recordIfBilled(ctx, "classify", classifyModel, resp.Model, resp.Usage)
+		}
 		return enrich.Classification{}, fmt.Errorf("nova classify: %w", err)
 	}
 	// Recorded before the answer is validated: the provider answered and billed,
@@ -194,6 +200,9 @@ func (c *Client) Write(ctx context.Context, input enrich.ContentInput) (enrich.C
 		},
 	}, nil)
 	if err != nil {
+		if resp != nil {
+			c.recordIfBilled(ctx, "write", chatModel, resp.Model, resp.Usage)
+		}
 		return enrich.Content{}, fmt.Errorf("nova write: %w", err)
 	}
 	c.logUsage(ctx, "write", chatModel, resp.Model, resp.Usage)
@@ -213,6 +222,11 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 
 	resp, err := c.embedder.Embed(ctx, novaembed.Request{Model: embedRole, Input: []string{text}})
 	if err != nil {
+		// novaembed.Roles answers a wrong dimension with the provider's usage and
+		// an error, which is the one path that both bills and fails in production.
+		if resp != nil {
+			c.recordIfBilled(ctx, "embed", EmbedModel, resp.Model, resp.Usage)
+		}
 		return nil, fmt.Errorf("nova embed: %w", err)
 	}
 	// Same rule as Decide and Write: the call is recorded before the shape of the
@@ -223,6 +237,17 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("nova embed: got %d vectors for one input", len(resp.Vectors))
 	}
 	return resp.Vectors[0], nil
+}
+
+// recordIfBilled records usage that came back attached to an error. A transport
+// failure answers a zero Usage and no model — nothing was billed, and a row for
+// it would be a phantom call — while a rejected answer, a mid-stream failure or
+// a dimension error carries the provider's real numbers and must be recorded.
+func (c *Client) recordIfBilled(ctx context.Context, surface, requested, served string, usage provider.Usage) {
+	if usage.CostUSD == 0 && usage.PromptTokens == 0 && usage.CompletionTokens == 0 && served == "" {
+		return
+	}
+	c.logUsage(ctx, surface, requested, served, usage)
 }
 
 // logUsage is the one place a call is recorded, so the log line and the row can

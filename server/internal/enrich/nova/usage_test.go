@@ -157,3 +157,93 @@ func TestEmbedRecordsABilledCallWhoseAnswerIsRejected(t *testing.T) {
 		t.Errorf("row = %+v, want the embed call's 0.25", sink.rows[0])
 	}
 }
+
+// The production path this class of bug lives on: novaembed.Roles validates the
+// answer's dimensions and returns the provider's usage *with* the error. Using
+// the real decorator is the point — a bare fake never reaches this code.
+type shortVectorEmbedder struct{ calls int }
+
+func (s *shortVectorEmbedder) Embed(context.Context, novaembed.Request) (*novaembed.Response, error) {
+	s.calls++
+	return &novaembed.Response{
+		Vectors: [][]float32{make([]float32, 3)},
+		Dims:    3,
+		Model:   EmbedModel,
+		Usage:   provider.Usage{PromptTokens: 9, CostUSD: 0.42},
+	}, nil
+}
+
+func TestEmbedRecordsABilledCallTheRolesDecoratorRejects(t *testing.T) {
+	roles := novaembed.NewRoles(novaembed.RolesConfig{
+		Embedder: &shortVectorEmbedder{},
+		Roles: map[string]novaembed.Role{
+			embedRole: {Model: EmbedModel, Dims: enrich.EmbeddingDims, Timeout: time.Second},
+		},
+	})
+
+	sink := &recordingSink{}
+	client := &Client{
+		embedder: roles,
+		log:      slog.New(slog.DiscardHandler),
+		timeout:  time.Second,
+		usage:    sink,
+		now:      time.Now,
+	}
+
+	if _, err := client.Embed(context.Background(), "text"); err == nil {
+		t.Fatal("Embed accepted a 3-component answer for a 1024-dimension role")
+	}
+	if len(sink.rows) != 1 {
+		t.Fatalf("recorded %d rows, want 1: novaembed.Roles billed for this call", len(sink.rows))
+	}
+	if sink.rows[0].CostUSD != 0.42 || sink.rows[0].Surface != "embed" {
+		t.Errorf("row = %+v, want the embed call's 0.42", sink.rows[0])
+	}
+}
+
+type failingDecider struct{ resp *decide.Response }
+
+func (d failingDecider) Decide(context.Context, decide.Request) (*decide.Response, error) {
+	return d.resp, errors.New("stream broke mid-answer")
+}
+
+func TestDecideRecordsUsageThatArrivesWithAnError(t *testing.T) {
+	sink := &recordingSink{}
+	client := &Client{
+		decider: failingDecider{resp: &decide.Response{
+			Model: classifyModel,
+			Usage: provider.Usage{PromptTokens: 5, CompletionTokens: 1, CostUSD: 0.02},
+		}},
+		log:     slog.New(slog.DiscardHandler),
+		timeout: time.Second,
+		usage:   sink,
+		now:     time.Now,
+	}
+
+	if _, err := client.Decide(context.Background(), enrich.ClassifyInput{URL: "https://example.test"}); err == nil {
+		t.Fatal("Decide ignored a stream error")
+	}
+	if len(sink.rows) != 1 || sink.rows[0].CostUSD != 0.02 {
+		t.Fatalf("rows = %+v, want the partial answer's 0.02", sink.rows)
+	}
+}
+
+// A transport failure answers an empty response and no usage: nothing was
+// billed, so a row for it would be a phantom call.
+func TestTransportFailuresDoNotRecordPhantomRows(t *testing.T) {
+	sink := &recordingSink{}
+	client := &Client{
+		decider: failingDecider{resp: &decide.Response{}},
+		log:     slog.New(slog.DiscardHandler),
+		timeout: time.Second,
+		usage:   sink,
+		now:     time.Now,
+	}
+
+	if _, err := client.Decide(context.Background(), enrich.ClassifyInput{URL: "https://example.test"}); err == nil {
+		t.Fatal("Decide ignored the error")
+	}
+	if len(sink.rows) != 0 {
+		t.Errorf("recorded %+v, want no row: a refused connection is not a billed call", sink.rows)
+	}
+}
