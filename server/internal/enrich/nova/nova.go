@@ -44,6 +44,11 @@ const (
 	PromptVersion = "tag.v1"
 
 	callTimeout = 45 * time.Second
+
+	// usageWriteTimeout bounds the detached row write. The insert is one small
+	// row on a local database; this is only here so a wedged disk cannot hold
+	// the enrichment loop.
+	usageWriteTimeout = 5 * time.Second
 )
 
 //go:embed prompts/*.md
@@ -267,7 +272,15 @@ func (c *Client) logUsage(ctx context.Context, surface, requested, served string
 	if c.usage == nil {
 		return
 	}
-	err := c.usage.RecordUsage(ctx, store.Usage{
+	// The call this records often failed by deadline or cancellation, so ctx is
+	// already dead — and RecordUsage is an ExecContext, which would reject the
+	// insert and lose exactly the row this exists to keep. Detach the write from
+	// the call (the same rule the importer's bookkeeping uses) and still bound
+	// it, so a wedged database cannot hold the drain.
+	write, cancel := context.WithTimeout(context.WithoutCancel(ctx), usageWriteTimeout)
+	defer cancel()
+
+	err := c.usage.RecordUsage(write, store.Usage{
 		At:               c.now(),
 		Surface:          surface,
 		RequestedModel:   requested,

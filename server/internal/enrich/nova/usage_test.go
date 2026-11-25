@@ -247,3 +247,83 @@ func TestTransportFailuresDoNotRecordPhantomRows(t *testing.T) {
 		t.Errorf("recorded %+v, want no row: a refused connection is not a billed call", sink.rows)
 	}
 }
+
+// contextCheckingSink models store.RecordUsage, which is an ExecContext: a dead
+// context rejects the insert. It records what it was given and whether the
+// context was still alive.
+type contextCheckingSink struct {
+	rows    []store.Usage
+	dead    bool
+	bounded bool
+}
+
+func (s *contextCheckingSink) RecordUsage(ctx context.Context, usage store.Usage) error {
+	if ctx.Err() != nil {
+		s.dead = true
+		return ctx.Err()
+	}
+	if _, ok := ctx.Deadline(); ok {
+		s.bounded = true
+	}
+	s.rows = append(s.rows, usage)
+	return nil
+}
+
+// A call that failed by deadline is exactly the call whose row this is for: the
+// partial response carries usage and the caller's context is already dead
+// (pi-review on #64).
+func TestUsageIsRecordedWhenTheCallRanOutOfTime(t *testing.T) {
+	sink := &contextCheckingSink{}
+	client := New(Config{APIKey: "test", Log: slog.New(slog.DiscardHandler), Usage: sink})
+
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	client.logUsage(dead, "write", chatModel, chatModel, provider.Usage{PromptTokens: 100, CostUSD: 0.42})
+
+	if sink.dead {
+		t.Fatal("the usage write used a dead context: the billed row would be lost")
+	}
+	if len(sink.rows) != 1 || sink.rows[0].CostUSD != 0.42 {
+		t.Fatalf("rows = %+v, want the 0.42 from the timed-out call", sink.rows)
+	}
+	// Detached, but still bounded: a wedged database must not hold the drain.
+	if !sink.bounded {
+		t.Error("the usage write has no deadline; a stuck insert could hang the enrichment loop")
+	}
+}
+
+// The same rule through the surface that produces it: a stream failure with a
+// partial answer and a cancelled context still records.
+func TestWriteRecordsUsageAfterTheContextIsCancelled(t *testing.T) {
+	sink := &contextCheckingSink{}
+	client := &Client{
+		chat:    partialChat{usage: provider.Usage{PromptTokens: 20, CostUSD: 0.11}},
+		log:     slog.New(slog.DiscardHandler),
+		timeout: time.Second,
+		usage:   sink,
+		now:     time.Now,
+	}
+
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := client.Write(dead, enrich.ContentInput{URL: "https://example.test", Text: "x"}); err == nil {
+		t.Fatal("Write ignored the cancelled call")
+	}
+	if len(sink.rows) != 1 || sink.rows[0].CostUSD != 0.11 {
+		t.Fatalf("rows = %+v, want the partial answer's 0.11", sink.rows)
+	}
+}
+
+// partialChat answers with the usage and an error, the shape provider.Stream
+// returns when a stream dies mid-answer.
+type partialChat struct {
+	usage provider.Usage
+}
+
+func (p partialChat) Name() string { return "partial" }
+
+func (p partialChat) Stream(context.Context, provider.Request, func(provider.StreamEvent)) (*provider.Response, error) {
+	return &provider.Response{Model: chatModel, Usage: p.usage}, errors.New("stream broke")
+}
