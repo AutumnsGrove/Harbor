@@ -20,7 +20,7 @@ function item(overrides: Partial<Item> = {}): Item {
 		kind: 'article',
 		kindSource: 'rule',
 		source: 'app',
-		state: 'enriched',
+		state: 'ready',
 		createdAt: '2026-11-24T12:00:00Z',
 		savedAt: '2026-11-24T12:00:00Z',
 		updatedAt: '2026-11-24T12:00:00Z',
