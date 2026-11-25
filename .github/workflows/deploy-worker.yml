@@ -16,6 +16,13 @@
 # `wrangler secret put`. It never lives in this repository or in CI.
 name: deploy-worker
 
+# Workflow-level, because `env.*` in a `with:` resolves only workflow/job/step
+# env — not repository variables. Without these, pnpm/action-setup gets an empty
+# version and fails before the install.
+env:
+  PNPM_VERSION: '10.32.1'
+  NODE_VERSION: '22'
+
 on:
   push:
     branches: [main]
@@ -38,7 +45,11 @@ jobs:
     name: Worker (deploy)
     runs-on: ubuntu-latest
     steps:
+      # Full history: the version stamp is `r<commit count>.<sha>`, which needs
+      # `git rev-list --count HEAD`.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -60,11 +71,18 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy
+        # The stamp the Worker reports on /healthz, so "what is live" names a
+        # commit rather than "dev". `--var` merges with [vars], it does not
+        # replace them.
+        run: >-
+          pnpm exec wrangler deploy
+          --var VERSION:r$(git rev-list --count HEAD).$(git rev-parse --short HEAD)
 
       - name: Show what is live
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        # Informational: the deploy above already happened, so a failure here
+        # must not turn a successful deploy red.
         run: pnpm exec wrangler deployments list --name harbor 2>/dev/null || true
