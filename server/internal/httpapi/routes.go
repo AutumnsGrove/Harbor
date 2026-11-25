@@ -54,22 +54,24 @@ func (s *Server) busy(w http.ResponseWriter, _ *http.Request) {
 // practice — a count that cannot be read is a log line and a zero, not a
 // failed request (design.md §3).
 //
-// The names are the ones the Meridian tile asks for (issue #60). QueueDepth is
-// the enrichment queue: queued plus enriching. MirrorPending and LastLinkCheck
-// are phase 6 and phase 11; they are present and zero/null so the tile never
-// has to guess whether a field is missing or the feature is.
+// The key names are the contract in docs/meridian.md ("What /api/status must
+// expose"): snake_case, because that is what the tile config and the deploy-day
+// checklist pin. QueueDepth is the enrichment queue: queued plus enriching.
+// MirrorPending and LastLinkCheck are phase 6 and phase 11; they are present and
+// zero/null so the tile never has to guess whether a field is missing or the
+// feature is.
 type statusResponse struct {
 	Status        string     `json:"status"`
 	Version       string     `json:"version"`
 	UptimeSeconds float64    `json:"uptimeSeconds"`
-	Items         int        `json:"items"`
-	QueueDepth    int        `json:"queueDepth"`
+	ItemsTotal    int        `json:"items_total"`
+	QueueDepth    int        `json:"queue_depth"`
 	Failed        int        `json:"failed"`
-	SavedThisWeek int        `json:"savedThisWeek"`
-	MirrorPending int        `json:"mirrorPending"`
-	DiskUsedPct   *float64   `json:"diskUsedPct,omitempty"`
-	LastBackup    *time.Time `json:"lastBackup"`
-	LastLinkCheck *time.Time `json:"lastLinkCheck"`
+	SavedThisWeek int        `json:"saved_this_week"`
+	MirrorPending int        `json:"mirror_pending"`
+	DiskUsedPct   *float64   `json:"disk_used_pct,omitempty"`
+	LastBackup    *time.Time `json:"last_backup"`
+	LastLinkCheck *time.Time `json:"last_link_check"`
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +87,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 			// not be able to take down alongside the app.
 			s.log.Warn("status counts unavailable", "error", err)
 		} else {
-			response.Items = counts.Items
+			response.ItemsTotal = counts.Items
 			response.QueueDepth = counts.Pending
 			response.Failed = counts.Failed
 			response.SavedThisWeek = counts.SavedThisWeek

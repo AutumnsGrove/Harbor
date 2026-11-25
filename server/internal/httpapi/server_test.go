@@ -380,8 +380,8 @@ func TestStatusIsCountsOnly(t *testing.T) {
 	for key := range body {
 		switch key {
 		case "status", "version", "uptimeSeconds",
-			"items", "queueDepth", "failed", "savedThisWeek",
-			"mirrorPending", "diskUsedPct", "lastBackup", "lastLinkCheck":
+			"items_total", "queue_depth", "failed", "saved_this_week",
+			"mirror_pending", "disk_used_pct", "last_backup", "last_link_check":
 		default:
 			t.Errorf("GET /api/status exposes %q; the header-less exemption is counts only", key)
 		}

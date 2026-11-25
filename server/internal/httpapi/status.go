@@ -1,10 +1,10 @@
 package httpapi
 
 import (
-	"os"
-	"strings"
 	"syscall"
 	"time"
+
+	"github.com/AutumnsGrove/Harbor/server/internal/backup"
 )
 
 // The two numbers /api/status reads from the box rather than the database
@@ -36,31 +36,23 @@ func diskUsedPct(dir string) *float64 {
 	return &used
 }
 
-// lastBackupAt is the mtime of the newest snapshot in the backup directory.
-// nil means there has never been one — which is true of the potato today, and
-// is the fact the tile should show rather than a confident zero.
+// lastBackupAt is the date of the newest snapshot, read through backup.List.
+// That package owns the rule for what a backup is — `harbor-<date>.db.zst` — and
+// reads the date from the name, so the compression's own temp files
+// (`.backup-*.zst` in the same directory) are not mistaken for a finished
+// snapshot, and an unrelated file cannot become one.
+//
+// nil means there has never been a backup, which is the fact the tile should
+// show rather than a confident zero.
 func lastBackupAt(dir string) *time.Time {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	backups, err := backup.List(dir)
+	if err != nil || len(backups) == 0 {
+		// A missing directory means no backup has ever been taken, which is the
+		// same answer as a directory with nothing in it. A read error is rare
+		// enough that a null field is better than a failed status page.
 		return nil
 	}
-
-	var newest time.Time
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".zst") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(newest) {
-			newest = info.ModTime()
-		}
-	}
-	if newest.IsZero() {
-		return nil
-	}
-	utc := newest.UTC()
-	return &utc
+	// List is newest first and each Date comes from the name.
+	newest := backups[0].Date.UTC()
+	return &newest
 }

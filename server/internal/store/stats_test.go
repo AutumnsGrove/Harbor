@@ -56,6 +56,31 @@ func TestCountsWindowExcludesOlderSaves(t *testing.T) {
 	}
 }
 
+// The boundary is the test that matters: saved_at is text in tsLayout, so a
+// bound bound the driver's own way ("2006-01-02 15:04:05 +0000 UTC") compares
+// wrong at position 10 and leaks a whole calendar day into the window
+// (pi-review on #62).
+func TestCountsWindowIsExactAtTheBoundary(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	since := time.Now().UTC().AddDate(0, 0, -7).Truncate(time.Second)
+
+	outside := since.Add(-2 * time.Hour)
+	inside := since.Add(time.Hour)
+
+	mustCreate(t, s, ItemInput{ID: "outside", Note: "two hours too old", SavedAt: outside})
+	mustCreate(t, s, ItemInput{ID: "inside", Note: "an hour inside", SavedAt: inside})
+
+	counts, err := s.Counts(ctx, since)
+	if err != nil {
+		t.Fatalf("Counts: %v", err)
+	}
+	if counts.SavedThisWeek != 1 {
+		t.Errorf("SavedThisWeek = %d, want 1: %v is outside the window and %v is inside",
+			counts.SavedThisWeek, outside, inside)
+	}
+}
+
 func TestCountsOnAnEmptyStore(t *testing.T) {
 	counts, err := openTestStore(t).Counts(context.Background(), time.Now().UTC().AddDate(0, 0, -7))
 	if err != nil {
