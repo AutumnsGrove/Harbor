@@ -42,6 +42,7 @@ func TestLoadValid(t *testing.T) {
 				AllowedHosts: []string{"harbor.tailnet.ts.net", "localhost", "127.0.0.1"},
 				UID:          defaultUID,
 				GID:          defaultGID,
+				AIBudgetUSD:  defaultAIBudgetUSD,
 			},
 		},
 		{
@@ -59,6 +60,7 @@ func TestLoadValid(t *testing.T) {
 				AllowedHosts: []string{"harbor.tailnet.ts.net", "localhost", "127.0.0.1"},
 				UID:          0,
 				GID:          1001,
+				AIBudgetUSD:  defaultAIBudgetUSD,
 			},
 		},
 		{
@@ -74,6 +76,7 @@ func TestLoadValid(t *testing.T) {
 				AllowedHosts: []string{"localhost", "127.0.0.1", "[::1]"},
 				UID:          defaultUID,
 				GID:          defaultGID,
+				AIBudgetUSD:  defaultAIBudgetUSD,
 				DevNoAuth:    true,
 			},
 		},
@@ -94,6 +97,7 @@ func TestLoadValid(t *testing.T) {
 				AllowedHosts: []string{"harbor.tailnet.ts.net", "localhost", "127.0.0.1"},
 				UID:          defaultUID,
 				GID:          defaultGID,
+				AIBudgetUSD:  defaultAIBudgetUSD,
 			},
 		},
 		{
@@ -112,6 +116,7 @@ func TestLoadValid(t *testing.T) {
 				AllowedHosts:     []string{"harbor.tailnet.ts.net", "localhost", "127.0.0.1"},
 				UID:              defaultUID,
 				GID:              defaultGID,
+				AIBudgetUSD:      defaultAIBudgetUSD,
 				WorkerURL:        "https://harbor-worker.example.workers.dev",
 				WorkerToken:      "door-token",
 				OpenRouterAPIKey: "sk-or-test",
@@ -142,6 +147,21 @@ func TestLoadRejects(t *testing.T) {
 			name: "docker without the data directory",
 			env:  without(dockerEnv(), EnvDataDir),
 			want: []string{EnvDataDir, "required"},
+		},
+		{
+			name: "a budget that is not a number JSON can encode",
+			env:  merged(dockerEnv(), map[string]string{EnvAIBudgetUSD: "NaN"}),
+			want: []string{EnvAIBudgetUSD, "positive"},
+		},
+		{
+			name: "an infinite budget",
+			env:  merged(dockerEnv(), map[string]string{EnvAIBudgetUSD: "+Inf"}),
+			want: []string{EnvAIBudgetUSD, "positive"},
+		},
+		{
+			name: "a budget that is not a positive number",
+			env:  merged(dockerEnv(), map[string]string{EnvAIBudgetUSD: "-3"}),
+			want: []string{EnvAIBudgetUSD, "positive"},
 		},
 		{
 			name: "docker with a relative data directory",
@@ -310,4 +330,24 @@ func without(base map[string]string, key string) map[string]string {
 	out := merged(base, nil)
 	delete(out, key)
 	return out
+}
+
+// The budget is only a denominator for Settings → AI usage, so it defaults and
+// is carried rather than validated against anything else.
+func TestLoadAIBudget(t *testing.T) {
+	cfg, err := Load(env(merged(dockerEnv(), map[string]string{EnvAIBudgetUSD: "12.50"})))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AIBudgetUSD != 12.5 {
+		t.Errorf("AIBudgetUSD = %v, want 12.5", cfg.AIBudgetUSD)
+	}
+
+	cfg, err = Load(env(dockerEnv()))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AIBudgetUSD != defaultAIBudgetUSD {
+		t.Errorf("AIBudgetUSD = %v, want the %v default", cfg.AIBudgetUSD, defaultAIBudgetUSD)
+	}
 }

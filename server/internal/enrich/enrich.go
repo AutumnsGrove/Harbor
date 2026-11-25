@@ -240,6 +240,10 @@ func (e *Enricher) Process(ctx context.Context, item model.Item) error {
 }
 
 func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
+	// The adapter records what each call cost against this item; the pipeline is
+	// the only place that knows which item a call belongs to (issue #52).
+	ctx = WithUsageItem(ctx, item.ID)
+
 	var extracted *extract.Result
 	if hasURL(item) {
 		page, err := e.Fetcher.Fetch(ctx, *item.URL)

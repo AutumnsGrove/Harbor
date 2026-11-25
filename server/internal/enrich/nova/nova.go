@@ -23,6 +23,7 @@ import (
 
 	"github.com/AutumnsGrove/Harbor/server/internal/enrich"
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
+	"github.com/AutumnsGrove/Harbor/server/internal/store"
 )
 
 const (
@@ -43,6 +44,11 @@ const (
 	PromptVersion = "tag.v1"
 
 	callTimeout = 45 * time.Second
+
+	// usageWriteTimeout bounds the detached row write. The insert is one small
+	// row on a local database; this is only here so a wedged disk cannot hold
+	// the enrichment loop.
+	usageWriteTimeout = 5 * time.Second
 )
 
 //go:embed prompts/*.md
@@ -55,6 +61,10 @@ type Config struct {
 	Log        *slog.Logger
 	HTTPClient *http.Client
 	Timeout    time.Duration
+
+	// Usage records what each call cost. Nil is a valid state: a score run or a
+	// test wants the log line and no database write.
+	Usage enrich.UsageSink
 }
 
 // Client implements enrich.Decider, enrich.Writer and enrich.Embedder.
@@ -64,6 +74,8 @@ type Client struct {
 	embedder novaembed.Embedder
 	log      *slog.Logger
 	timeout  time.Duration
+	usage    enrich.UsageSink
+	now      func() time.Time
 }
 
 // New builds the three surfaces. It never fails; a missing key is reported by
@@ -82,7 +94,7 @@ func New(cfg Config) *Client {
 		httpClient = &http.Client{Timeout: 2 * timeout}
 	}
 
-	return &Client{
+	client := &Client{
 		decider: decide.NewRoles(decide.RolesConfig{
 			Decider: decideor.New(decideor.Config{APIKey: cfg.APIKey, HTTPClient: httpClient}),
 			Roles: map[string]decide.Role{
@@ -103,7 +115,10 @@ func New(cfg Config) *Client {
 		}),
 		log:     log,
 		timeout: timeout,
+		usage:   cfg.Usage,
+		now:     time.Now,
 	}
+	return client
 }
 
 // Decide classifies one page. The model never sees "unknown": article is the
@@ -138,13 +153,22 @@ func (c *Client) Decide(ctx context.Context, input enrich.ClassifyInput) (enrich
 		},
 	})
 	if err != nil {
+		// Nova answers with the usage alongside the error when the call itself
+		// completed badly (a mid-stream failure, a rejected answer). That call was
+		// billed, so it is recorded before the error is returned (issue #52).
+		if resp != nil {
+			c.recordIfBilled(ctx, "classify", classifyModel, resp.Model, resp.Usage)
+		}
 		return enrich.Classification{}, fmt.Errorf("nova classify: %w", err)
 	}
+	// Recorded before the answer is validated: the provider answered and billed,
+	// and a rejected answer is still a paid call (issue #52).
+	c.logUsage(ctx, "classify", classifyModel, resp.Model, resp.Usage)
+
 	answer, ok := resp.Answers["kind"]
 	if !ok || strings.TrimSpace(answer.Choice) == "" {
 		return enrich.Classification{}, fmt.Errorf("nova classify: no kind answer")
 	}
-	c.logUsage("classify", classifyModel, resp.Model, resp.Usage)
 	return enrich.Classification{
 		Kind:      model.Kind(strings.ToLower(strings.TrimSpace(answer.Choice))),
 		Paywalled: resp.Answers["paywalled"].Noul >= 0.5,
@@ -181,9 +205,12 @@ func (c *Client) Write(ctx context.Context, input enrich.ContentInput) (enrich.C
 		},
 	}, nil)
 	if err != nil {
+		if resp != nil {
+			c.recordIfBilled(ctx, "write", chatModel, resp.Model, resp.Usage)
+		}
 		return enrich.Content{}, fmt.Errorf("nova write: %w", err)
 	}
-	c.logUsage("write", chatModel, resp.Model, resp.Usage)
+	c.logUsage(ctx, "write", chatModel, resp.Model, resp.Usage)
 
 	content, err := parseContent(resp.Message.Content)
 	if err != nil {
@@ -200,16 +227,39 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 
 	resp, err := c.embedder.Embed(ctx, novaembed.Request{Model: embedRole, Input: []string{text}})
 	if err != nil {
+		// novaembed.Roles answers a wrong dimension with the provider's usage and
+		// an error, which is the one path that both bills and fails in production.
+		if resp != nil {
+			c.recordIfBilled(ctx, "embed", EmbedModel, resp.Model, resp.Usage)
+		}
 		return nil, fmt.Errorf("nova embed: %w", err)
 	}
+	// Same rule as Decide and Write: the call is recorded before the shape of the
+	// answer is judged, because the bill does not depend on it (issue #52).
+	c.logUsage(ctx, "embed", EmbedModel, resp.Model, resp.Usage)
+
 	if len(resp.Vectors) != 1 {
 		return nil, fmt.Errorf("nova embed: got %d vectors for one input", len(resp.Vectors))
 	}
-	c.logUsage("embed", EmbedModel, resp.Model, resp.Usage)
 	return resp.Vectors[0], nil
 }
 
-func (c *Client) logUsage(surface, requested, served string, usage provider.Usage) {
+// recordIfBilled records usage that came back attached to an error. A transport
+// failure answers a zero Usage and no model — nothing was billed, and a row for
+// it would be a phantom call — while a rejected answer, a mid-stream failure or
+// a dimension error carries the provider's real numbers and must be recorded.
+func (c *Client) recordIfBilled(ctx context.Context, surface, requested, served string, usage provider.Usage) {
+	if usage.CostUSD == 0 && usage.PromptTokens == 0 && usage.CompletionTokens == 0 && served == "" {
+		return
+	}
+	c.logUsage(ctx, surface, requested, served, usage)
+}
+
+// logUsage is the one place a call is recorded, so the log line and the row can
+// never disagree. The row is written even when the answer is later rejected: the
+// provider billed for it. A failed write is a warning — the answer is already in
+// hand (issue #52).
+func (c *Client) logUsage(ctx context.Context, surface, requested, served string, usage provider.Usage) {
 	c.log.Info("nova call",
 		"surface", surface,
 		"model", requested,
@@ -218,6 +268,31 @@ func (c *Client) logUsage(surface, requested, served string, usage provider.Usag
 		"completion_tokens", usage.CompletionTokens,
 		"cost_usd", usage.CostUSD,
 	)
+
+	if c.usage == nil {
+		return
+	}
+	// The call this records often failed by deadline or cancellation, so ctx is
+	// already dead — and RecordUsage is an ExecContext, which would reject the
+	// insert and lose exactly the row this exists to keep. Detach the write from
+	// the call (the same rule the importer's bookkeeping uses) and still bound
+	// it, so a wedged database cannot hold the drain.
+	write, cancel := context.WithTimeout(context.WithoutCancel(ctx), usageWriteTimeout)
+	defer cancel()
+
+	err := c.usage.RecordUsage(write, store.Usage{
+		At:               c.now(),
+		Surface:          surface,
+		RequestedModel:   requested,
+		ServedModel:      served,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		CostUSD:          usage.CostUSD,
+		ItemID:           enrich.UsageItem(ctx),
+	})
+	if err != nil {
+		c.log.Warn("recording a model call failed", "surface", surface, "error", err)
+	}
 }
 
 // kindCriteria is the twelve kinds and what they mean. It is the option set the
