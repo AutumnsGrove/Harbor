@@ -21,6 +21,7 @@ declare global {
 			/** Per-IP dampening; absent in tests and in a binding-less deploy (src/limits.ts). */
 			DOOR_LIMIT?: RateLimit;
 			R2_BUCKET: string;
+			R2_BACKUPS_BUCKET?: string;
 			VERSION: string;
 			/** Override for the door dampener's window limit (default 30, see limits.ts). */
 			DOOR_LIMIT_MAX?: string;

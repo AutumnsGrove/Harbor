@@ -37,7 +37,17 @@ export function presignKeyScope(key: string): KeyScope | null {
 	return /^(incoming|media|archives)\/[A-Za-z0-9._\-/]+$/.test(key) ? 'job' : null;
 }
 
-export async function presign(env: Env, key: string, now: number): Promise<PresignResult> {
+/**
+ * The bucket a key belongs to. Snapshots live in their own bucket (the BACKUPS
+ * binding), so a backup signed against the intake bucket would answer 404 and
+ * look like a missing snapshot.
+ */
+export function bucketFor(env: Env, scope: KeyScope): string {
+	if (scope === 'backup') return env.R2_BACKUPS_BUCKET ?? 'harbor-backups';
+	return env.R2_BUCKET;
+}
+
+export async function presign(env: Env, key: string, bucket: string, now: number): Promise<PresignResult> {
 	if (!presignConfigured(env)) throw new Error('presign is not configured');
 	const client = new AwsClient({
 		accessKeyId: env.R2_ACCESS_KEY_ID as string,
@@ -47,7 +57,7 @@ export async function presign(env: Env, key: string, now: number): Promise<Presi
 	});
 
 	const encoded = key.split('/').map(encodeURIComponent).join('/');
-	const url = new URL(`https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_BUCKET}/${encoded}`);
+	const url = new URL(`https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${bucket}/${encoded}`);
 	url.searchParams.set('X-Amz-Expires', String(PRESIGN_TTL_SECONDS));
 
 	// aws4fetch signs the query rather than the headers, which is what makes the

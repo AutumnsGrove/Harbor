@@ -14,7 +14,7 @@ import {
 	contentAllowed,
 } from './constants';
 import { doorLimit, doorLimitKey, pruneDoorLimits } from './limits';
-import { presign, presignConfigured, presignKeyScope } from './presign';
+import { bucketFor, presign, presignConfigured, presignKeyScope } from './presign';
 import {
 	claim,
 	insertUpload,
@@ -388,7 +388,7 @@ route('GET', '/presign', 'potato', async (c) => {
 		// No R2 credential yet: say so instead of signing something that will 403.
 		return json({ error: 'presign is not configured' }, 503);
 	}
-	return json(await presign(c.env, key, nowSeconds()));
+	return json(await presign(c.env, key, bucketFor(c.env, scope), nowSeconds()));
 });
 
 // ── no read path, and no surprises ──────────────────────────────────────────
