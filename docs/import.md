@@ -85,10 +85,10 @@ harbor enrich --dry-run          # how many are waiting, write nothing
 harbor enrich --limit 50         # a slice first, to look at the tags before the bill
 harbor enrich                    # the whole backlog
 
-# After the cover fix (#67): finished rows whose stored page image is not an
-# absolute URL. `harbor enrich` will never touch those — it only queues rows the
-# model has never read — so this is the one deliberate re-read. Dry-run first to
-# see the number on the potato.
+# Finished rows whose stored page image is not an absolute URL. `harbor enrich`
+# never touches those — it only queues rows the model has never read — so this is
+# the one deliberate re-read, and it is exclusive: --refresh does not queue the
+# backlog as well. Dry-run first.
 harbor enrich --refresh --dry-run
 harbor enrich --refresh
 ```
@@ -96,6 +96,12 @@ harbor enrich --refresh
 It refuses to run without `OPENROUTER_API_KEY`: without a key the loop only marks rows ready, which
 would look like enrichment and be none. An item the model has already read is never queued again —
 re-enriching after a prompt change is a deliberate, separate job.
+
+`--refresh`'s number means "stored values that are not absolute", not "covers that fail today": the
+API resolves a relative image against the item URL when it serves it, so most of those rows render,
+and the genuinely broken ones came from a page that redirected. A row whose re-enrichment cannot
+change `og_json` — a walled video filed from public metadata — keeps matching on every pass, so treat
+this as a deliberate, occasional run rather than something that converges to zero.
 
 On the real library (1,476 saves) it took about two hours and $0.51: 954 read by the model, 359 videos
 filed from their public metadata because YouTube walls a datacenter fetch, and 163 left in Needs

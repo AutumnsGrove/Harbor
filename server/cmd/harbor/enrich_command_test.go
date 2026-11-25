@@ -214,6 +214,16 @@ func seedRelativeCovers(t *testing.T, dataDir string) *store.Store {
 			t.Fatalf("ApplyEnrichment(%s): %v", id, err)
 		}
 	}
+	// One row the model has never read. `--refresh` must leave it alone; the
+	// backlog is a different command's job (pi-review on #68).
+	backlog, err := library.CreateItem(ctx, store.ItemInput{ID: "backlog", Note: "never read"})
+	if err != nil {
+		t.Fatalf("CreateItem(backlog): %v", err)
+	}
+	if err := library.MarkReady(ctx, backlog.ID); err != nil {
+		t.Fatalf("MarkReady(backlog): %v", err)
+	}
+
 	return library
 }
 
@@ -275,6 +285,16 @@ func TestEnrichRefreshCountsOnlyUnusableCovers(t *testing.T) {
 			t.Errorf("%s = %q, want queued", id, item.State)
 		}
 	}
+	// The never-enriched row is still waiting for its first pass: --refresh must
+	// not have queued it, and must not have spent --limit on it.
+	backlogRow, err := library.GetItem(ctx, "backlog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backlogRow.State != model.StateReady {
+		t.Errorf("backlog row = %q, want it left ready: --refresh queued the normal backlog too", backlogRow.State)
+	}
+
 	// An absolute cover and a page with no image are not this command's work.
 	for _, id := range []string{"absolute", "no-image"} {
 		item, err := library.GetItem(ctx, id)

@@ -27,6 +27,14 @@ have already been read by the model, and no other path will ever touch them, so
 this is the one deliberate re-read. Missing images are left alone: this fixes bad
 values, not absent ones (issue #67).
 
+Read the dry-run number as "stored values that are not absolute", which is not
+the same as "covers that fail today": the API resolves a relative image against
+the item's URL when it serves it, so most of these render. The ones that are
+actually broken came from a page that redirected. Two consequences: the number
+overstates the damage, and a row whose re-enrichment cannot change og_json — a
+walled video filed from public metadata — keeps matching, so run this once per
+deliberate pass rather than expecting the count to reach zero.
+
 Flags:
   --limit N     queue at most N items, oldest saved first (default: all)
   --refresh     re-queue finished items whose stored cover is not an absolute URL
@@ -108,9 +116,14 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 		return nil
 	}
 
-	queued, remaining, err := library.QueueUnenriched(ctx, enrichPriority, *limit)
+	// Exactly one selection. Calling both would spend --limit twice and, with
+	// --refresh, quietly queue the whole never-enriched backlog as well — the
+	// bill the dry run was supposed to preview (pi-review on #68).
+	var queued, remaining int
 	if *refresh {
 		queued, remaining, err = library.QueueRelativeCovers(ctx, enrichPriority, *limit)
+	} else {
+		queued, remaining, err = library.QueueUnenriched(ctx, enrichPriority, *limit)
 	}
 	if err != nil {
 		return err
