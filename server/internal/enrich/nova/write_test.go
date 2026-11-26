@@ -3,6 +3,7 @@ package nova
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -140,7 +141,7 @@ func TestWriteDoesNotRetryATruncatedAnswer(t *testing.T) {
 	if chat.calls != 1 {
 		t.Errorf("calls = %d, want no retry for a truncated answer", chat.calls)
 	}
-	if !strings.Contains(err.Error(), "800-token cap") {
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d-token cap", writeMaxTokens)) {
 		t.Errorf("error = %q, want it to name the cap to change", err)
 	}
 }

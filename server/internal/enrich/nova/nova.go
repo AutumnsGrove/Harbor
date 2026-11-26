@@ -49,7 +49,16 @@ const (
 	// writeMaxTokens is the answer's budget. It is a constant because the error
 	// message quotes it: "the answer hit the N-token cap" has to name the number
 	// somebody would change (issue #78).
-	writeMaxTokens = 800
+	//
+	// 800 was measured, not guessed, and it was 800 too small. On the potato after
+	// the 2026-11-26 deploy, deepseek-v4.1-flash spent the whole budget on some
+	// items (finish_reason=length, 800/800 completion tokens) for what should be a
+	// title, a summary and 3-6 tags; the answers that fitted finished in 398 and
+	// 497. Five rows were sitting in Needs attention because of it, and before
+	// #78's diagnostics they looked like the model answering with nothing.
+	// 2,000 tokens is about $0.0006 at $0.30/M out — the cap that matters is the
+	// input one, not this.
+	writeMaxTokens = 2000
 
 	// writeCallAttempts is how many times one Write asks before the item is
 	// charged an attempt. Two is deliberate: the cost of a miss is one extra

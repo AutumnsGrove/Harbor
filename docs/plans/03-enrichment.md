@@ -268,7 +268,7 @@ What was checked and what it showed, because these are the three questions that 
   `deepseek/deepseek-v4-flash-0731` costs **more** on every axis — $0.0434/M in, $0.30/M out, and
   $0.035/M for a cache read against $0.001 — so "the newer flash must be dearer" is backwards here and
   a 1,476-save import would cost about $3.20 on it instead of $2.20. Nothing changed. The levers that
-  do matter are the ones already in the code: `MaxTokens: 800` on the write call and the 8k input cap.
+  do matter are the ones already in the code: the write call's output cap and the 8k input cap.
 - **A walled video is filed, not failed.** YouTube answers a datacenter fetch with Google's
   `/sorry/` wall (spike S8). The first real drain on the potato found it the hard way: 371 of 421
   video saves failed with that exact reason. `internal/youtube` now reads the public, keyless oEmbed
@@ -299,7 +299,7 @@ Per save, from the usage log (input tokens dominated by page text):
 | typed note (no fetch, no classify) | — | $0.000296 | $0.000001 | **$0.00030** |
 
 The note is the expensive one because its summary was long (347 output tokens); the cap that matters
-is `MaxTokens: 800` on the write call, not the page length.
+is the write call's output cap, not the page length.
 
 ## The first real drain (2026-11-23/24, on the potato)
 
@@ -448,6 +448,19 @@ A single failed save wrote three log lines at two levels — `WARN video metadat
 - The pass summary's two numbers belong to the pass. `failed` was a field that was never reset, which
   is how a pass that took 5 rows reported `failed:11` — every failure since the process started. Both
   counts are now returned by `Pass`, and `failed ≤ processed` is a property rather than a hope.
+
+### The write cap was 800, and 800 was too small (2026-11-26, issue #78)
+
+The first deploy with #78's diagnostics answered the question it was built to answer. Five rows that
+had failed with `answer is not JSON` now failed with `the answer hit the 800-token cap and was cut off
+(800 completion tokens)`, and the same pass logged the successful ones: 398 and 497 completion tokens
+for a title, a summary and 3-6 tags.
+
+So the empty answers were never empty — `deepseek-v4.1-flash` sometimes writes past 800 tokens and the
+JSON was cut in the middle. The cap is now **2,000**, which is about $0.0006 at $0.30/M out; the
+input cap is the one that actually governs cost. Two rows that measured the old behaviour are in
+`docs/plans/spikes.md`'s spirit rather than asserted in a test: the number came from the box, not from
+a fixture.
 
 ### An unreadable answer is retried at the call (2026-11-26, issue #78)
 
