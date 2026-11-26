@@ -23,6 +23,11 @@ DOCKER="${DOCKER:-docker}"
 CURL="${CURL:-curl}"
 GIT="${GIT:-git}"
 
+# CHECKOUT_BEFORE is the commit the checkout was on before this run synced it. A
+# rollback restores it, so the compose file and the image it starts always describe
+# the same version (review on #95).
+CHECKOUT_BEFORE=""
+
 HEALTH_TIMEOUT="${HARBOR_HEALTH_TIMEOUT:-120}"
 HEALTH_INTERVAL="${HARBOR_HEALTH_INTERVAL:-0.5}"
 
@@ -165,8 +170,15 @@ sync_checkout() {
 		return 0
 	fi
 
+	# A status that fails is not a clean tree. The guard exists to protect a hand
+	# edit, so "git could not tell" has to fail closed: `|| true` here turned a
+	# dubious-ownership refusal into "nothing to see" and let the update run
+	# (review on #95).
 	local dirty
-	dirty="$(git_in_repo status --porcelain 2>/dev/null || true)"
+	if ! dirty="$(git_in_repo status --porcelain 2>/dev/null)"; then
+		status "failed" "could not read the state of the checkout at $ROOT; not updating"
+		return 1
+	fi
 	if [ -n "$dirty" ]; then
 		log "error: $ROOT has local changes:"
 		printf '%s\n' "$dirty" | sed 's/^/  /' >&2
@@ -174,17 +186,38 @@ sync_checkout() {
 		return 1
 	fi
 
+	# Before the merge, not after: this is the commit a rollback returns to.
+	CHECKOUT_BEFORE="$(git_in_repo rev-parse HEAD 2>/dev/null || true)"
+
 	if ! git_in_repo fetch --quiet origin; then
 		log "warning: could not fetch; keeping the compose file as it is"
+		CHECKOUT_BEFORE=""
 		return 0
 	fi
 
 	if ! git_in_repo merge --ff-only --quiet FETCH_HEAD; then
+		CHECKOUT_BEFORE=""
 		status "failed" "the checkout at $ROOT cannot fast-forward; not updating"
 		return 1
 	fi
 
 	log "checkout at $(git_in_repo rev-parse --short HEAD 2>/dev/null || printf '?')"
+	return 0
+}
+
+# restore_checkout puts the checkout back where it was before the sync, for a
+# rollback: the old image must not be started by a compose file from a newer commit.
+# Nothing to do when the run did not sync, and nothing to do when it did not move.
+restore_checkout() {
+	[ -n "$CHECKOUT_BEFORE" ] || return 0
+	local now
+	now="$(git_in_repo rev-parse HEAD 2>/dev/null || true)"
+	[ "$now" = "$CHECKOUT_BEFORE" ] && return 0
+	if git_in_repo reset --hard --quiet "$CHECKOUT_BEFORE"; then
+		log "checkout restored to $(git_in_repo rev-parse --short HEAD 2>/dev/null || printf '?')"
+	else
+		log "warning: could not restore the checkout to $CHECKOUT_BEFORE"
+	fi
 	return 0
 }
 
@@ -374,6 +407,7 @@ job_update() {
 	if ! compose up -d harbor; then
 		reason="recreate failed"
 		rewrite_env_image "$old_ref"
+		restore_checkout
 		compose up -d harbor || log "warning: recreating the old image also failed"
 		status "failed" "$reason"
 		exit 1
@@ -386,6 +420,7 @@ job_update() {
 
 	log "health check failed within ${HEALTH_TIMEOUT}s; rolling back"
 	rewrite_env_image "$old_ref"
+	restore_checkout
 	restore_snapshot || true
 	if ! compose up -d harbor; then
 		log "warning: could not recreate the old image"

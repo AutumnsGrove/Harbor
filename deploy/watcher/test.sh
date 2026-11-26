@@ -112,6 +112,7 @@ FAKE
 #!/usr/bin/env bash
 set -uo pipefail
 printf '%s\n' "$*" >>"$FAKE_STATE/calls"
+printf 'docker %s\n' "$*" >>"$FAKE_STATE/trace"
 args=" $* "
 case "$args" in
 *" snapshots "*)
@@ -167,9 +168,11 @@ FAKE
 # Records every call so a test can assert the order, and answers from state files.
 set -uo pipefail
 printf '%s\n' "$*" >>"$FAKE_STATE/git_calls"
+printf 'git %s\n' "$*" >>"$FAKE_STATE/trace"
 args=" $* "
 case "$args" in
 *" status --porcelain "*)
+	[ -f "$FAKE_STATE/status_fails" ] && exit 128
 	if [ -f "$FAKE_STATE/dirty" ]; then
 		printf ' M docker-compose.yml\n'
 	fi
@@ -181,10 +184,23 @@ case "$args" in
 	;;
 *" merge --ff-only "*)
 	[ -f "$FAKE_STATE/diverged" ] && exit 1
+	touch "$FAKE_STATE/synced"
+	exit 0
+	;;
+*" rev-parse --short "*)
+	if [ -f "$FAKE_STATE/synced" ]; then printf 'def5678\n'; else printf 'abc1234\n'; fi
 	exit 0
 	;;
 *" rev-parse "*)
-	printf 'abc1234\n'
+	if [ -f "$FAKE_STATE/synced" ]; then
+		printf 'def5678901234567890123456789012345678901\n'
+	else
+		printf 'abc1234567890123456789012345678901234567\n'
+	fi
+	exit 0
+	;;
+*" reset --hard "*)
+	rm -f "$FAKE_STATE/synced"
 	exit 0
 	;;
 esac
@@ -239,6 +255,25 @@ image_line() { grep '^HARBOR_IMAGE=' "$WORK/.env"; }
 status_json() { cat "$WORK/update-signal/status.json" 2>/dev/null || printf ''; }
 calls() { cat "$STATE/calls" 2>/dev/null || printf ''; }
 git_calls() { cat "$STATE/git_calls" 2>/dev/null || printf ''; }
+trace() { cat "$STATE/trace" 2>/dev/null || printf ''; }
+
+# comes_first asserts that the line matching $1 appears before the one matching $2 in
+# the interleaved trace. The fakes append to one file precisely so this can compare
+# two different tools' calls; a line number inside git's own log cannot.
+comes_first() {
+	local first second first_at second_at
+	first_at=$(trace | grep -n -- "$1" | head -1 | cut -d: -f1)
+	second_at=$(trace | grep -n -- "$2" | head -1 | cut -d: -f1)
+	if [ -z "$first_at" ]; then
+		no "${3:-order}" "no call matching [$1]"
+	elif [ -z "$second_at" ]; then
+		no "${3:-order}" "no call matching [$2]"
+	elif [ "$first_at" -lt "$second_at" ]; then
+		ok "${3:-order}"
+	else
+		no "${3:-order}" "[$1] came at $first_at, after [$2] at $second_at"
+	fi
+}
 
 # make_checkout gives the fixture the git checkout the real box has, which is what
 # sync_checkout looks for. Without it every other case exercises the "no checkout"
@@ -559,17 +594,75 @@ case_checkout_syncs_before_the_pin() {
 	assert_contains "$(git_calls)" "fetch --quiet origin" "fetches"
 	assert_contains "$(git_calls)" "merge --ff-only" "fast-forwards"
 
-	# Before the pin, so a compose-only change still applies when the image did not
-	# move: the sync is above the "already pinned" branch.
-	local merge_line pin_line
-	merge_line=$(grep -n "merge --ff-only" "$STATE/git_calls" | head -1 | cut -d: -f1)
-	pin_line=$(grep -n "up -d harbor" "$STATE/calls" | head -1 | cut -d: -f1)
-	if [ -n "$merge_line" ] && [ -n "$pin_line" ] && [ "$merge_line" -lt 5 ]; then
-		ok "the sync happens before the container is touched"
-	else
-		no "the sync happens before the container is touched" "merge at line ${merge_line:-?}"
-	fi
+	# Before the container is touched, so the version of the compose file that starts
+	# it is the one we just synced to.
+	comes_first "git .*merge --ff-only" "docker compose .*up -d harbor" \
+		"the sync happens before the container is touched"
 	assert_contains "$(status_json)" '"status":"ok"'
+}
+
+# A rollback must not start the old image with a compose file from the new commit: the
+# two describe the same version or the container comes up wrong (review on #95).
+case_rollback_restores_the_checkout() {
+	current="an unhealthy update puts the checkout back too"
+	setup
+	make_checkout
+	rm -f "$STATE/healthy"   # the new image never becomes healthy
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "rolled back" "the status says it rolled back"
+	assert_contains "$(git_calls)" "reset --hard" "the checkout was restored"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest is the old one"
+	# The reset names the commit the run started from, not whatever is current.
+	assert_contains "$(git_calls)" "abc1234567890123456789012345678901234567" "the reset targets the pre-sync commit"
+}
+
+# Nothing to restore when the run never synced.
+case_rollback_without_a_checkout_touches_no_git() {
+	current="a rollback with no checkout calls no git"
+	setup
+	rm -f "$STATE/healthy"
+	run_watcher
+
+	assert_contains "$(status_json)" "rolled back" "the status says it rolled back"
+	assert_eq "$(git_calls)" "" "git was never called"
+}
+
+# The reason the sync sits above the no-op branch: an update that changes only the
+# compose file must still apply. Without this case the ordering can be moved and the
+# suite stays green (review on #95).
+case_compose_change_applies_when_the_image_did_not_move() {
+	current="an already-pinned image still syncs the checkout"
+	setup
+	make_checkout
+	# .env already points at what :latest resolves to.
+	sed -i.bak "s|^HARBOR_IMAGE=.*|HARBOR_IMAGE=$REPO@$NEW_DIGEST|" "$WORK/.env"
+	rm -f "$WORK/.env.bak"
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "0" "exit code"
+	assert_contains "$(status_json)" "already pinned" "the image was not updated"
+	assert_eq "$(grep -c 'pull harbor' "$STATE/calls")" "0" "nothing was pulled"
+	assert_contains "$(git_calls)" "merge --ff-only" "the checkout was still synced"
+	comes_first "git .*merge --ff-only" "docker compose .*up -d harbor" \
+		"the sync happens before the reconcile"
+}
+
+# git that cannot report its own state is not a clean tree: the guard exists to
+# protect a hand edit, so "could not tell" has to fail closed (review on #95).
+case_unreadable_checkout_state_refuses_to_update() {
+	current="a checkout git cannot read refuses to update"
+	setup
+	make_checkout
+	touch "$STATE/status_fails"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "could not read the state" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest was not pinned"
+	assert_not_contains "$(calls)" "pull harbor" "nothing was pulled"
+	assert_not_contains "$(git_calls)" "merge --ff-only" "nothing was merged"
 }
 
 # A hand-edited box is a thing to look at, not to reset: overwriting it would throw
@@ -653,7 +746,11 @@ for case in \
 	case_dirty_checkout_refuses_to_update \
 	case_diverged_checkout_refuses_to_update \
 	case_fetch_failure_still_updates \
-	case_no_checkout_never_runs_git; do
+	case_no_checkout_never_runs_git \
+	case_compose_change_applies_when_the_image_did_not_move \
+	case_unreadable_checkout_state_refuses_to_update \
+	case_rollback_restores_the_checkout \
+	case_rollback_without_a_checkout_touches_no_git; do
 	"$case"
 done
 
