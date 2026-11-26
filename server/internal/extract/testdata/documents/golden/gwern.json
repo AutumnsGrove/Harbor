@@ -1,0 +1,20 @@
+{
+  "Title": "First, Make Me Care",
+  "Byline": "Gwern",
+  "SiteName": "",
+  "Language": "",
+  "Excerpt": "Writing advice: some nonfiction fails because it opens with background instead of a hook. Find the single anomaly that makes the topic interesting and lead with that.",
+  "Published": "2026-01-14T00:00:00Z",
+  "CoverURL": "https://gwern.net/doc/ai/nn/diffusion/imagen/2026-02-07-thinkingface.jpg",
+  "Text": "\u003e \"Venice built a maritime empire from a city that couldn't feed itself; so who fed it?\"\n\nThat sentence creates a question you want answered, and you keep reading. Most\nnonfiction introductions do not do that — they start with background.\n\nWhen writing, first, make the reader care. See the [maritime empire of *Venice*](https://en.wikipedia.org/wiki/Stato_da_M%C3%A0r)\nfor the example, and the [notes](/notes/hooks) for the rest.\n\n---\n\nA rule line above is a separator here, not a closing fence for anything.",
+  "Markdown": "\u003e \"Venice built a maritime empire from a city that couldn't feed itself; so who fed it?\"\n\nThat sentence creates a question you want answered, and you keep reading. Most\nnonfiction introductions do not do that — they start with background.\n\nWhen writing, first, make the reader care. See the [maritime empire of *Venice*](https://en.wikipedia.org/wiki/Stato_da_M%C3%A0r)\nfor the example, and the [notes](/notes/hooks) for the rest.\n\n---\n\nA rule line above is a separator here, not a closing fence for anything.",
+  "OG": {
+    "title": "First, Make Me Care",
+    "description": "Writing advice: some nonfiction fails because it opens with background instead of a hook. Find the single anomaly that makes the topic interesting and lead with that.",
+    "image": "https://gwern.net/doc/ai/nn/diffusion/imagen/2026-02-07-thinkingface.jpg",
+    "url": "https://gwern.net/blog/2026/make-me-care",
+    "author": "Gwern",
+    "publishedTime": "2026-01-14"
+  },
+  "Details": null
+}

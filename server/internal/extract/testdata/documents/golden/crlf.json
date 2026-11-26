@@ -1,0 +1,19 @@
+{
+  "Title": "Quoted and CRLF",
+  "Byline": "Someone",
+  "SiteName": "",
+  "Language": "",
+  "Excerpt": "",
+  "Published": "2026-02-03T00:00:00Z",
+  "CoverURL": "https://cdn.example/cover.png",
+  "Text": "First paragraph.\n\nSecond paragraph.",
+  "Markdown": "First paragraph.\n\nSecond paragraph.",
+  "OG": {
+    "title": "Quoted and CRLF",
+    "image": "https://cdn.example/cover.png",
+    "url": "https://example.test/quoted",
+    "author": "Someone",
+    "publishedTime": "2026-02-03"
+  },
+  "Details": null
+}

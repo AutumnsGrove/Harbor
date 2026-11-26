@@ -140,6 +140,7 @@ property holds.** Seeds live in `testdata/fuzz/<FuzzName>/` next to the test.
 | `FuzzCanonicalURL` | 2 | arbitrary bytes/strings | never panics; output parses as a URL or is rejected; **idempotent**; scheme restricted to http/https; fragment always gone; `utm_*`/`fbclid` gone; non-tracking query preserved |
 | `FuzzJobEnvelope` | 2 | `contracts/`-shaped JSON | unknown fields ignored or rejected consistently; missing required fields rejected; never panics; blob list bounded |
 | `FuzzHTMLExtract` | 3 | HTML bytes | no panic; output is valid UTF-8; text length bounded by input × factor; a 5 MB cap is enforced *before* parse |
+| `FuzzDocumentExtract` | 3 | Markdown/plain-text bytes | no panic; valid UTF-8; caps hold (text, markdown, title, excerpt); plain text never yields metadata; `content_text` and `content_md` are the same bytes |
 | `FuzzFTSQuery` | 3 | user search strings | never produces an SQL error or an injection; snippets are well-formed; empty/whitespace returns empty |
 | `FuzzTelegramUpdate` | 4 | webhook JSON | dedupe by update id; album grouping by `(chat_id, media_group_id)` terminates; wrong-secret and non-owner senders never reach the queue |
 | `FuzzImportRow` | 5 | CSV/HTML row bytes | malformed rows are skipped with a warning, never abort the import; canonical URL idempotence holds per row |

@@ -400,3 +400,24 @@ Demo:
   record the schema in the prompt file).
 - The embedding input: title + summary + first N chars of content (cap it) — record N and why.
 - Where `is_paywalled` is surfaced on the card versus the item page.
+
+### Documents: Markdown and plain text (2026-11-26, issue #73)
+
+A page can be worth reading and not be HTML. gwern.net answers Harbor with
+`text/markdown; charset=utf-8` and a YAML front matter block, and the pipeline refused it as
+`content type … is not HTML` — three real saves. `text/plain` was worse: it *was* accepted by the
+HTML reader, so a text file went into a parser that found no article and failed permanently.
+
+- `extract.Document` reads both: the body stays as it is in `content_text` **and** `content_md`,
+  and Markdown syntax is deliberately not stripped. A hand-written stripper would be a second parser
+  in the one place that must not lose text, FTS5's tokenizer already drops the punctuation, and a
+  chat model reads Markdown natively. If search quality says otherwise, that is phase 10's
+  measurement to make.
+- Front matter is read as a **flat** `key: value` block — the static-site shape — and not as YAML.
+  An unrecognised line is skipped rather than rejected, and an unclosed fence is not front matter at
+  all (a file may simply start with a horizontal rule).
+- `extract_version` is **not** bumped. The old behaviour for these types was a permanent failure, so
+  no stored row was extracted under the old rule and none is stale; bumping would make 1,313 `ready`
+  rows disagree with the constant without a re-read to justify it.
+- The SSRF guard, the byte cap and the retry budget are unchanged. A PDF and an image still fail
+  here, on purpose, until phase 6 gives them a reader.

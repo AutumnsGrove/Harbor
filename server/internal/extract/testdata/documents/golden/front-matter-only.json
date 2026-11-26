@@ -1,0 +1,17 @@
+{
+  "Title": "Notes with no body",
+  "Byline": "",
+  "SiteName": "",
+  "Language": "",
+  "Excerpt": "A file that holds metadata and nothing to read.",
+  "Published": null,
+  "CoverURL": "",
+  "Text": "",
+  "Markdown": "",
+  "OG": {
+    "title": "Notes with no body",
+    "description": "A file that holds metadata and nothing to read.",
+    "url": "https://example.test/meta-only"
+  },
+  "Details": null
+}

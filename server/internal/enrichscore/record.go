@@ -187,11 +187,11 @@ func capture(ctx context.Context, fetcher enrich.Fetcher, source Source) (*extra
 	}
 	defer fetched.Close()
 
-	// Production refuses a non-HTML page before extraction (a PDF is a
+	// Production refuses a page with no reader before extraction (a PDF is a
 	// permanent failure until phase 6), so a capture of one could never be a
-	// scored save.
-	if !enrich.IsHTML(fetched.ContentType) {
-		return nil, fmt.Errorf("content type %q is not HTML", fetched.ContentType)
+	// scored save. It reads the same three shapes the pipeline does.
+	if !extract.IsHTML(fetched.ContentType) && !extract.IsDocument(fetched.ContentType) {
+		return nil, fmt.Errorf("content type %q is not readable", fetched.ContentType)
 	}
 
 	base := fetched.URL
@@ -202,6 +202,9 @@ func capture(ctx context.Context, fetcher enrich.Fetcher, source Source) (*extra
 	// the item, classifies it from the title and OG metadata, and the exit demo
 	// counts what the owner thinks of that. Only a capture with nothing at all
 	// is useless.
+	if extract.IsDocument(fetched.ContentType) {
+		return extract.Document(fetched.Body, fetched.ContentType, base)
+	}
 	return extract.HTML(fetched.Body, base)
 }
 

@@ -1,0 +1,3 @@
+A plain text file, not Markdown.
+
+It has paragraphs and no metadata.
