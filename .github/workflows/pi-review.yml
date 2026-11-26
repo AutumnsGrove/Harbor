@@ -2,13 +2,15 @@
 # Edit the settings file, not this workflow. The job lives once, in
 # AutumnsGrove/pi-extensions/.github/workflows/pi-review-reusable.yml, and runs from @main,
 # so a fix there reaches this repository without a commit here.
+#
+# TEMPORARILY PARKED 2026-11-26 while claude-code-review is tuned. The reusable
+# job and .github/pi-review.json are unchanged; restore the `pull_request` and
+# `issue_comment` triggers below (and delete this note) to bring it back. A
+# manual dispatch has no pull request, so the job skips.
 name: pi-review
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 concurrency:
   group: >-

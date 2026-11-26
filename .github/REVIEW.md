@@ -1,7 +1,8 @@
 # Notes for the reviewer
 
-Guidance for `pi-review`. Read the repository's own instructions first; this file says only where a
-review's turns are worth spending.
+Guidance for `pi-review`. The Claude reviewer reads the "Reviewing a pull request" section of
+`CLAUDE.md`, which is restored from the base branch; keep the two in step. Read the repository's own
+instructions first; this file says only where a review's turns are worth spending.
 
 ## What this job can run
 
