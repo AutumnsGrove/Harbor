@@ -284,6 +284,21 @@ func waitForRun(t *testing.T, h http.Handler) importStatusResponse {
 	return importStatusResponse{}
 }
 
+// waitForRows blocks until the library holds at least n items. A fixed sleep is a
+// guess about how fast the machine is; the import says when a row has landed, and
+// waiting for that is both faster and reliable.
+func waitForRows(t *testing.T, library *store.Store, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if itemCount(t, library) >= n {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("fewer than %d rows landed in 5 seconds", n)
+}
+
 // Cancel stops the run at the next record and closes it as cancelled, which is
 // what makes the same file resumable.
 func TestImportCancelStopsTheRun(t *testing.T) {
@@ -293,8 +308,11 @@ func TestImportCancelStopsTheRun(t *testing.T) {
 		t.Fatalf("POST /api/import = %d: %s", rec.Code, rec.Body.String())
 	}
 	waitForRun(t, h)
-	// Long enough for rows to land, short enough that the file is not finished.
-	time.Sleep(25 * time.Millisecond)
+	// Wait for a row rather than sleeping a guessed interval. This test is about a
+	// cancel arriving while rows are landing; 25 ms was a guess about the machine,
+	// and a loaded CI runner missed it — the run was cancelled before its first
+	// write and the test failed itself on "wrote nothing at all" (2026-11-26).
+	waitForRows(t, library, 1)
 
 	if rec := authed(h, http.MethodPost, "/api/import/cancel"); rec.Code != http.StatusAccepted {
 		t.Fatalf("POST /api/import/cancel = %d: %s", rec.Code, rec.Body.String())
@@ -307,8 +325,10 @@ func TestImportCancelStopsTheRun(t *testing.T) {
 	if status.Run.State != store.ImportCancelled {
 		t.Fatalf("state = %q, want cancelled: the file had not been read to the end", status.Run.State)
 	}
-	if n := itemCount(t, library); n == 0 {
-		t.Error("a cancelled run wrote nothing at all; that is a failure, not a cancel")
+	// At least one row is guaranteed by waitForRows and the end of the file is
+	// excluded by the report below, so the cancel left the library part-written.
+	if n := itemCount(t, library); n >= 2_000 {
+		t.Errorf("the run finished all %d rows before the cancel landed", n)
 	}
 	if status.Run.Report == nil || status.Run.Report.Total >= 2_000 {
 		t.Errorf("report = %+v, want a run that stopped before the end", status.Run.Report)
