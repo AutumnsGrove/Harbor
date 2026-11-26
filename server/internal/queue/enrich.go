@@ -32,7 +32,6 @@ type Enricher struct {
 	log       *slog.Logger
 	cadence   time.Duration
 	batch     int
-	failed    int
 
 	mu      sync.Mutex
 	lastRun time.Time
@@ -65,13 +64,13 @@ func (e *Enricher) Run(ctx context.Context) {
 	ticker := time.NewTicker(e.cadence)
 	defer ticker.Stop()
 	for {
-		if n, err := e.Pass(ctx); err != nil {
+		if processed, failed, err := e.Pass(ctx); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			e.log.Error("enrichment pass failed", "error", err)
-		} else if n > 0 {
-			e.log.Info("enrichment pass finished", "items", n, "failed", e.failed)
+			e.log.Error("enrichment pass failed", "processed", processed, "failed", failed, "error", err)
+		} else if processed > 0 {
+			e.log.Info("enrichment pass finished", "processed", processed, "failed", failed)
 		}
 		select {
 		case <-ctx.Done():
@@ -83,43 +82,50 @@ func (e *Enricher) Run(ctx context.Context) {
 
 // Pass drains queued items in batches until the queue is empty, bounded by
 // maxDrain so one pass cannot run forever.
-func (e *Enricher) Pass(ctx context.Context) (int, error) {
+//
+// Both counts belong to this pass: processed is the rows it took, failed is how
+// many of those failed, so failed is never larger than processed. The second
+// number used to be a field that was never reset, which is how a pass that took
+// 5 rows reported "failed:11" (issue #80).
+func (e *Enricher) Pass(ctx context.Context) (processed int, failed int, err error) {
 	total := 0
 	for total < maxDrain {
 		items, err := e.store.QueuedItems(ctx, e.batch)
 		if err != nil {
 			e.record(err)
-			return total, err
+			return total, failed, err
 		}
 		if len(items) == 0 {
 			e.record(nil)
-			return total, nil
+			return total, failed, nil
 		}
 		for _, item := range items {
 			if err := ctx.Err(); err != nil {
-				return total, err
+				return total, failed, err
 			}
 			if e.processor != nil {
 				// A failed item has already recorded its retry on the row, so
 				// the next QueuedItems call will not return it; the batch keeps
 				// going regardless (plans/03 test 14).
 				if err := e.processor.Process(ctx, item); err != nil {
-					e.failed++
-					e.log.Error("enrichment item failed", "item", item.ID, "error", err)
+					// Counted, not logged: the pipeline writes the one line that
+					// says whether the row was parked or scheduled, and it knows
+					// both (issue #80).
+					failed++
 				}
 			} else if err := e.store.MarkReady(ctx, item.ID); err != nil {
 				e.record(err)
-				return total, err
+				return total, failed, err
 			}
 			total++
 		}
 		if len(items) < e.batch {
 			e.record(nil)
-			return total, nil
+			return total, failed, nil
 		}
 	}
 	e.record(nil)
-	return total, nil
+	return total, failed, nil
 }
 
 func (e *Enricher) record(err error) {

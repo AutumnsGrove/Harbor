@@ -1,9 +1,11 @@
 package enrich
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"testing"
@@ -942,4 +944,71 @@ func TestShortenIsBoundedAndValidUTF8(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A failure is one log line, and the level is the outcome. Before #80 a single
+// failed item wrote three lines at two levels — "video metadata unavailable",
+// "enrichment failed", then "enrichment item failed" — so eleven parked rows read
+// as an error storm in `docker logs`.
+func TestOneFailureWritesOneLine(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   error
+		level string
+	}{
+		{"parked", &fetch.HTTPError{URL: "https://example.com/gone", Status: 404}, "INFO"},
+		{"retrying", &fetch.HTTPError{URL: "https://example.com/a", Status: 503}, "WARN"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openStore(t)
+			var logged bytes.Buffer
+			f, d, w, em := happyFakes()
+			f.err = tc.err
+			en := newTestEnricher(t, s, f, d, w, em)
+			en.Log = slog.New(slog.NewJSONHandler(&logged, nil))
+
+			item := createItem(t, s, store.ItemInput{ID: "one", URL: ptr("https://example.com/x")})
+			if err := en.Process(context.Background(), item); err == nil {
+				t.Fatal("Process accepted a failing fetch")
+			}
+
+			lines := nonEmptyLines(logged.String())
+			if len(lines) != 1 {
+				t.Fatalf("logged %d lines for one failure, want 1:\n%s", len(lines), logged.String())
+			}
+			if !strings.Contains(lines[0], `"level":"`+tc.level+`"`) {
+				t.Errorf("level = %s, want %s: %s", lineLevel(lines[0]), tc.level, lines[0])
+			}
+			if !strings.Contains(lines[0], item.ID) {
+				t.Errorf("the line does not say which item: %s", lines[0])
+			}
+			if strings.Contains(lines[0], "enrichment item failed") {
+				t.Errorf("the loop still logs its own copy: %s", lines[0])
+			}
+		})
+	}
+}
+
+func nonEmptyLines(s string) []string {
+	lines := []string{}
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func lineLevel(line string) string {
+	const key = `"level":"`
+	start := strings.Index(line, key)
+	if start < 0 {
+		return ""
+	}
+	rest := line[start+len(key):]
+	if end := strings.IndexByte(rest, '"'); end >= 0 {
+		return rest[:end]
+	}
+	return ""
 }

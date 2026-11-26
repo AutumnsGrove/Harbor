@@ -30,7 +30,7 @@ func TestEnricherDrainsTheQueueInBatches(t *testing.T) {
 	enricher := NewEnricher(s, nil, nil)
 	enricher.batch = 2 // force more than one round trip
 
-	n, err := enricher.Pass(ctx)
+	n, _, err := enricher.Pass(ctx)
 	if err != nil {
 		t.Fatalf("Pass: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestEnricherDrainsTheQueueInBatches(t *testing.T) {
 	if _, err := s.CreateItem(ctx, storeInput("d")); err != nil {
 		t.Fatalf("CreateItem: %v", err)
 	}
-	if n, err = enricher.Pass(ctx); err != nil || n != 1 {
+	if n, _, err = enricher.Pass(ctx); err != nil || n != 1 {
 		t.Errorf("second Pass = %d, %v; want 1", n, err)
 	}
 	if run, problem := enricher.Status(); run.IsZero() || problem != "" {
@@ -92,15 +92,15 @@ func TestEnricherRunsTheProcessorAndKeepsGoingAfterAFailure(t *testing.T) {
 	processor := &recordingProcessor{store: s, errs: map[string]error{"a": errors.New("boom")}}
 	enricher := NewEnricher(s, processor, nil)
 
-	n, err := enricher.Pass(ctx)
+	n, failed, err := enricher.Pass(ctx)
 	if err != nil {
 		t.Fatalf("Pass: %v", err)
 	}
 	if n != 2 || len(processor.calls) != 2 {
 		t.Fatalf("Pass = %d, calls = %v; want both items attempted", n, processor.calls)
 	}
-	if enricher.failed != 1 {
-		t.Errorf("failed = %d, want 1", enricher.failed)
+	if failed != 1 {
+		t.Errorf("failed = %d, want 1", failed)
 	}
 	a, _ := s.GetItem(ctx, "a")
 	if a.State != model.StateFailed {
@@ -112,5 +112,41 @@ func TestEnricherRunsTheProcessorAndKeepsGoingAfterAFailure(t *testing.T) {
 	}
 	if queued, _ := s.QueuedItems(ctx, 10); len(queued) != 0 {
 		t.Errorf("queue still holds %d items", len(queued))
+	}
+}
+
+// The failed count belongs to the pass that produced it. It used to be a field on
+// the Enricher that was never reset, so a pass that took 5 rows could report
+// "failed:11" — the failures of every pass since the process started (issue #80).
+func TestFailedCountBelongsToThePass(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateItem(ctx, storeInput("a")); err != nil {
+		t.Fatal(err)
+	}
+	processor := &recordingProcessor{store: s, errs: map[string]error{"a": errors.New("boom")}}
+	enricher := NewEnricher(s, processor, nil)
+
+	if processed, failed, err := enricher.Pass(ctx); err != nil || processed != 1 || failed != 1 {
+		t.Fatalf("first pass = %d processed, %d failed, %v; want 1 and 1", processed, failed, err)
+	}
+
+	// A second pass with a row that succeeds must not inherit the first pass's
+	// failure.
+	if _, err := s.CreateItem(ctx, storeInput("b")); err != nil {
+		t.Fatal(err)
+	}
+	processed, failed, err := enricher.Pass(ctx)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if processed != 1 {
+		t.Errorf("second pass processed = %d, want 1", processed)
+	}
+	if failed != 0 {
+		t.Errorf("second pass failed = %d, want 0: the count carried over from the first pass", failed)
+	}
+	if failed > processed {
+		t.Errorf("failed (%d) is larger than processed (%d): the two numbers cannot be read together", failed, processed)
 	}
 }
