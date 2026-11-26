@@ -256,18 +256,27 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		}
 		defer page.Close()
 
-		if !IsHTML(page.ContentType) {
-			cause := permanent(fmt.Errorf("content type %q is not HTML", page.ContentType))
+		base := page.URL
+		if base == nil {
+			base = &url.URL{}
+		}
+
+		// Three readable shapes, one refusal. A Markdown or plain-text body is read
+		// as text instead of being fed to an HTML parser that would find no
+		// article in it (issue #73); anything else — a PDF, an image, a zip — is
+		// still a permanent failure until its own phase gives it a reader.
+		switch {
+		case extract.IsHTML(page.ContentType):
+			extracted, err = extract.HTML(page.Body, base)
+		case extract.IsDocument(page.ContentType):
+			extracted, err = extract.Document(page.Body, page.ContentType, base)
+		default:
+			cause := permanent(fmt.Errorf("content type %q is not readable", page.ContentType))
 			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
 				return handled
 			}
 			return cause
 		}
-		base := page.URL
-		if base == nil {
-			base = &url.URL{}
-		}
-		extracted, err = extract.HTML(page.Body, base)
 		if err != nil {
 			cause := permanent(err)
 			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
@@ -565,19 +574,6 @@ func classifyFetchError(err error) error {
 		}
 	}
 	return err
-}
-
-// IsHTML reports whether a fetched content type is one the pipeline can
-// extract. It is exported because the scored set captures pages with the same
-// rule: a capture the pipeline would have refused before extraction is not a
-// save, and must never become a scored case.
-func IsHTML(contentType string) bool {
-	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
-	switch mediaType {
-	case "text/html", "application/xhtml+xml", "application/xml", "text/xml", "text/plain":
-		return true
-	}
-	return false
 }
 
 func hasURL(item model.Item) bool {

@@ -717,3 +717,74 @@ func TestProcessRetriesWhenTheMetadataEndpointIsBusy(t *testing.T) {
 		})
 	}
 }
+
+// A Markdown page is read as a document rather than refused: the body becomes
+// text and Markdown, its front matter becomes the cover and the date, and the
+// item reaches ready (issue #73).
+func TestProcessEnrichesAMarkdownPage(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	item := createItem(t, s, store.ItemInput{
+		ID: "a", URL: ptr("https://gwern.net/blog/2026/make-me-care"), Title: "First, Make Me Care",
+	})
+
+	f, d, w, em := happyFakes()
+	final, _ := url.Parse("https://gwern.net/blog/2026/make-me-care")
+	f.final = final
+	f.contentType = "text/markdown; charset=utf-8"
+	f.body = "---\ntitle: 'First, Make Me Care'\ndescription: \"Writing advice about hooks.\"\nthumbnail: /img/thinkingface.jpg\ncreated: 2026-01-14\n---\n\nVenice built a maritime empire from a city that could not feed itself.\n"
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	enriched, err := s.GetItem(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if enriched.State != model.StateReady {
+		t.Fatalf("state = %q (%s), want ready", enriched.State, enriched.LastError)
+	}
+	if !strings.Contains(enriched.ContentText, "maritime empire") {
+		t.Errorf("content_text = %q, want the document body", enriched.ContentText)
+	}
+	if !strings.Contains(enriched.OGJSON, "https://gwern.net/img/thinkingface.jpg") {
+		t.Errorf("og_json = %q, want the cover resolved against the page", enriched.OGJSON)
+	}
+	if d.calls != 1 || !strings.Contains(d.last.Text, "maritime empire") {
+		t.Errorf("decide input = %+v, want the document body", d.last)
+	}
+	if w.calls != 1 || !strings.Contains(w.last.Text, "maritime empire") {
+		t.Errorf("writer input = %+v", w.last)
+	}
+	if len(enriched.ContentText) == 0 {
+		t.Error("no text was stored for a readable document")
+	}
+}
+
+// A plain text file is a document too; it used to be handed to the HTML parser.
+func TestProcessEnrichesAPlainTextPage(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	item := createItem(t, s, store.ItemInput{
+		ID: "a", URL: ptr("https://example.test/notes.txt"), Title: "notes.txt",
+	})
+
+	f, d, w, em := happyFakes()
+	f.contentType = "text/plain; charset=utf-8"
+	f.body = "A plain text file, not Markdown.\n\nIt has paragraphs and no metadata.\n"
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	enriched, _ := s.GetItem(ctx, item.ID)
+	if enriched.State != model.StateReady {
+		t.Fatalf("state = %q (%s), want ready", enriched.State, enriched.LastError)
+	}
+	if !strings.Contains(enriched.ContentText, "It has paragraphs") {
+		t.Errorf("content_text = %q", enriched.ContentText)
+	}
+	if enriched.OGJSON != "" && strings.Contains(enriched.OGJSON, "image") {
+		t.Errorf("og_json invented a cover for a text file: %q", enriched.OGJSON)
+	}
+}
