@@ -67,6 +67,13 @@ type itemDTO struct {
 	// only; a list stays lean, and an unenriched row has nothing to send.
 	Details map[string]any `json:"details,omitempty"`
 
+	// Filed without its page, which is not a failure (design §6, issue #76).
+	// Walled is a site that refused this client; LinkStatus says "dead" when the
+	// page is gone. Each is an amber badge on the card, and neither appears in
+	// Needs attention.
+	Walled     bool   `json:"walled,omitempty"`
+	LinkStatus string `json:"linkStatus,omitempty"`
+
 	CreatedAt time.Time  `json:"createdAt"`
 	SavedAt   time.Time  `json:"savedAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
@@ -107,11 +114,22 @@ func toDTO(item model.Item) itemDTO {
 		Attempts:    item.Attempts,
 		LastError:   item.LastError,
 		Cover:       coverVersion(item),
+		Walled:      item.Walled(),
+		LinkStatus:  linkStatusOf(item),
 		CreatedAt:   item.CreatedAt,
 		SavedAt:     item.SavedAt,
 		UpdatedAt:   item.UpdatedAt,
 		DeletedAt:   item.DeletedAt,
 	}
+}
+
+// linkStatusOf sends the verdict only when it is news: "ok" is every row's
+// default and would be noise on every card (design §7, issue #76).
+func linkStatusOf(item model.Item) string {
+	if item.LinkStatus == model.LinkOK {
+		return ""
+	}
+	return item.LinkStatus
 }
 
 // requireLibrary answers 503 rather than panicking when the binary was built

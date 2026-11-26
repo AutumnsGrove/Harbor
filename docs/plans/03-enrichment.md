@@ -118,8 +118,9 @@ anchor's `text_hash` in phase 8. (The first draft of this plan listed `summary`,
 
 14. Retry 3× with backoff over ~an hour (time injected, not slept), then `failed` with `last_error`
     stored, and the item still exists, visible, with `state='failed'`.
-15. A permanently bad URL (404) fails fast without consuming the whole retry budget (typed
-    `ErrPermanent`), while a 503 retries.
+15. A permanently bad URL fails fast without consuming the whole retry budget (typed
+    `ErrPermanent`), while a 503 retries. A 404 is not that case any more (issue #76): it files the
+    row as a dead link. A 400 from the page is what fails fast.
 16. **Retries live on the item.** `attempts`, `next_attempt_at` and `last_error` advance per failure;
     the Worker job is already `done` and is never touched again; after the third failure `state`
     is `failed`.
@@ -212,8 +213,10 @@ Decisions made here:
   exactly that string is stored so re-embedding can be skipped later.
 - **A summary is required**; more than 8 tags is a shape failure (retry, not truncation). 0 tags is
   allowed.
-- **Two retries, then park**: 15 min then 45 min, three attempts in total; a 404, a blocked address,
-  an oversized body, a non-HTML content type and a wrong-sized vector are terminal immediately.
+- **Two retries, then park**: 15 min then 45 min, three attempts in total; a blocked address, an
+  oversized body, a non-HTML content type and a wrong-sized vector are terminal immediately. A 429
+  gets its own longer budget (5 tries over ~16 h, design §6), and a 403, 404 or NXDOMAIN is not a
+  failure at all: the row is filed with a badge (issues #76, #79).
 - **PDFs are terminal until phase 6.** The item stays, the reason is `last_error`, and the attention
   strip (still to land) will show it.
 - **The layout follows the data, not the label, in one case only.** If the item's kind is the
@@ -378,8 +381,8 @@ Demo:
 2. Within a minute each has a kind, 3–6 tags, a summary, and a clean title. Count how many the human
    agrees with — that number is the phase's real result.
 3. Keyword-search a phrase that only exists in the article body → the item is found with a snippet.
-4. Save a URL that 404s → item exists, amber "couldn't fetch" strip appears, one-tap retry works
-   after the fixture server starts serving it.
+4. Save a URL that 404s → item exists, `ready`, badged "link dead", and **not** in the attention
+   strip; one-tap "try again" re-reads it after the fixture server starts serving it.
 5. Stop the Nova key (bad token) → items still save, still appear, and enrichment failures queue
    visibly; no save is lost.
 6. Re-enrich one item after editing the prompt version → tags change, `kind_source=manual` items keep

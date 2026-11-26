@@ -40,14 +40,27 @@ const (
 	DefaultPromptVersion  = "tag.v1"
 	DefaultExtractVersion = "extract.v1"
 
+	// WallVersion and DeadVersion are what a row records when the page would not
+	// be read: a site that refuses this client, and a page that is gone. They are
+	// not prompts — no model ran — which is the point: the API badges a row by
+	// them and a manual retry clears them (design §6, issues #76, #79). The
+	// values live in model, because the badge is decided there too.
+	WallVersion = model.WallVersion
+	DeadVersion = model.DeadVersion
+
 	// EmbeddingDims is pplx-embed-v1-0.6b's dimension (spike S5). A different
 	// model means changing this deliberately, not silently accepting a vector
 	// of the wrong size.
 	EmbeddingDims = 1024
 
-	// MaxAttempts is three tries in total, matching the "could not be enriched
-	// after three tries" copy in the attention strip.
+	// MaxAttempts is three tries in total for a broken answer, matching the
+	// "could not be enriched after three tries" copy in the attention strip.
 	MaxAttempts = 3
+
+	// RateLimitedAttempts is the longer budget for a site that asked us to come
+	// back later. A 429 is a promise, not a fault, so parking it inside the hour
+	// would throw away a save a slower retry would file (design §6).
+	RateLimitedAttempts = 5
 
 	// Input caps. The embedding text is title + summary + the first 2,000
 	// characters of the body: enough to place the item next to its neighbours
@@ -168,6 +181,7 @@ type Embedder interface {
 type Store interface {
 	ApplyEnrichment(ctx context.Context, id string, e store.Enrichment) (model.Item, error)
 	ApplyVideoMetadata(ctx context.Context, id string, m store.VideoMetadata) (model.Item, error)
+	ApplyUnreadable(ctx context.Context, id string, u store.Unreadable) (model.Item, error)
 	RecordEnrichmentFailure(ctx context.Context, id, message string, next *time.Time) (model.Item, error)
 	TagVocabulary(ctx context.Context, limit int) ([]string, error)
 }
@@ -209,12 +223,34 @@ func New(f Fetcher, d Decider, w Writer, e Embedder, s Store, log *slog.Logger) 
 }
 
 // RetryDelay is how long an item waits after the given failure. Two delays
-// before the third (terminal) failure add up to about an hour.
+// before the third (terminal) failure add up to about an hour. A rate-limited
+// answer uses RateLimitedDelay instead, so it can outlive that budget.
 func RetryDelay(attempt int) time.Duration {
 	if attempt <= 1 {
 		return 15 * time.Minute
 	}
 	return 45 * time.Minute
+}
+
+// RateLimitedDelay is the wait after a 429, by attempt. It runs longer than a
+// broken answer's because the site told us the page is still there.
+func RateLimitedDelay(attempt int) time.Duration {
+	switch {
+	case attempt <= 1:
+		return 15 * time.Minute
+	case attempt == 2:
+		return 45 * time.Minute
+	case attempt == 3:
+		return 3 * time.Hour
+	default:
+		return 12 * time.Hour
+	}
+}
+
+// retriesRateLimited reports a site that asked us to slow down.
+func retriesRateLimited(err error) bool {
+	var httpErr *fetch.HTTPError
+	return errors.As(err, &httpErr) && httpErr.RateLimited()
 }
 
 // Process enriches one item and records either success or failure on the item
@@ -251,8 +287,14 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		page, err := e.Fetcher.Fetch(ctx, *item.URL)
 		if err != nil {
 			cause := classifyFetchError(err)
+			// A video is still worth a real row even when its page refuses us;
+			// the zero-cost metadata endpoint is the better answer, so it is
+			// tried before anything is filed thin.
 			if done, handled := e.tryVideoMetadata(ctx, item, nil, cause); done || handled != nil {
 				return handled
+			}
+			if refusal, ok := refusalOf(err); ok {
+				return e.fileUnreadable(ctx, item, nil, refusal)
 			}
 			return cause
 		}
@@ -542,9 +584,20 @@ func (e *Enricher) fail(ctx context.Context, item model.Item, cause error) error
 
 	attempt := item.Attempts + 1
 	var next *time.Time
-	if !isPermanent(cause) && attempt < MaxAttempts {
-		at := e.Now().Add(RetryDelay(attempt))
-		next = &at
+	if !isPermanent(cause) {
+		switch {
+		case retriesRateLimited(cause):
+			// A 429 outlives the broken budget: the site said the page is there.
+			if attempt < RateLimitedAttempts {
+				at := e.Now().Add(RateLimitedDelay(attempt))
+				next = &at
+			}
+		default:
+			if attempt < MaxAttempts {
+				at := e.Now().Add(RetryDelay(attempt))
+				next = &at
+			}
+		}
 	}
 	if _, err := e.Store.RecordEnrichmentFailure(ctx, item.ID, cause.Error(), next); err != nil {
 		e.Log.Error("recording an enrichment failure", "item", item.ID, "error", err)
@@ -648,6 +701,75 @@ func embeddingText(title, summary, text string) string {
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
+// --- a page that will not be read -----------------------------------------
+
+// refusal is a page that answered and still cannot be read: the site refusing
+// this client, or the page being gone. Neither is a failure — the save is hers
+// — so the row is filed with what it already carries and a marker saying why it
+// is thin (design §6, issue #76).
+
+type refusal struct {
+	marker string
+	reason string
+	dead   bool
+}
+
+// refusalOf turns a fetch error into a refusal, or reports that this is not one
+// of those answers. A wall is 401, 403 and 451; a death is 404, 410 and a host
+// that no longer resolves. A sinkholed or private answer is not a refusal: that
+// is the guard doing its job, and it is reported as what it is.
+func refusalOf(err error) (refusal, bool) {
+	var httpErr *fetch.HTTPError
+	if errors.As(err, &httpErr) {
+		switch {
+		case httpErr.Walled():
+			return refusal{
+				marker: WallVersion,
+				reason: "the site refuses this client (" + shorten(err, 120) + "); filed from what the save has, with no summary or tags",
+			}, true
+		case httpErr.Dead():
+			return refusal{
+				marker: DeadVersion,
+				reason: "the page is gone (" + shorten(err, 120) + "); filed from what the save has, with no summary or tags",
+				dead:   true,
+			}, true
+		}
+	}
+	if errors.Is(err, fetch.ErrDeadLink) {
+		return refusal{
+			marker: DeadVersion,
+			reason: "the host no longer resolves (" + shorten(err, 120) + "); filed from what the save has, with no summary or tags",
+			dead:   true,
+		}, true
+	}
+	return refusal{}, false
+}
+
+// fileUnreadable writes the row the page would not give up. It is the same
+// shape as filing a refused video: ready, titled, and honest about what it does
+// not have — and no model call, because there is no text to read.
+func (e *Enricher) fileUnreadable(ctx context.Context, item model.Item, extracted *extract.Result, r refusal) error {
+	title := ""
+	if extracted != nil {
+		title = strings.TrimSpace(extracted.Title)
+	}
+	_, err := e.Store.ApplyUnreadable(ctx, item.ID, store.Unreadable{
+		Title:  title,
+		Reason: r.reason,
+		Marker: r.marker,
+		Dead:   r.dead,
+	})
+	if err != nil {
+		return err
+	}
+	e.Log.Info("filed a save the page would not give up",
+		"item", item.ID,
+		"outcome", r.marker,
+		"reason", r.reason,
+	)
+	return nil
+}
+
 // --- errors ----------------------------------------------------------------
 
 // permanentError is a failure another attempt cannot fix: a 404, a PDF, a
@@ -675,7 +797,10 @@ func classifyFetchError(err error) error {
 		}
 		return err
 	}
-	for _, terminal := range []error{fetch.ErrBlocked, fetch.ErrTooLarge, fetch.ErrTooManyRedirects, fetch.ErrUnsupportedURL} {
+	// A name that does not resolve is a dead link, handled before this function
+	// is asked what to retry; listing it here keeps a caller that forgets from
+	// spending a retry budget on a host that is not there.
+	for _, terminal := range []error{fetch.ErrBlocked, fetch.ErrTooLarge, fetch.ErrTooManyRedirects, fetch.ErrUnsupportedURL, fetch.ErrDeadLink} {
 		if errors.Is(err, terminal) {
 			return permanent(err)
 		}

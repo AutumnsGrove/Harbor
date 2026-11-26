@@ -527,6 +527,40 @@ returning it to Needs attention. Only a 404, or a refusal with no title to file 
 failure. Treating the two as one answer retired five real saves, and a retry could never have
 changed it (issue #79).
 
+**A wall is not a failure either.** 401, 403 and 451 mean the site will not serve *this client*, and
+about 40 of the library's failed rows were one of those — a paywall, a bot wall, a sign-in. Nothing
+about a retry could change the answer, and the save is hers: the title, the note and the source URL
+are all still there. So the row is filed `ready` from what the save already carried, with
+`prompt_version='wall.v1'` as the marker — the same idiom as `oembed.v1`, and it is not a prompt,
+which is the point — and `extract_error` saying it is behind a wall. **No model call**: there is no text to read, and a summary invented from a title is a
+lie in the library. The card shows the imported title and an amber **walled** badge, and it is not
+in Needs attention. It is not retried on a schedule either — a wall that lifts is a wall we find out
+about when she taps retry, which clears the marker and the reason.
+
+**A dead link is not a failure either.** 404 and 410, and a host that no longer resolves at all
+(NXDOMAIN), are the page being gone. The row is filed the same way — `ready`, from what the save
+has, `prompt_version='dead.v1'` — and `link_status='dead'` with `last_checked_at` stamped is the
+badge: the amber **link dead**. That column is phase 11's, and this is the same answer its checker
+would reach, so the checker keeps it current (a link that comes back flips it to `ok`) instead of
+disagreeing with it. The archive, when there is one, is still what opens.
+
+**Being told to wait is a promise, not a fault.** A 429 says the page is there and this client is
+asking too often; parking the row after a few minutes throws away a save that a slower retry would
+have filed. A rate-limited answer therefore gets its own budget — 15 minutes, 45 minutes, 3 hours,
+12 hours, then parked — and is the one cause that outlives the three-try budget below. 5xx, a
+timeout and a broken answer stay the normal budget: the origin being down for an hour is not a
+promise about later.
+
+**The fetcher presents a browser's User-Agent.** This reverses the earlier honest-`Harbor/0`
+decision, deliberately (open-questions P1). A browser UA is what makes uniqlo answer at all — 16 of
+23 timeouts were that one shop, which answers 200 in under a second for a browser and never answers
+`curl/8` — and it is what most of the 403s were punishing. The cost is real and it is accepted: once
+we look like a browser, a page that serves us a JavaScript shell is our own doing. It is not called a
+broken save, though — a body with no readable text still goes to the model with the title and Open
+Graph tags it does carry, which is how The Strand's paywalled page was filed — and only a save with
+nothing at all to file it under fails. The UA lives in the fetch client as one constant
+(`BrowserUserAgent`), so the next reversal is one line and one paragraph here.
+
 **Items with no URL** (typed notes) skip fetch, extract, render and classification: `kind` is
 `note`, and they still get tags, a summary and an embedding. **Image items** take the image path
 below, where the vision call supplies the kind.
@@ -581,8 +615,11 @@ stable public API, so the implementation needs a fallback and must degrade quiet
 
 Failures: retry **3× with backoff over ~an hour** — tracked on the item (`attempts`,
 `next_attempt_at`, `last_error`), not on the Worker job — then park the item as `failed` with the
-error kept. The UI shows a dismissible **"needs attention"** strip with one-tap retry; failures are
-never silent. A bad URL must never wedge the queue.
+error kept. A rate-limited answer (429) gets a longer budget, 5 tries over ~16 hours, because being
+asked to slow down is a promise that the page will still be there. The UI shows a dismissible
+**"needs attention"** strip with one-tap retry; failures are never silent, and only a *broken* save
+reaches it — a wall and a dead link are filed, badged and left alone. A bad URL must never wedge the
+queue.
 
 **Cost reality check (measured 2026-11-21):** four live saves — a six-ingredient recipe page, two
 article pages of ~1,500–2,000 tokens, and one typed note — cost **$0.000788 in total, about
@@ -630,7 +667,8 @@ CREATE TABLE items (
   attempts        INTEGER NOT NULL DEFAULT 0,
   next_attempt_at DATETIME,
   last_error      TEXT NOT NULL DEFAULT '',
-  prompt_version  TEXT NOT NULL DEFAULT '',
+  prompt_version  TEXT NOT NULL DEFAULT '',          -- the prompt that wrote the row, or the marker
+                                                     -- when no prompt did: wall.v1, dead.v1, oembed.v1
   extract_version TEXT NOT NULL DEFAULT '',          -- ties to highlights.anchor_json.text_hash
   extract_error   TEXT NOT NULL DEFAULT '',
   enriched_at     DATETIME,
@@ -640,7 +678,8 @@ CREATE TABLE items (
   transcript_lang  TEXT NOT NULL DEFAULT '',
   transcript_fetched_at DATETIME,
   -- link health
-  link_status     TEXT NOT NULL DEFAULT 'ok',        -- ok|dead|error (scheduled checker)
+  link_status     TEXT NOT NULL DEFAULT 'ok',        -- ok|dead|error (scheduled checker; a 404 during
+                                                     -- enrichment writes 'dead' too)
   last_checked_at DATETIME,
   deleted_at      DATETIME,                          -- NULL = live; purged after 30 days
   -- three clocks: when it was made, when it was last saved, when it was last edited
@@ -1059,7 +1098,13 @@ the first real import. Details, the milestone, and the cut list are in
 - Home is search + Spaces + pending + a **masonry** recent grid.
 - Archiving: single-file HTML + screenshot on every save; PDF on demand.
 - Telegram is a dedicated bot; it accepts links, text, photos, documents, and albums.
-- Failed jobs retry 3× over ~an hour, then surface in a "needs attention" strip.
+- Failed jobs retry 3× over ~an hour, then surface in a "needs attention" strip. A rate-limited
+  answer gets 5 tries over ~16 hours instead.
+- A wall (401/403/451) and a dead link (404/410/NXDOMAIN) are **filed, not failed**: the row keeps its
+  imported title, shows an amber badge, and stays out of Needs attention. `prompt_version='wall.v1'`
+  carries the wall; `link_status='dead'` carries the death.
+- The fetcher presents a **browser User-Agent** (reversing the honest `Harbor/0` line, 2026-11-26).
+  A page that then serves no readable text is a wall, not a broken save.
 - Export is JSON + Markdown + Netscape HTML + a media manifest and files.
 - One canonical item per URL; re-saving **merges** (append note, union tags, refresh archive).
 - v1 imports **Raindrop CSV + Netscape HTML**; collections/folders become manual Spaces.

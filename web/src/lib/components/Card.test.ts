@@ -55,6 +55,27 @@ describe('Card', () => {
 		expect(container.querySelector('.kindmark')).not.toBeNull();
 	});
 
+	// Issue #76: a save the page refused is filed, not failed, so the card says
+	// why it is thin instead of looking like a broken fetch.
+	it('badges a walled save', () => {
+		const { container } = render(Card, { item: item({ walled: true }) });
+
+		expect(container.querySelector('.flag')?.textContent?.trim()).toBe('Walled');
+		expect(container.querySelector('h3')?.textContent).toBe('A page');
+	});
+
+	it('badges a dead link', () => {
+		const { container } = render(Card, { item: item({ linkStatus: 'dead' }) });
+
+		expect(container.querySelector('.flag')?.textContent?.trim()).toBe('Link dead');
+	});
+
+	it('says nothing when the page was readable', () => {
+		const { container } = render(Card, { item: item() });
+
+		expect(container.querySelector('.flag')).toBeNull();
+	});
+
 	it('falls back to the placeholder when the image fails to load', async () => {
 		const { container } = render(Card, { item: item({ cover: '0123456789abcdef' }) });
 		const image = container.querySelector('img.coverimg');

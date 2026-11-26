@@ -202,6 +202,13 @@ export type Item = {
 	/** Present when the item is failing enrichment. */
 	attempts?: number;
 	lastError?: string;
+	/**
+	 * Filed without its page, which is not a failure (issue #76): the site
+	 * refused this client, so the card says so instead of "couldn't read this".
+	 */
+	walled?: boolean;
+	/** Only sent when it is news: `dead` when the page is gone. */
+	linkStatus?: 'dead' | 'error';
 	/** Filled for one item; absent in a list so the grid stays one query. */
 	tags?: string[];
 	/** details_json, filled for one item; the per-kind layout is built on it. */

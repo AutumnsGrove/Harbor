@@ -499,3 +499,143 @@ func (s *Store) QueueRelativeCovers(ctx context.Context, priority, limit int) (q
 	}
 	return int(affected), remaining, nil
 }
+
+// Unreadable is a row filed without its page, because the page said no. It is
+// not a failure and not a partial success: there is a save, and there is a
+// reason the library cannot show what is inside it (issue #76, design §6).
+type Unreadable struct {
+	// Title is the page's own title when the answer carried one. It only
+	// replaces a placeholder, so a title the owner typed is never overwritten.
+	Title string
+	// Reason says what this row does not have. It lands in extract_error, where
+	// the card and the item page already look for it.
+	Reason string
+	// Marker is what wrote the row, in prompt_version: "wall.v1" or "dead.v1".
+	// It is not a prompt — no model ran — which is exactly why it has its own
+	// value: the UI badges the row by it, and a manual retry clears it. Same
+	// idiom as VideoMetadataVersion.
+	Marker string
+	// Dead marks the link itself as gone (link_status='dead'), which is phase
+	// 11's column. The checker later updates that verdict rather than fighting
+	// it.
+	Dead bool
+}
+
+// ApplyUnreadable files a row the page refused: ready, with its own title, the
+// reason kept, and the marker that says what kind of refusal it was. It writes
+// no tags, no summary and no embedding, and makes no model call — a summary
+// invented from a title alone is a fabrication the library cannot take back.
+func (s *Store) ApplyUnreadable(ctx context.Context, id string, u Unreadable) (model.Item, error) {
+	if strings.TrimSpace(u.Marker) == "" {
+		return model.Item{}, fmt.Errorf("store: an unreadable item needs a marker")
+	}
+	if strings.TrimSpace(u.Reason) == "" {
+		return model.Item{}, fmt.Errorf("store: an unreadable item needs a reason")
+	}
+	now := time.Now().UTC()
+
+	var out model.Item
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		item, err := getItemTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		before := item
+
+		if title := strings.TrimSpace(u.Title); title != "" {
+			if item.Title == "" || (item.URL != nil && item.Title == *item.URL) {
+				item.Title = title
+			}
+		}
+		item.PromptVersion = u.Marker
+		item.ExtractError = u.Reason
+		item.State = model.StateReady
+		item.Attempts = 0
+		item.NextAttemptAt = nil
+		item.LastError = ""
+		item.EnrichedAt = &now
+		if u.Dead {
+			item.LinkStatus = LinkDead
+			item.LastCheckedAt = &now
+		}
+
+		if err := updateItemRow(ctx, tx, item); err != nil {
+			return err
+		}
+		fresh, err := getItemTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		// The title is the only indexed value that changed, and FTS5 cannot
+		// update in place.
+		if before.DeletedAt == nil {
+			if err := ftsDelete(ctx, tx, before); err != nil {
+				return err
+			}
+			if err := ftsInsert(ctx, tx, fresh); err != nil {
+				return err
+			}
+		}
+		out = fresh
+		return nil
+	})
+	if err != nil {
+		return model.Item{}, err
+	}
+	return out, nil
+}
+
+// LinkStatus values are design §7's: what a link checker can conclude about a
+// URL, and nothing about the page's contents.
+const (
+	LinkOK    = model.LinkOK
+	LinkDead  = model.LinkDead
+	LinkError = model.LinkError
+)
+
+// FailedCount is how many parked rows an older pipeline left in Needs attention.
+// It is the number `harbor enrich --refile-failed` reports before anything is
+// touched.
+func (s *Store) FailedCount(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM items WHERE state = 'failed' AND deleted_at IS NULL`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("counting failed items: %w", err)
+	}
+	return n, nil
+}
+
+// QueueFailed puts the parked rows back in the queue so the current filing rules
+// get to see them. It exists because a rule that improves what happens to a
+// refused or dead page cannot help the rows an older rule already parked: the
+// 403s and 404s of issue #76 sit in `failed` until something re-reads them.
+//
+// They come back at the interactive priority, not the import backlog's: these
+// are her saves, and the run is watched. `last_error` is cleared so a row that
+// files cleanly leaves no stale reason behind; a page that fails again writes
+// its own.
+func (s *Store) QueueFailed(ctx context.Context, priority, limit int) (queued, remaining int, err error) {
+	if limit <= 0 {
+		limit = -1
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE items SET
+		state = 'queued', priority = ?, attempts = 0, next_attempt_at = NULL, last_error = ''
+		WHERE seq IN (
+			SELECT seq FROM items
+			WHERE state = 'failed' AND deleted_at IS NULL
+			ORDER BY saved_at ASC, seq ASC
+			LIMIT ?
+		)`, priority, limit)
+	if err != nil {
+		return 0, 0, fmt.Errorf("requeueing failed items: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, 0, fmt.Errorf("requeueing failed items: %w", err)
+	}
+	remaining, err = s.FailedCount(ctx)
+	if err != nil {
+		return int(affected), 0, err
+	}
+	return int(affected), remaining, nil
+}

@@ -290,20 +290,23 @@ func TestProcessNeverCallsDecideForAManualKind(t *testing.T) {
 	}
 }
 
+// plans/03 test 15: a permanent fetch error makes no model call and is not
+// retried. The 404 used to be the example here; #76 files it instead (see
+// TestA404FilesTheSaveAsADeadLink), so the example is a 400 from the page.
 func TestProcessFailsFastOnAPermanentFetchError(t *testing.T) {
 	s := openStore(t)
-	item := createItem(t, s, store.ItemInput{ID: "a", URL: ptr("https://example.com/gone")})
+	item := createItem(t, s, store.ItemInput{ID: "a", URL: ptr("https://example.com/bad")})
 	f, d, w, em := happyFakes()
-	f.err = &fetch.HTTPError{URL: "https://example.com/gone", Status: 404}
+	f.err = &fetch.HTTPError{URL: "https://example.com/bad", Status: 400}
 
 	if err := newTestEnricher(t, s, f, d, w, em).Process(context.Background(), item); err == nil {
-		t.Fatal("Process accepted a 404")
+		t.Fatal("Process accepted a 400")
 	}
 	enriched, _ := s.GetItem(context.Background(), item.ID)
 	if enriched.State != model.StateFailed || enriched.Attempts != 1 || enriched.NextAttemptAt != nil {
-		t.Errorf("after a 404 = state %q, attempts %d, next %v; want terminal", enriched.State, enriched.Attempts, enriched.NextAttemptAt)
+		t.Errorf("after a 400 = state %q, attempts %d, next %v; want terminal", enriched.State, enriched.Attempts, enriched.NextAttemptAt)
 	}
-	if !strings.Contains(enriched.LastError, "404") {
+	if !strings.Contains(enriched.LastError, "400") {
 		t.Errorf("last_error = %q", enriched.LastError)
 	}
 	if w.calls != 0 || em.calls != 0 {
@@ -956,7 +959,10 @@ func TestOneFailureWritesOneLine(t *testing.T) {
 		err   error
 		level string
 	}{
-		{"parked", &fetch.HTTPError{URL: "https://example.com/gone", Status: 404}, "INFO"},
+		// A dead link no longer parks (issue #76), so the parked case is a page
+		// that answered with something retrying cannot fix and that is not a
+		// refusal: a 400 from the page itself.
+		{"parked", &fetch.HTTPError{URL: "https://example.com/bad", Status: 400}, "INFO"},
 		{"retrying", &fetch.HTTPError{URL: "https://example.com/a", Status: 503}, "WARN"},
 	}
 	for _, tc := range cases {
@@ -1058,5 +1064,169 @@ func TestProcessDoesNotRecordACancelledRun(t *testing.T) {
 		if lineLevel(line) == "ERROR" {
 			t.Errorf("a cancelled run logged an error: %s", line)
 		}
+	}
+}
+
+// A page that refuses this client is not a failed save (issue #76, design §6):
+// the row is filed from what the save already carried, badged by its marker,
+// and no model is asked to invent a summary from a title alone.
+func TestA403FilesTheSaveInsteadOfFailingIt(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	item := createItem(t, s, store.ItemInput{
+		ID: "a", URL: ptr("https://www.nytimes.com/2026/11/01/thing.html"),
+		Title: "The Thing", Note: "from the train",
+	})
+	f, d, w, em := happyFakes()
+	f.err = &fetch.HTTPError{URL: "https://www.nytimes.com/2026/11/01/thing.html", Status: 403}
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if d.calls+w.calls+em.calls != 0 {
+		t.Errorf("a walled save cost model calls: decide %d, write %d, embed %d", d.calls, w.calls, em.calls)
+	}
+
+	after, err := s.GetItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != model.StateReady {
+		t.Errorf("state = %q, want ready: a wall is not a failure", after.State)
+	}
+	if after.PromptVersion != WallVersion {
+		t.Errorf("prompt_version = %q, want %q (the marker the badge reads)", after.PromptVersion, WallVersion)
+	}
+	if !strings.Contains(after.ExtractError, "403") {
+		t.Errorf("extract_error = %q, want the reason it is thin", after.ExtractError)
+	}
+	if after.Title != "The Thing" || after.Note != "from the train" {
+		t.Errorf("row = %q / %q, want the save's own title and note kept", after.Title, after.Note)
+	}
+	if after.LinkStatus != "ok" {
+		t.Errorf("link_status = %q; a wall is not a dead link", after.LinkStatus)
+	}
+	if after.Summary != "" {
+		t.Errorf("summary = %q, want none: no text was read", after.Summary)
+	}
+
+	failed, err := s.FailedItems(ctx, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 0 {
+		t.Errorf("FailedItems = %v, want the walled save out of Needs attention", failed)
+	}
+}
+
+// The page being gone is the other no that is not a failure: the link is dead,
+// and `link_status` is where phase 11 checks that verdict later.
+func TestA404FilesTheSaveAsADeadLink(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	item := createItem(t, s, store.ItemInput{
+		ID: "a", URL: ptr("https://example.com/gone"), Title: "Something I saved",
+	})
+	f, d, w, em := happyFakes()
+	f.err = &fetch.HTTPError{URL: "https://example.com/gone", Status: 404}
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	after, err := s.GetItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != model.StateReady || after.LinkStatus != "dead" {
+		t.Errorf("state/link = %q/%q, want ready/dead", after.State, after.LinkStatus)
+	}
+	if after.PromptVersion != DeadVersion {
+		t.Errorf("prompt_version = %q, want %q", after.PromptVersion, DeadVersion)
+	}
+	if after.LastCheckedAt == nil {
+		t.Error("last_checked_at is nil, want when we found out")
+	}
+	if after.Title != "Something I saved" {
+		t.Errorf("title = %q, want the saved title kept", after.Title)
+	}
+}
+
+// A host that no longer resolves is the page being gone, not a bad URL.
+func TestAHostThatDoesNotResolveIsADeadLink(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	item := createItem(t, s, store.ItemInput{ID: "a", URL: ptr("https://gone.example/a"), Title: "Gone"})
+	f, d, w, em := happyFakes()
+	f.err = fmt.Errorf("%w: gone.example", fetch.ErrDeadLink)
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	after, _ := s.GetItem(ctx, item.ID)
+	if after.State != model.StateReady || after.LinkStatus != "dead" {
+		t.Errorf("state/link = %q/%q, want ready/dead", after.State, after.LinkStatus)
+	}
+}
+
+// A 429 is a promise about later, so it gets the long budget: 15 m, 45 m, 3 h,
+// 12 h, and only then parked. Verified against a fake clock, not a comment
+// (issue #76).
+func Test429GetsItsOwnLongerRetryBudget(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	item := createItem(t, s, store.ItemInput{ID: "a", URL: ptr("https://example.com/a")})
+
+	now := fixedNow
+	f, d, w, em := happyFakes()
+	f.err = &fetch.HTTPError{URL: "https://example.com/a", Status: 429}
+	en := newTestEnricher(t, s, f, d, w, em)
+	en.Now = func() time.Time { return now }
+
+	for i, want := range []time.Duration{15 * time.Minute, 45 * time.Minute, 3 * time.Hour, 12 * time.Hour} {
+		if err := en.Process(ctx, item); err == nil {
+			t.Fatalf("attempt %d: a 429 was reported as success", i+1)
+		}
+		current, err := s.GetItem(ctx, item.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.State != model.StateQueued || current.NextAttemptAt == nil {
+			t.Fatalf("after attempt %d = state %q, next %v; want a scheduled retry",
+				i+1, current.State, current.NextAttemptAt)
+		}
+		if got := current.NextAttemptAt.Sub(now); got != want {
+			t.Errorf("attempt %d scheduled %v ahead, want %v", i+1, got, want)
+		}
+		now = now.Add(want)
+		item = current
+	}
+
+	if err := en.Process(ctx, item); err == nil {
+		t.Fatal("the fifth 429 was reported as success")
+	}
+	parked, err := s.GetItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parked.State != model.StateFailed || parked.NextAttemptAt != nil {
+		t.Errorf("after five tries = state %q, next %v; want parked with the reason kept",
+			parked.State, parked.NextAttemptAt)
+	}
+	if !strings.Contains(parked.LastError, "429") {
+		t.Errorf("last_error = %q, want the 429 kept", parked.LastError)
+	}
+}
+
+// The same longer budget must not leak to a broken answer: a 503 is still three
+// tries over about an hour.
+func Test503KeepsTheThreeTryBudget(t *testing.T) {
+	if got := RetryDelay(1) + RetryDelay(2); got != time.Hour {
+		t.Errorf("broken budget = %v, want an hour", got)
+	}
+	if retriesRateLimited(&fetch.HTTPError{Status: 503}) {
+		t.Error("a 503 was given the rate-limit budget")
+	}
+	if !retriesRateLimited(&fetch.HTTPError{Status: 429}) {
+		t.Error("a 429 lost its rate-limit budget")
 	}
 }

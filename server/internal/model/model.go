@@ -57,6 +57,30 @@ type Item struct {
 	UpdatedAt time.Time `db:"updated_at"`
 }
 
+// The markers written to prompt_version by a row that was filed without its
+// page. They are not prompts — no model ran — which is the point: the API badges
+// a row by them and a manual retry clears them (design §6, issues #76, #79).
+const (
+	WallVersion = "wall.v1" // the site refused this client (401/403/451)
+	DeadVersion = "dead.v1" // the page is gone (404/410, or the host no longer resolves)
+)
+
+// Link statuses: what can be said about a URL's existence, and nothing about its
+// contents (design §7).
+const (
+	LinkOK    = "ok"
+	LinkDead  = "dead"
+	LinkError = "error"
+)
+
+// Walled reports a row filed because the site refused this client, rather than
+// because the page could not be read. It is the card's amber badge.
+func (i Item) Walled() bool { return i.PromptVersion == WallVersion }
+
+// Dead reports a link known to be gone. Phase 11's checker owns the verdict
+// after enrichment records it, so it can also come back to `ok`.
+func (i Item) Dead() bool { return i.LinkStatus == LinkDead }
+
 // Tag is a canonical tag name. Aliases and item links are separate tables.
 type Tag struct {
 	ID   int64  `db:"id"`
