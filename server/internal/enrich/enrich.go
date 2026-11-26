@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/extract"
 	"github.com/AutumnsGrove/Harbor/server/internal/fetch"
@@ -249,7 +250,7 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		page, err := e.Fetcher.Fetch(ctx, *item.URL)
 		if err != nil {
 			cause := classifyFetchError(err)
-			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
+			if done, handled := e.tryVideoMetadata(ctx, item, nil, cause); done || handled != nil {
 				return handled
 			}
 			return cause
@@ -272,14 +273,14 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 			extracted, err = extract.Document(page.Body, page.ContentType, base)
 		default:
 			cause := permanent(fmt.Errorf("content type %q is not readable", page.ContentType))
-			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
+			if done, handled := e.tryVideoMetadata(ctx, item, extracted, cause); done || handled != nil {
 				return handled
 			}
 			return cause
 		}
 		if err != nil {
 			cause := permanent(err)
-			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
+			if done, handled := e.tryVideoMetadata(ctx, item, extracted, cause); done || handled != nil {
 				return handled
 			}
 			return cause
@@ -290,7 +291,7 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 		// the old path stays.
 		if strings.TrimSpace(extracted.Text) == "" {
 			cause := permanent(errors.New("the page carried no readable text"))
-			if done, handled := e.tryVideoMetadata(ctx, item, cause); done || handled != nil {
+			if done, handled := e.tryVideoMetadata(ctx, item, extracted, cause); done || handled != nil {
 				return handled
 			}
 			// A video that has neither a page nor a metadata source has nothing
@@ -386,16 +387,21 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 // metadata still carries a title, a channel and a still, and an item with those
 // is usable before phase 7 fetches the transcript.
 //
-// The two return values separate three outcomes, and the caller needs all three:
+// extracted is the page as far as it was read, which may be nil (the fetch
+// failed) or carry only Open Graph metadata (the page parsed to no article). It
+// matters for one outcome: a video the endpoint refuses to describe still has a
+// title from its own page or from the save, and taking that is the difference
+// between an item and a row in Needs attention (issue #79).
+//
+// The two return values separate the outcomes, and the caller needs all of them:
 //
 //   - handled: the row was written (or the write failed, which is the error).
 //   - not a video, or no video source: (false, nil) — the caller's own failure
 //     stands.
-//   - a video whose metadata the endpoint could not answer: (false, err) with
-//     err classified. A definitive answer is permanent; a timeout or a 429 is
-//     not, and must keep the retry schedule the page's own failure would have
-//     given it.
-func (e *Enricher) tryVideoMetadata(ctx context.Context, item model.Item, cause error) (bool, error) {
+//   - a video with nothing left to try: (false, err) with err classified. A
+//     definitive answer is permanent; a timeout or a 429 is not, and must keep
+//     the retry schedule the page's own failure would have given it.
+func (e *Enricher) tryVideoMetadata(ctx context.Context, item model.Item, extracted *extract.Result, cause error) (bool, error) {
 	if e.Videos == nil || !hasURL(item) {
 		return false, nil
 	}
@@ -406,6 +412,9 @@ func (e *Enricher) tryVideoMetadata(ctx context.Context, item model.Item, cause 
 	meta, err := e.Videos.Metadata(ctx, *item.URL)
 	if err != nil {
 		e.Log.Warn("video metadata unavailable", "item", item.ID, "error", err)
+		if errors.Is(err, youtube.ErrRefused) {
+			return e.fileRefusedVideo(ctx, item, extracted, err)
+		}
 		if errors.Is(err, youtube.ErrNoMetadata) {
 			return false, permanent(err)
 		}
@@ -427,18 +436,109 @@ func (e *Enricher) tryVideoMetadata(ctx context.Context, item model.Item, cause 
 	return true, nil
 }
 
+// fileRefusedVideo keeps a video the endpoint declined to describe. An owner who
+// disabled embedding produces a 401 or a 403 for a video that plays perfectly
+// well, so the refusal says nothing about whether the item is worth keeping —
+// and the item already has a real URL and usually a real title.
+//
+// What it does not have is a summary and tags: those need the model, and the
+// model needs text this item never had. So the row is filed ready, with the
+// reason it is thin, and phase 7 can still give it a transcript.
+func (e *Enricher) fileRefusedVideo(ctx context.Context, item model.Item, extracted *extract.Result, cause error) (bool, error) {
+	title := videoFallbackTitle(item, extracted)
+	if title == "" {
+		// Nothing to file it under: no page title, no metadata, and the saved
+		// title is only the URL. The refusal stands as a failure, honestly.
+		return false, permanent(fmt.Errorf("the video's metadata refused this one and it has no title to file it under: %w", cause))
+	}
+
+	cover := ""
+	if extracted != nil {
+		cover = extracted.CoverURL
+	}
+	_, err := e.Store.ApplyVideoMetadata(ctx, item.ID, store.VideoMetadata{
+		Title:         title,
+		Thumbnail:     cover,
+		PageURL:       youtube.WatchURL(youtubeIDOf(*item.URL)),
+		Reason:        refusedVideoReason(cause),
+		PromptVersion: VideoMetadataVersion,
+	})
+	if err != nil {
+		return true, err
+	}
+	e.Log.Info("filed a refused video from the title it already had", "item", item.ID, "page_error", cause)
+	return true, nil
+}
+
+// videoFallbackTitle is the best title available when the endpoint refuses the
+// page: its own og:title, else the title the save already carried — unless that
+// title is just the URL, which is not a title.
+func videoFallbackTitle(item model.Item, extracted *extract.Result) string {
+	if extracted != nil {
+		if title := strings.TrimSpace(extracted.Title); title != "" {
+			return title
+		}
+	}
+	title := strings.TrimSpace(item.Title)
+	if item.URL != nil && title == strings.TrimSpace(*item.URL) {
+		return ""
+	}
+	return title
+}
+
+// youtubeIDOf is the id for a URL that has already been proven to carry one; it
+// is only called from the branches that checked.
+func youtubeIDOf(rawURL string) string {
+	id, _ := youtube.VideoID(rawURL)
+	return id
+}
+
+// refusedVideoReason is what the row keeps about a video nobody described. It is
+// the amber strip on the item, so it says what is missing rather than what broke.
+func refusedVideoReason(cause error) string {
+	detail := shorten(cause, 120)
+	if detail == "" {
+		return "the video's public metadata refuses this one (embedding is disabled); filed from its title, with no summary or tags"
+	}
+	return "the video's public metadata refuses this one (" + detail + "); filed from its title, with no summary or tags"
+}
+
+// shorten bounds an error for a field shown to the owner: the reason is one line,
+// and an HTTP error can be long. max is the bound on the result in bytes, ellipsis
+// included, and the cut lands on a rune boundary — this is stored in
+// extract_error and shown in the UI, so half a rune is not an option (review on
+// #89).
+func shorten(err error, max int) string {
+	if err == nil {
+		return ""
+	}
+	detail := strings.TrimSpace(err.Error())
+	if len(detail) <= max {
+		return detail
+	}
+	const ellipsis = "…"
+	cut := max - len(ellipsis)
+	if cut <= 0 {
+		// A bound too small to hold the ellipsis still gets respected: cut to it
+		// and say nothing about being cut.
+		cut = max
+		for cut > 0 && !utf8.RuneStart(detail[cut]) {
+			cut--
+		}
+		return detail[:cut]
+	}
+	for cut > 0 && !utf8.RuneStart(detail[cut]) {
+		cut--
+	}
+	return detail[:cut] + ellipsis
+}
+
 // videoReason is what the row keeps about the page it could not read. Bounded,
 // because a fetch error can be long and this is shown to the owner one day.
 func videoReason(cause error) string {
 	reason := "the page could not be read; filed from the video's public metadata"
-	if cause != nil {
-		detail := strings.TrimSpace(cause.Error())
-		if len(detail) > 120 {
-			detail = detail[:117] + "…"
-		}
-		if detail != "" {
-			reason = "the page could not be read (" + detail + "); filed from the video's public metadata"
-		}
+	if detail := shorten(cause, 120); detail != "" {
+		reason = "the page could not be read (" + detail + "); filed from the video's public metadata"
 	}
 	return reason
 }

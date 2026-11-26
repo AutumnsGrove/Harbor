@@ -519,6 +519,14 @@ inventing either would be a lie the UI cannot take back. Phase 7 finds those row
 gives them a transcript and a real pass. Anything that is not a video URL keeps the normal failure
 path.
 
+**A refusal is not an absence.** oEmbed answers 401 or 403 for a video whose owner disabled
+embedding, or which is behind a sign-in — a video that plays perfectly well in a browser. Those are
+filed `ready` too, from the page's own `og:title` when the page gave one and otherwise from the title
+the save already carried, with `extract_error` saying what the item does not have rather than
+returning it to Needs attention. Only a 404, or a refusal with no title to file it under, stays a
+failure. Treating the two as one answer retired five real saves, and a retry could never have
+changed it (issue #79).
+
 **Items with no URL** (typed notes) skip fetch, extract, render and classification: `kind` is
 `note`, and they still get tags, a summary and an embedding. **Image items** take the image path
 below, where the vision call supplies the kind.

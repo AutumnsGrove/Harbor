@@ -48,6 +48,13 @@ const (
 // reason to give up on a video forever.
 var ErrNoMetadata = errors.New("youtube: no metadata for this video")
 
+// ErrRefused is the endpoint declining to describe a video that exists: 401 and
+// 403 are what an owner who disabled embedding produces, and the video plays
+// perfectly well in a browser. It is not the same answer as ErrNoMetadata, and
+// treating it as one retired real items — a video with a working title and a
+// working URL was parked in Needs attention for good (issue #79).
+var ErrRefused = errors.New("youtube: the oEmbed endpoint refused this video")
+
 // videoIDLength is YouTube's id length, and its alphabet is base64-url without
 // padding. Both are checked so a path segment like "playlist" cannot pass.
 const videoIDLength = 11
@@ -182,11 +189,16 @@ func (c *Client) Metadata(ctx context.Context, raw string) (Metadata, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		// 401 and 404 mean "this id has nothing": a private, deleted or
-		// age-gated video, and no retry will change it. 429 and 5xx are the
-		// endpoint being busy or broken, which is worth another attempt.
-		if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
+		// 401 and 403 say "not for you": embedding is disabled, or the video is
+		// behind a sign-in. The video can still exist and be worth keeping, so
+		// this is a refusal, not an absence. 404 and 400 mean the id has nothing
+		// at all. 429 and 5xx are the endpoint being busy or broken, which is
+		// worth another attempt.
+		switch {
+		case response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500:
 			return Metadata{}, fmt.Errorf("youtube: oEmbed answered %d for %s", response.StatusCode, id)
+		case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
+			return Metadata{}, fmt.Errorf("%w: oEmbed answered %d for %s", ErrRefused, response.StatusCode, id)
 		}
 		return Metadata{}, fmt.Errorf("%w: oEmbed answered %d for %s", ErrNoMetadata, response.StatusCode, id)
 	}

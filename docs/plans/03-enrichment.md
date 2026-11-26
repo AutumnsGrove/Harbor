@@ -313,9 +313,15 @@ The imported library — 1,476 saves, none of them ever read by a model — was 
 - **522 failed**, and 371 of those were one cause: YouTube answers a datacenter fetch with Google's
   `/sorry/` wall. The oEmbed fallback (design §6) then filed **359 of them** from public metadata —
   real titles and channels, `kind=video`, the still as the cover, no model call, no tags — leaving
-  **11 genuinely gone** (oEmbed 401/403/404: deleted, private, age-gated) and one broken affiliate
-  redirect. Those 359 are the ones phase 7 re-enriches; the 12 that stayed failed have no captions to
-  fetch and no `oembed.v1` row at all.
+  **11 refused or gone** (oEmbed 401/403/404) and one broken affiliate redirect. Those 359 are the
+  ones phase 7 re-enriches; the 12 that stayed failed have no captions to fetch and no `oembed.v1` row
+  at all.
+
+  Of those 11, **five were only refused** — 401/403 is what an owner who disabled embedding produces
+  for a video that plays fine in a browser, and retiring them was wrong (issue #79). They are filed
+  `ready` now, from the page's own `og:title` or the title the save already carried; only a 404, or a
+  refusal with no title anywhere, still fails. That leaves **6 gone** — genuinely deleted — which is
+  the number this phase's demo should show.
 - **The whole library's kinds after the fallback** are article 801 · video 410 · product 194 · book 21
   · movie 13 · paper 12 · image 11 · recipe 5 · podcast 4 · place 3 · tweet 2. That list is not the
   model's: every imported row starts as the default `article`, so the failures sit inside it, and the
