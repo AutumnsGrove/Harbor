@@ -17,23 +17,19 @@ import (
 // lives beside it: the property is that the output never contains FTS5 syntax
 // outside the quotes it built, and that the argument count is one placeholder.
 func FTSQuery(input string) (string, error) {
-	terms := strings.Fields(input)
-	if len(terms) == 0 {
-		return "", ErrEmptyQuery
-	}
-	if len(terms) > MaxQueryTerms {
-		terms = terms[:MaxQueryTerms]
-	}
-
-	quoted := make([]string, 0, len(terms))
-	for _, term := range terms {
-		// A term of only punctuation has nothing to match and would be a syntax
-		// error even inside quotes in some FTS5 builds; drop it rather than fail
-		// the whole search for one stray comma.
+	quoted := make([]string, 0, MaxQueryTerms)
+	for _, term := range strings.Fields(input) {
+		// A term of only punctuation has nothing to match; drop it rather than fail
+		// the whole search for one stray comma. The cap is checked after dropping,
+		// not before: sixteen dashes must not spend a budget the real word behind
+		// them needed (review on #94).
 		if !hasLetterOrDigit(term) {
 			continue
 		}
 		quoted = append(quoted, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
+		if len(quoted) == MaxQueryTerms {
+			break
+		}
 	}
 	if len(quoted) == 0 {
 		return "", ErrEmptyQuery

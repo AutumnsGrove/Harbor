@@ -93,3 +93,26 @@ func TestFTSQueryCapsTheTermCount(t *testing.T) {
 		t.Errorf("terms = %d, want the cap %d", n, MaxQueryTerms)
 	}
 }
+
+// Punctuation-only terms are dropped before the cap is applied, so noise cannot
+// spend a budget a real word needed (review on #94).
+func TestFTSQueryNoiseDoesNotEatTheTermBudget(t *testing.T) {
+	input := strings.Repeat("- ", MaxQueryTerms+4) + "venice"
+	got, err := FTSQuery(input)
+	if err != nil {
+		t.Fatalf("FTSQuery(%q): %v", input, err)
+	}
+	if got != `"venice"` {
+		t.Errorf("FTSQuery with leading noise = %s, want the real term", got)
+	}
+
+	// Real words still stop at the cap, noise or not.
+	mixed := "venice " + strings.Repeat("- ", 5) + strings.Repeat("word ", MaxQueryTerms+4)
+	got, err = FTSQuery(mixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(strings.Fields(got)); n != MaxQueryTerms {
+		t.Errorf("terms = %d, want the cap %d", n, MaxQueryTerms)
+	}
+}
