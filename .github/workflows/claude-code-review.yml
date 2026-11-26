@@ -1,45 +1,101 @@
+# Claude's review of every pull request. The job checks out the merge commit —
+# base merged into the head, not the head alone — installs the Go, web and worker
+# toolchains, and gives Claude full Bash so it can reproduce and test what the
+# pull request claims. The repo-specific reviewer notes are in CLAUDE.md, which
+# the action restores from the base branch, so a pull request cannot rewrite
+# them.
+#
+# The Claude GitHub app refuses to run a workflow file that differs from the one
+# on `main`. A pull request that changes this file is therefore never reviewed by
+# it; CI and the other checks still run.
 name: Claude Code Review
 
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+
+# One group per pull request. A draft or fork push gets a unique group so it
+# cancels nothing; only a run that will review joins the pull request's group.
+concurrency:
+  group: >-
+    ${{ ((github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository))
+    && format('claude-review-{0}', github.event.pull_request.number)
+    || format('claude-review-ignored-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: read
+  id-token: write # required to exchange the OIDC token for the Claude app token
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
+    # Forks are never reviewed: they cannot mint the OIDC token, and their code
+    # is untrusted. Drafts are skipped until they are marked ready.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-      issues: read
-      id-token: write
-
+    timeout-minutes: 40
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout the merge commit
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          # pull_request checks out refs/pull/<n>/merge by default. Full history
+          # because the reviewer reads git blame and reverts a fix in a worktree.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.32.1
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: |
+            web/pnpm-lock.yaml
+            worker/pnpm-lock.yaml
+
+      # The reviewer's whole point is running the code. Install what `make check`
+      # needs before Claude starts, so the review spends its time on the change
+      # rather than on package managers.
+      - name: Install dependencies
+        run: |
+          go mod download
+          cd web && pnpm install --frozen-lockfile
+          cd ../worker && pnpm install --frozen-lockfile
 
       - name: Run Claude Code Review
-        id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
-          plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-
+          # The same-repo gate above means the author has write access (or is a
+          # bot we allowed), so running the checkout is not a fork risk. A bot
+          # author has no write access of its own, which is why this is off.
+          restrict_untrusted_prs: 'false'
+          # Review Claude's own pull requests too. The app's author check refuses
+          # a bot actor that is not listed.
+          allowed_bots: 'claude[bot]'
+          additional_permissions: |
+            actions: read
+          # Full Bash: the reviewer builds, tests and reproduces, the same as
+          # pi-review did. Auto mode would send every command through a safety
+          # review and can deny a test run; this job runs only same-repo
+          # branches.
+          claude_args: |
+            --permission-mode bypassPermissions
+          # The process lives in .claude/commands/review.md, which the action
+          # restores from the base branch. Keeping it out of this file means a
+          # pull request that changes the review process still gets reviewed.
+          prompt: '/review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
