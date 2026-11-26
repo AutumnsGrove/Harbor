@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AutumnsGrove/Harbor/server/internal/clip"
 	"github.com/AutumnsGrove/Harbor/server/internal/workerclient"
 )
 
@@ -71,10 +72,9 @@ func pendingTitle(job workerclient.Job) string {
 	if job.Note != nil {
 		line := strings.TrimSpace(strings.SplitN(*job.Note, "\n", 2)[0])
 		if line != "" {
-			if len(line) > 80 {
-				line = line[:77] + "…"
-			}
-			return line
+			// A note can be any language, so the cut has to land on a rune: a byte
+			// cut turned a Japanese note's last word into U+FFFD (issue #90).
+			return clip.Text(line, 80)
 		}
 	}
 	return "A save on its way"
