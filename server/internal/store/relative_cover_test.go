@@ -40,7 +40,7 @@ func TestRelativeCoverCountFindsOnlyUnusableImages(t *testing.T) {
 			t.Fatalf("%s: CreateItem: %v", name, err)
 		}
 		// A finished row: the state these rows are actually in.
-		if _, err := s.db.ExecContext(ctx, `UPDATE items SET state = 'ready', prompt_version = 'tag.v1', enriched_at = ? WHERE id = ?`, stamp(time.Now().UTC()), id); err != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE items SET state = 'ready', prompt_version = 'tag.v1', enriched_at = ? WHERE id = ?`, Stamp(time.Now().UTC()), id); err != nil {
 			t.Fatalf("%s: marking ready: %v", name, err)
 		}
 

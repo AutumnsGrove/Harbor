@@ -36,7 +36,7 @@ func (s *Store) Counts(ctx context.Context, since time.Time) (Counts, error) {
 			coalesce(sum(CASE WHEN deleted_at IS NULL AND state IN ('queued', 'enriching') THEN 1 ELSE 0 END), 0),
 			coalesce(sum(CASE WHEN deleted_at IS NULL AND state = 'failed' THEN 1 ELSE 0 END), 0),
 			coalesce(sum(CASE WHEN deleted_at IS NULL AND saved_at >= ? THEN 1 ELSE 0 END), 0)
-		FROM items`, stamp(since)).Scan(&c.Items, &c.Pending, &c.Failed, &c.SavedThisWeek)
+		FROM items`, Stamp(since)).Scan(&c.Items, &c.Pending, &c.Failed, &c.SavedThisWeek)
 	if err != nil {
 		return Counts{}, fmt.Errorf("counts: %w", err)
 	}

@@ -354,7 +354,7 @@ func (s *Store) ListItems(ctx context.Context, opts ListOptions) ([]model.Item, 
 	}
 	if opts.After != nil {
 		where = append(where, "(saved_at < ? OR (saved_at = ? AND seq < ?))")
-		args = append(args, stamp(opts.After.SavedAt), stamp(opts.After.SavedAt), opts.After.Seq)
+		args = append(args, Stamp(opts.After.SavedAt), Stamp(opts.After.SavedAt), opts.After.Seq)
 	}
 	query := `SELECT ` + itemColumns + ` FROM items`
 	if len(where) > 0 {
@@ -449,7 +449,7 @@ func (s *Store) SoftDeleteItem(ctx context.Context, id string) error {
 		if err := ftsDelete(ctx, tx, item); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE items SET deleted_at = ? WHERE id = ?`, stamp(time.Now().UTC()), id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE items SET deleted_at = ? WHERE id = ?`, Stamp(time.Now().UTC()), id); err != nil {
 			return fmt.Errorf("soft delete %s: %w", id, err)
 		}
 		return nil
@@ -548,7 +548,7 @@ func insertItem(ctx context.Context, tx *sql.Tx, m model.Item) error {
 		string(m.State), m.Priority, m.Attempts, nullableStamp(m.NextAttemptAt), m.LastError, m.PromptVersion,
 		m.ExtractVersion, m.ExtractError, nullableStamp(m.EnrichedAt), m.TranscriptText, m.TranscriptState,
 		m.TranscriptLang, nullableStamp(m.TranscriptFetchedAt), m.LinkStatus, nullableStamp(m.LastCheckedAt), nullableStamp(m.DeletedAt),
-		stamp(m.CreatedAt), stamp(m.SavedAt), stamp(m.UpdatedAt))
+		Stamp(m.CreatedAt), Stamp(m.SavedAt), Stamp(m.UpdatedAt))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrDuplicateURL
@@ -572,7 +572,7 @@ func updateItemRow(ctx context.Context, tx *sql.Tx, m model.Item) error {
 		string(m.State), m.Priority, m.Attempts, nullableStamp(m.NextAttemptAt), m.LastError, m.PromptVersion,
 		m.ExtractVersion, m.ExtractError, nullableStamp(m.EnrichedAt), m.TranscriptText, m.TranscriptState,
 		m.TranscriptLang, nullableStamp(m.TranscriptFetchedAt), m.LinkStatus, nullableStamp(m.LastCheckedAt), nullableStamp(m.DeletedAt),
-		stamp(m.CreatedAt), stamp(m.SavedAt), stamp(m.UpdatedAt), m.ID)
+		Stamp(m.CreatedAt), Stamp(m.SavedAt), Stamp(m.UpdatedAt), m.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrDuplicateURL
@@ -882,13 +882,21 @@ func jsonOr(v, fallback string) string {
 // width, so string ordering in SQLite is chronological ordering.
 const tsLayout = "2006-01-02T15:04:05.000000000Z"
 
-func stamp(t time.Time) string { return t.UTC().Format(tsLayout) }
+// Stamp formats a timestamp the way this database stores one.
+//
+// It is exported because a caller outside this package has to bind a time into a
+// comparison against a stored column, and those columns are text: any other layout
+// compares wrongly. time.RFC3339 is the obvious choice and it is the wrong one —
+// `2025-01-01T10:00:00Z` sorts *below* `2025-01-01T10:00:00.500000000Z` because
+// '.' (0x2E) is less than 'Z' (0x5A) at position 19, so a row half a second past
+// the cutoff falls outside the window (review on #94).
+func Stamp(t time.Time) string { return t.UTC().Format(tsLayout) }
 
 func nullableStamp(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return stamp(*t)
+	return Stamp(*t)
 }
 
 func parseStamp(s string) (time.Time, error) {

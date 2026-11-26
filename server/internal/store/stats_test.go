@@ -94,3 +94,20 @@ func TestCountsOnAnEmptyStore(t *testing.T) {
 		t.Errorf("Counts = %+v, want zeroes", counts)
 	}
 }
+
+// The stored layout is chronological as text; RFC3339 is not. This is why Stamp is
+// exported for callers that bind a time into a comparison — the window's edge
+// depends on it (review on #94).
+func TestStampSortsChronologically(t *testing.T) {
+	early := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	late := early.Add(500 * time.Millisecond)
+
+	if !(Stamp(late) > Stamp(early)) {
+		t.Errorf("Stamp does not sort: %q <= %q", Stamp(late), Stamp(early))
+	}
+	// The trap, asserted so nobody "simplifies" the layout back: an RFC3339 bound
+	// sorts above a row that is later than it.
+	if !(early.Format(time.RFC3339) > Stamp(late)) {
+		t.Fatal("RFC3339 no longer mis-sorts here; the reason Stamp is exported has changed")
+	}
+}

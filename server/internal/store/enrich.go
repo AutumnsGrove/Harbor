@@ -30,7 +30,7 @@ func (s *Store) QueuedItems(ctx context.Context, limit int) ([]model.Item, error
 		WHERE state = 'queued' AND deleted_at IS NULL
 		  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
 		ORDER BY priority DESC, next_attempt_at IS NULL DESC, next_attempt_at ASC, saved_at ASC, seq ASC
-		LIMIT ?`, stamp(time.Now().UTC()), limit)
+		LIMIT ?`, Stamp(time.Now().UTC()), limit)
 	if err != nil {
 		return nil, fmt.Errorf("queued items: %w", err)
 	}
@@ -191,7 +191,7 @@ func saveEmbeddingTx(ctx context.Context, tx *sql.Tx, itemID, modelName string, 
 			model = excluded.model, dims = excluded.dims,
 			content_hash = excluded.content_hash, vec = excluded.vec,
 			created_at = excluded.created_at`,
-		itemID, modelName, len(vec), contentHash, encodeVector(vec), stamp(time.Now().UTC()))
+		itemID, modelName, len(vec), contentHash, encodeVector(vec), Stamp(time.Now().UTC()))
 	if err != nil {
 		return fmt.Errorf("saving embedding for %s: %w", itemID, err)
 	}
@@ -260,7 +260,7 @@ func (s *Store) RecordEnrichmentFailure(ctx context.Context, id, message string,
 func (s *Store) MarkReady(ctx context.Context, id string) error {
 	if _, err := s.db.ExecContext(ctx, `UPDATE items
 		SET state = 'ready', enriched_at = ?, next_attempt_at = NULL, last_error = ''
-		WHERE id = ? AND state = 'queued'`, stamp(time.Now().UTC()), id); err != nil {
+		WHERE id = ? AND state = 'queued'`, Stamp(time.Now().UTC()), id); err != nil {
 		return fmt.Errorf("marking %s ready: %w", id, err)
 	}
 	// Zero rows means it was already ready, already failed, or gone; none of

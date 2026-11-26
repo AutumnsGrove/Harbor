@@ -23,7 +23,7 @@ func TestQueuedItemsOrdersByPriorityThenDue(t *testing.T) {
 
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE items SET next_attempt_at = ? WHERE id = 'blocked'`,
-		stamp(base.Add(-time.Hour))); err != nil {
+		Stamp(base.Add(-time.Hour))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,7 +49,7 @@ func TestQueuedItemsSkipsWorkThatIsNotDueYet(t *testing.T) {
 	mustCreate(t, s, ItemInput{ID: "later", Note: "after the backoff"})
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE items SET next_attempt_at = ? WHERE id = 'later'`,
-		stamp(time.Now().UTC().Add(time.Hour))); err != nil {
+		Stamp(time.Now().UTC().Add(time.Hour))); err != nil {
 		t.Fatal(err)
 	}
 	items, err := s.QueuedItems(ctx, 10)

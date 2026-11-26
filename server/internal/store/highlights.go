@@ -69,7 +69,7 @@ func (s *Store) ReplaceImportedHighlights(ctx context.Context, itemID string, qu
 				`INSERT INTO highlights (id, item_id, quote, note, color, anchor_json, detached, created_at)
 				 VALUES (?, ?, ?, '', ?, ?, 0, ?)`,
 				uuid.NewString(), itemID, quote, string(model.ColorAmber), importedAnchorJSON(i),
-				stamp(base.Add(time.Duration(i)*time.Microsecond))); err != nil {
+				Stamp(base.Add(time.Duration(i)*time.Microsecond))); err != nil {
 				return fmt.Errorf("inserting imported highlight %d for %s: %w", i, itemID, err)
 			}
 		}
