@@ -77,6 +77,14 @@ whatever Autumn saved. That leaves two controls:
    runs a public-internet check after applying the rules and warns instead of
    pretending; if it fails, check `/etc/resolv.conf` on the host.
 
+   Harbor does not take that path: `docker-compose.yml` pins `dns: [1.1.1.1,
+   1.0.0.1]` on the service, so the container asks a public resolver directly and
+   the host's chain is out of the loop. That is deliberate — the potato's
+   resolver filters (AdGuard Home in front of unbound), and a filtering answer of
+   `0.0.0.0` arrives here as a refused address, which is a failed save for a page
+   that is perfectly fine (issue #77). An archiver should resolve what a browser
+   resolves. It also means this rule set no longer depends on `/etc/resolv.conf`.
+
 ```bash
 sudo deploy/docker-user-firewall.sh --check     # all rules present?
 sudo deploy/docker-user-firewall.sh --apply     # idempotent

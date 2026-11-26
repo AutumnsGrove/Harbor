@@ -251,6 +251,7 @@ launchd job:
 | Saves do not appear | `harbor serve` logs: is the ingest loop polling, and does the Worker answer? |
 | Items stay `queued` | the enrichment loop; `OPENROUTER_API_KEY` set? |
 | Items go `failed` | the attention strip on Home, and the log line carrying the cause |
+| `fetch: … address is not allowed: 0.0.0.0` | a resolver answer of `0.0.0.0`, which is what a filtering DNS says for "blocked". The container pins `dns: [1.1.1.1, 1.0.0.1]` in `docker-compose.yml` and does not use the host's AdGuard/unbound chain, so this should mean the pin was lost — check `docker inspect harbor-harbor-1 --format '{{.HostConfig.Dns}}'` |
 | Backups stop appearing | `harbor backup` by hand: the error is printed, not swallowed |
 | `data/.lock` exists but nothing runs | harmless: the lock dies with the process, and the file is only a handle |
 | Disk full | export, prune archives, delete media; the storage guardrail lands in 12b |

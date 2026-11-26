@@ -20,6 +20,21 @@ services:
 
     user: '${HARBOR_UID:-1000}:${HARBOR_GID:-1000}'
     read_only: true
+
+    # Harbor reads the open web, so it resolves through its own servers rather
+    # than the host's resolver chain. The potato's 127.0.0.1 is AdGuard Home in
+    # front of unbound with three million blocklist entries; a filtering answer
+    # of 0.0.0.0 reaches the dial-time SSRF guard and fails a save that looks like
+    # a Harbor bug (issue #77). Cloudflare's pair is chosen for being unfiltered,
+    # which is the point: an archiver should see what a browser sees.
+    #
+    # This also closes the "DNS trap" in docker/security-notes.md — the container
+    # no longer depends on what /etc/resolv.conf on the host happens to say.
+    # Nothing here needs MagicDNS: the Worker is *.workers.dev and the tailnet is
+    # inbound only.
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
     tmpfs: ['/tmp']
