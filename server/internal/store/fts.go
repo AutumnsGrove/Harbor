@@ -45,18 +45,21 @@ var ErrEmptyQuery = errors.New("store: nothing to search for")
 // and the cap keeps one search from building a thousand-term expression.
 const MaxQueryTerms = 16
 
-// hasLetterOrDigit reports whether a term has anything FTS5 will index. The
-// tokenizer keeps letters and digits and drops everything else, so this asks the
-// same question of Unicode rather than of ASCII: a search in Japanese or Greek is
-// a real search, and an em dash, an arrow or a smart quote is punctuation in any
-// script.
+// hasLetterOrDigit reports whether a term has anything FTS5 will index.
 //
-// The first version treated every rune above 127 as a letter, which let `Text: "—"`
-// through validation and then matched nothing — the silent failure the check is
-// there to prevent (review on #94).
+// The tokenizer's default categories are L*, N* and Co: letters in any script,
+// numbers of any kind, and private use. So this asks IsLetter or IsNumber, not
+// IsDigit — `½`, `²` and `Ⅷ` are `No` and `Nl` rather than `Nd`, FTS5 indexes them,
+// and refusing to search for them would be the mirror image of the bug this check
+// exists to prevent. Private-use characters are left out on purpose: nobody types
+// one to search a library.
+//
+// The history is worth keeping, because each version was wrong in a different
+// direction: `r > 127` treated an em dash as a letter, and `IsDigit` refused the
+// numerals above (review on #94).
 func hasLetterOrDigit(term string) bool {
 	for _, r := range term {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
 			return true
 		}
 	}

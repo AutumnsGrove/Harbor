@@ -1,6 +1,9 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -72,6 +75,11 @@ func TestFTSQueryKeepsNonLatinWords(t *testing.T) {
 		"griechisch άλφα": `"griechisch" "άλφα"`,
 		"accentué":        `"accentué"`,
 		"числа 42":        `"числа" "42"`,
+		// Numbers that are not Nd: FTS5's tokenizer keeps all of N*, so these are
+		// searchable and must not be mistaken for punctuation.
+		"½ cup": `"½" "cup"`,
+		"²":     `"²"`,
+		"Ⅷ":     `"Ⅷ"`,
 	} {
 		got, err := FTSQuery(input)
 		if err != nil {
@@ -114,5 +122,46 @@ func TestFTSQueryNoiseDoesNotEatTheTermBudget(t *testing.T) {
 	}
 	if n := len(strings.Fields(got)); n != MaxQueryTerms {
 		t.Errorf("terms = %d, want the cap %d", n, MaxQueryTerms)
+	}
+}
+
+// The tokenizer's question, answered by the tokenizer itself: an FTS5 table indexed
+// `½` and `Ⅷ` as tokens, so a search for them must be allowed through. The
+// alternative — refusing them as punctuation — is the mirror of the bug this check
+// exists to prevent (review on #94).
+func TestFTSQueryAgreesWithTheTokenizer(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "fts.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE VIRTUAL TABLE t USING fts5(body)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO t VALUES('add ½ cup, area ², chapter Ⅷ, an em dash — and an arrow →')`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	for _, term := range []string{"½", "²", "Ⅷ", "cup", "dash"} {
+		query, err := FTSQuery(term)
+		if err != nil {
+			t.Errorf("FTSQuery(%q) = %v: the tokenizer indexes it", term, err)
+			continue
+		}
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM t WHERE t MATCH ?`, query).Scan(&n); err != nil {
+			t.Errorf("matching %q: %v", term, err)
+			continue
+		}
+		if n == 0 {
+			t.Errorf("FTSQuery(%q) = %s matched nothing, but the tokenizer indexed it", term, query)
+		}
+	}
+
+	// And the other direction: punctuation really is refused.
+	for _, term := range []string{"—", "→", "…"} {
+		if _, err := FTSQuery(term); !errors.Is(err, ErrEmptyQuery) {
+			t.Errorf("FTSQuery(%q) = %v, want ErrEmptyQuery", term, err)
+		}
 	}
 }
