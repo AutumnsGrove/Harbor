@@ -421,3 +421,21 @@ HTML reader, so a text file went into a parser that found no article and failed 
   rows disagree with the constant without a re-read to justify it.
 - The SSRF guard, the byte cap and the retry budget are unchanged. A PDF and an image still fail
   here, on purpose, until phase 6 gives them a reader.
+
+### An unreadable answer is retried at the call (2026-11-26, issue #78)
+
+Eight rows spent all three item attempts on `nova write: answer is not JSON: unexpected end of JSON
+input`, which is what an **empty** completion produces — and the message blamed JSON, so a provider
+miss looked exactly like a page that will not read.
+
+- `Write` now asks twice before the item is charged, and only for a *shapeless* answer. A transport
+  failure is not retried here: that is the pipeline's retry to spend, and retrying it here would bill
+  the dead network twice and halve the item's attempts for nothing.
+- A `finish_reason` of `length` is **not** retried. The same input and the same cap cut the answer in
+  the same place, so a second call pays for the same truncation; the item fails saying the answer hit
+  the cap and naming the number to change (`writeMaxTokens`).
+- The error now carries what the provider did — finish reason, completion tokens, answer length, and
+  the first 80 bytes when it was prose — and how many calls were made. A parked item says `asked 2
+  times`, so the next reader can tell one empty answer from a provider that gave nothing twice.
+- Both calls are billed, so both are recorded in `usage_calls`; the cost of a retry is visible rather
+  than absorbed.
