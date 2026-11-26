@@ -106,6 +106,22 @@ func (r *Rule) Validate() error {
 	if len(r.TagsAll) > MaxTags || len(r.TagsAny) > MaxTags {
 		return fmt.Errorf("%w: at most %d tags in a field", ErrInvalidRule, MaxTags)
 	}
+	// A blank tag is a mistake, not a filter: it would compile to `t.name = ''`
+	// and match nothing, which is the silent failure this package exists to avoid
+	// (review on #94).
+	for _, field := range []struct {
+		name string
+		tags []string
+	}{
+		{"tags_all", r.TagsAll},
+		{"tags_any", r.TagsAny},
+	} {
+		for _, tag := range field.tags {
+			if tag == "" {
+				return fmt.Errorf("%w: %s holds an empty tag", ErrInvalidRule, field.name)
+			}
+		}
+	}
 	for _, kind := range r.Kinds {
 		if !kind.Valid() {
 			return fmt.Errorf("%w: %q is not one of the twelve kinds", ErrInvalidRule, kind)
@@ -140,6 +156,15 @@ func (r *Rule) Validate() error {
 	if len(r.Text) > MaxTextBytes {
 		return fmt.Errorf("%w: text is longer than %d bytes", ErrInvalidRule, MaxTextBytes)
 	}
+	if r.Text != "" {
+		// Text that searches for nothing — "---", "!!!" — must be rejected when
+		// the rule is written, not when it is read. A Space that fails on every
+		// evaluation is a Space the owner cannot fix, and the error would look like
+		// a database fault rather than a bad rule (review on #94).
+		if _, err := store.FTSQuery(r.Text); err != nil {
+			return fmt.Errorf("%w: text has nothing to search for: %v", ErrInvalidRule, err)
+		}
+	}
 	r.SimilarToItem = strings.TrimSpace(r.SimilarToItem)
 	if len(r.SimilarToItem) > 64 {
 		return fmt.Errorf("%w: similar_to_item is not an item id", ErrInvalidRule)
@@ -147,8 +172,9 @@ func (r *Rule) Validate() error {
 	return nil
 }
 
-// normaliseTags trims and lowercases, and rejects an empty name rather than
-// dropping it: a tag rule with a blank tag is a mistake the UI should show.
+// normaliseTags trims and lowercases. An empty name is rejected by Validate
+// rather than dropped here: a tag rule with a blank tag is a mistake the UI should
+// show, not one to quietly fix.
 func normaliseTags(names []string) []string {
 	if len(names) == 0 {
 		return nil
