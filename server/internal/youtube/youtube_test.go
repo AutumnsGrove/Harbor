@@ -93,25 +93,30 @@ func TestMetadataReadsTheAnswer(t *testing.T) {
 }
 
 // The classification matters more than the message: a definitive "this id has
-// nothing" parks the item, and a busy endpoint must stay retryable. Harbor's
-// first drain asked this endpoint 371 times in a burst, and a 429 in that burst
-// is not a reason to give up on a video.
+// nothing" parks the item, a refusal keeps it, and a busy endpoint must stay
+// retryable. Harbor's first drain asked this endpoint 371 times in a burst, and a
+// 429 in that burst is not a reason to give up on a video.
+//
+// 401 and 403 are not "gone": they are what an owner who disabled embedding
+// produces for a video that plays fine in a browser, which is why they have their
+// own error (issue #79).
 func TestMetadataErrors(t *testing.T) {
 	tests := []struct {
-		name      string
-		status    int
-		body      string
-		wantErr   string
-		permanent bool
+		name    string
+		status  int
+		body    string
+		wantErr string
+		gone    bool
+		refused bool
 	}{
-		{"a deleted video", http.StatusNotFound, `{"error":"Not Found"}`, "404", true},
-		{"a private video", http.StatusUnauthorized, `{}`, "401", true},
-		{"gone for another reason", http.StatusForbidden, `{}`, "403", true},
-		{"rate limited", http.StatusTooManyRequests, `{}`, "429", false},
-		{"the endpoint is broken", http.StatusInternalServerError, `{}`, "500", false},
-		{"not JSON: a proxy's error page", http.StatusOK, "<html>", "not JSON", false},
-		{"no title", http.StatusOK, `{"author_name":"x"}`, "no title", true},
-		{"not a video type", http.StatusOK, `{"title":"x","type":"rich"}`, "type", true},
+		{"a deleted video", http.StatusNotFound, `{"error":"Not Found"}`, "404", true, false},
+		{"embedding disabled", http.StatusUnauthorized, `{}`, "401", false, true},
+		{"blocked for this client", http.StatusForbidden, `{}`, "403", false, true},
+		{"rate limited", http.StatusTooManyRequests, `{}`, "429", false, false},
+		{"the endpoint is broken", http.StatusInternalServerError, `{}`, "500", false, false},
+		{"not JSON: a proxy's error page", http.StatusOK, "<html>", "not JSON", false, false},
+		{"no title", http.StatusOK, `{"author_name":"x"}`, "no title", true, false},
+		{"not a video type", http.StatusOK, `{"title":"x","type":"rich"}`, "type", true, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -126,8 +131,14 @@ func TestMetadataErrors(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want it to mention %q", err, tc.wantErr)
 			}
-			if got := errors.Is(err, ErrNoMetadata); got != tc.permanent {
-				t.Errorf("ErrNoMetadata = %v, want %v: the retry decision hangs on it", got, tc.permanent)
+			if got := errors.Is(err, ErrNoMetadata); got != tc.gone {
+				t.Errorf("ErrNoMetadata = %v, want %v: the outcome hangs on it", got, tc.gone)
+			}
+			if got := errors.Is(err, ErrRefused); got != tc.refused {
+				t.Errorf("ErrRefused = %v, want %v: the outcome hangs on it", got, tc.refused)
+			}
+			if errors.Is(err, ErrNoMetadata) && errors.Is(err, ErrRefused) {
+				t.Error("an error is both gone and refused; the caller cannot tell what to do")
 			}
 		})
 	}

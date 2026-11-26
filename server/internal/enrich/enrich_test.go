@@ -788,3 +788,112 @@ func TestProcessEnrichesAPlainTextPage(t *testing.T) {
 		t.Errorf("og_json invented a cover for a text file: %q", enriched.OGJSON)
 	}
 }
+
+// A video whose owner disabled embedding answers 401 or 403 — the video plays
+// fine, the endpoint just will not describe it. Retiring the item for that loses
+// a real save with a real URL, so it is filed ready from the title it already has
+// (issue #79).
+func TestProcessFilesARefusedVideoFromItsSavedTitle(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	const savedTitle = "Medieval Cat Laws - Laws for your Medieval Cat - YouTube"
+
+	en := newTestEnricher(t, s, blockedFetcher(), &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{})
+	en.Videos = &fakeVideos{err: fmt.Errorf("%w: oEmbed answered 401 for jD3b1s-s9bk", youtube.ErrRefused)}
+
+	item := createItem(t, s, store.ItemInput{
+		ID: "refused", URL: ptr("https://m.youtube.com/watch?v=jD3b1s-s9bk&ra=m"),
+		Title: savedTitle, Source: model.SourceImport,
+	})
+	if err := en.Process(ctx, item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	after, err := s.GetItem(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if after.State != model.StateReady {
+		t.Fatalf("state = %q (%s), want ready: the video exists", after.State, after.LastError)
+	}
+	if after.Kind != model.KindVideo {
+		t.Errorf("kind = %q, want video", after.Kind)
+	}
+	if after.Title != savedTitle {
+		t.Errorf("title = %q, want the saved one kept", after.Title)
+	}
+	if !strings.Contains(after.ExtractError, "refuses") {
+		t.Errorf("extract_error = %q, want the refusal and what is missing", after.ExtractError)
+	}
+	if !strings.Contains(after.ExtractError, "no summary or tags") {
+		t.Errorf("extract_error = %q, want it to say what the item does not have", after.ExtractError)
+	}
+	if after.LastError != "" || after.Attempts != 0 || after.NextAttemptAt != nil {
+		t.Errorf("failure columns not cleared: last=%q attempts=%d next=%v", after.LastError, after.Attempts, after.NextAttemptAt)
+	}
+	if after.PromptVersion != VideoMetadataVersion {
+		t.Errorf("prompt version = %q, want %q: no prompt ran", after.PromptVersion, VideoMetadataVersion)
+	}
+}
+
+// The page can be readable enough to carry an og:title and still have no article.
+// A refusal then prefers the page's own title over the saved one, and keeps its
+// cover.
+func TestProcessFilesARefusedVideoFromItsPageTitle(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := &fakeFetcher{body: `<html><head>
+		<meta property="og:title" content="Medieval Cat Laws">
+		<meta property="og:image" content="https://i.ytimg.com/vi/jD3b1s-s9bk/hqdefault.jpg">
+	</head><body></body></html>`}
+
+	en := newTestEnricher(t, s, f, &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{})
+	en.Videos = &fakeVideos{err: fmt.Errorf("%w: oEmbed answered 403 for jD3b1s-s9bk", youtube.ErrRefused)}
+
+	item := createItem(t, s, store.ItemInput{
+		ID: "page", URL: ptr("https://www.youtube.com/watch?v=jD3b1s-s9bk"),
+		Title: "https://www.youtube.com/watch?v=jD3b1s-s9bk",
+	})
+	if err := en.Process(ctx, item); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	after, err := s.GetItem(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if after.State != model.StateReady {
+		t.Fatalf("state = %q (%s), want ready", after.State, after.LastError)
+	}
+	if after.Title != "Medieval Cat Laws" {
+		t.Errorf("title = %q, want the page's own", after.Title)
+	}
+	if !strings.Contains(after.DetailsJSON, "hqdefault.jpg") {
+		t.Errorf("details = %s, want the page's cover kept", after.DetailsJSON)
+	}
+}
+
+// A refusal with nothing to file it under is an honest failure: no title from the
+// page, no metadata, and a saved title that is only the URL.
+func TestProcessFailsARefusedVideoWithNoTitleToFileItUnder(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	const rawURL = "https://www.youtube.com/watch?v=jD3b1s-s9bk"
+
+	en := newTestEnricher(t, s, blockedFetcher(), &fakeDecider{}, &fakeWriter{}, &fakeEmbedder{})
+	en.Videos = &fakeVideos{err: fmt.Errorf("%w: oEmbed answered 401 for jD3b1s-s9bk", youtube.ErrRefused)}
+
+	item := createItem(t, s, store.ItemInput{ID: "bare", URL: ptr(rawURL), Title: rawURL})
+	if err := en.Process(ctx, item); err == nil {
+		t.Fatal("a refused video with no title was accepted")
+	}
+	after, err := s.GetItem(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if after.State != model.StateFailed || after.NextAttemptAt != nil {
+		t.Errorf("state = %q next = %v, want a terminal failure", after.State, after.NextAttemptAt)
+	}
+	if !strings.Contains(after.LastError, "refused") || !strings.Contains(after.LastError, "no title") {
+		t.Errorf("last_error = %q, want it to say why nothing was filed", after.LastError)
+	}
+}
