@@ -211,9 +211,15 @@ sync_checkout() {
 	return 0
 }
 
-# restore_checkout puts the checkout back where it was before the sync, for a
-# rollback: the old image must not be started by a compose file from a newer commit.
-# Nothing to do when the run did not sync, and nothing to do when it did not move.
+# restore_checkout puts the checkout back where it was before the sync. Every failed
+# exit after the sync calls it, because the invariant is "the image and the compose
+# file describe the same version" and a half-updated box has to keep it too.
+#
+# One path does not: a SIGTERM (an update interrupted mid-flight, systemd stopping the
+# unit) exits 130 through the signal trap without restoring, and leaves .env pinned at
+# the new digest with the checkout on the new commit. The two agree, so the next run's
+# already-pinned path reconciles them — which is why an interruption needs no cleanup
+# of its own (review on #95). Nothing to do when the run did not sync, or did not move.
 restore_checkout() {
 	[ -n "$CHECKOUT_BEFORE" ] || return 0
 	local now
