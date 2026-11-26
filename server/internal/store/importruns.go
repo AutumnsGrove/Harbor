@@ -66,7 +66,7 @@ func (s *Store) StartImportRun(ctx context.Context, fileSHA256 string, counts st
 	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO import_runs (id, file_sha256, state, checkpoint, counts_json, started_at)
 		 VALUES (?, ?, ?, 0, ?, ?)`,
-		run.ID, run.FileSHA256, run.State, run.CountsJSON, stamp(time.Now().UTC())); err != nil {
+		run.ID, run.FileSHA256, run.State, run.CountsJSON, Stamp(time.Now().UTC())); err != nil {
 		return model.ImportRun{}, false, fmt.Errorf("starting an import run: %w", err)
 	}
 	stored, err := s.ImportRunByID(ctx, run.ID)
@@ -135,7 +135,7 @@ func (s *Store) FinishImportRun(ctx context.Context, id, state string, records i
 	}
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE import_runs SET state = ?, checkpoint = ?, counts_json = ?, finished_at = ?
-		 WHERE id = ?`, state, records, counts, stamp(time.Now().UTC()), id)
+		 WHERE id = ?`, state, records, counts, Stamp(time.Now().UTC()), id)
 	if err != nil {
 		return fmt.Errorf("finishing import run %s: %w", id, err)
 	}

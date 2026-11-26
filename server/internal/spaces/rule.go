@@ -259,9 +259,12 @@ func (r Rule) Where(ctx context.Context, now time.Time, sim Similarity) (Clause,
 		}
 	}
 	if r.WithinDays != nil {
-		from := now.AddDate(0, 0, -*r.WithinDays).UTC()
+		from := now.AddDate(0, 0, -*r.WithinDays)
 		parts = append(parts, "saved_at >= ?")
-		args = append(args, from.Format(time.RFC3339))
+		// store.Stamp, not RFC3339: saved_at is text in the store's fixed-width
+		// layout, and a bound in any other layout compares wrongly at the edge of
+		// the window (review on #94).
+		args = append(args, store.Stamp(from))
 	}
 	if r.After != "" {
 		parts = append(parts, "saved_at >= ?")

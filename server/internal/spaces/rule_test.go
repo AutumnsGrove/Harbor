@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
+	"github.com/AutumnsGrove/Harbor/server/internal/store"
 )
 
 // The rule vocabulary is the contract (open-questions H3), so each operator is
@@ -61,7 +62,9 @@ func TestRuleCompilesToTypedSQL(t *testing.T) {
 			name: "within_days is relative to now, not to the Space",
 			rule: Rule{WithinDays: &days},
 			want: []string{"saved_at >= ?"},
-			args: []any{"2026-08-28T12:00:00Z"},
+			// The store's own layout: saved_at is text, and a bound in another
+			// layout compares wrongly at the window edge.
+			args: []any{store.Stamp(now.AddDate(0, 0, -days))},
 		},
 		{
 			name: "after is inclusive",
@@ -258,4 +261,37 @@ type fakeSimilarity struct {
 
 func (f fakeSimilarity) Neighbours(context.Context, string) ([]string, error) {
 	return f.ids, f.err
+}
+
+// saved_at is text in the store's fixed-width layout, so the bound's layout decides
+// whether a row at the edge of the window is inside it. time.RFC3339 was the
+// obvious choice and it is the wrong one: `…T10:00:00Z` sorts below
+// `…T10:00:00.500000000Z`, so a row half a second *inside* the window fell outside
+// it (review on #94).
+func TestWithinDaysBoundSortsWithStoredTimestamps(t *testing.T) {
+	now := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	days := 30
+	clause, err := Rule{WithinDays: &days}.Where(context.Background(), now, nil)
+	if err != nil {
+		t.Fatalf("Where: %v", err)
+	}
+	bound, ok := clause.Args[0].(string)
+	if !ok {
+		t.Fatalf("bound is %T, want a string", clause.Args[0])
+	}
+	cutoff := now.AddDate(0, 0, -days)
+	if bound != store.Stamp(cutoff) {
+		t.Errorf("bound = %q, want the store's layout %q", bound, store.Stamp(cutoff))
+	}
+
+	// The property, not the format: a row just inside the window must sort at or
+	// above the bound, and a row just outside must sort below it.
+	inside := store.Stamp(cutoff.Add(500 * time.Millisecond))
+	if !(inside >= bound) {
+		t.Errorf("a row half a second inside the window sorts below the bound: %q < %q", inside, bound)
+	}
+	outside := store.Stamp(cutoff.Add(-500 * time.Millisecond))
+	if !(outside < bound) {
+		t.Errorf("a row half a second outside the window sorts at or above the bound: %q >= %q", outside, bound)
+	}
 }
