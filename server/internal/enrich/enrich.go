@@ -218,8 +218,9 @@ func RetryDelay(attempt int) time.Duration {
 }
 
 // Process enriches one item and records either success or failure on the item
-// row. It returns the cause for the loop's log line; the loop continues with
-// the next item either way.
+// row. It returns the cause, which the loop counts; the single log line for a
+// failed item is written here, by the layer that knows whether the row was
+// parked or scheduled (issue #80).
 func (e *Enricher) Process(ctx context.Context, item model.Item) error {
 	if e.PromptVersion == "" || e.EmbeddingModel == "" {
 		cause := permanent(errors.New("enrich: prompt version and embedding model must be configured"))
@@ -411,7 +412,9 @@ func (e *Enricher) tryVideoMetadata(ctx context.Context, item model.Item, extrac
 
 	meta, err := e.Videos.Metadata(ctx, *item.URL)
 	if err != nil {
-		e.Log.Warn("video metadata unavailable", "item", item.ID, "error", err)
+		// No log line here: the error is returned, and whichever outcome it leads
+		// to — filed anyway, or parked with a reason — is logged once by the
+		// layer that knows which (issue #80).
 		if errors.Is(err, youtube.ErrRefused) {
 			return e.fileRefusedVideo(ctx, item, extracted, err)
 		}
@@ -545,7 +548,18 @@ func videoReason(cause error) string {
 
 // fail advances the retry columns. A permanent error, or the third failure,
 // parks the item as failed with the reason kept.
+//
+// A cancelled run is not an outcome: if the context died while this item was
+// being worked on, nothing is recorded, no retry is scheduled and no failure is
+// claimed. The row keeps the state it had, and the next pass picks it up — which
+// is the whole point of a resumable drain. Recording it would also fail, because
+// the write needs the same dead context (CLAUDE.md's class, issue #80).
 func (e *Enricher) fail(ctx context.Context, item model.Item, cause error) error {
+	if err := ctx.Err(); err != nil {
+		e.Log.Info("enrichment stopped mid-item; the row is unchanged", "item", item.ID, "reason", err.Error())
+		return err
+	}
+
 	attempt := item.Attempts + 1
 	var next *time.Time
 	if !isPermanent(cause) && attempt < MaxAttempts {
@@ -555,12 +569,25 @@ func (e *Enricher) fail(ctx context.Context, item model.Item, cause error) error
 	if _, err := e.Store.RecordEnrichmentFailure(ctx, item.ID, cause.Error(), next); err != nil {
 		e.Log.Error("recording an enrichment failure", "item", item.ID, "error", err)
 	}
-	e.Log.Warn("enrichment failed",
-		"item", item.ID,
-		"attempt", attempt,
-		"terminal", next == nil,
-		"error", cause.Error(),
-	)
+	// One line per item outcome, and the level is the outcome: a row that is now
+	// parked with a reason is a fact, and a row that will be tried again is a
+	// warning. This used to be two lines at WARN plus a third at ERROR from the
+	// loop, which made a night of 11 parked rows read as an error storm (issue
+	// #80).
+	if next == nil {
+		e.Log.Info("enrichment parked the item",
+			"item", item.ID,
+			"attempts", attempt,
+			"error", cause.Error(),
+		)
+	} else {
+		e.Log.Warn("enrichment failed; a retry is scheduled",
+			"item", item.ID,
+			"attempt", attempt,
+			"retry_at", next.Format(time.RFC3339),
+			"error", cause.Error(),
+		)
+	}
 	return cause
 }
 

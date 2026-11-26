@@ -428,6 +428,27 @@ HTML reader, so a text file went into a parser that found no article and failed 
 - The SSRF guard, the byte cap and the retry budget are unchanged. A PDF and an image still fail
   here, on purpose, until phase 6 gives them a reader.
 
+### One line per item outcome (2026-11-26, issue #80)
+
+A single failed save wrote three log lines at two levels — `WARN video metadata unavailable`, then
+`WARN enrichment failed`, then `ERROR enrichment item failed` — so eleven parked rows made the tail of
+`docker logs` read as an error storm while the state was unchanged and nothing was being attempted.
+
+- One line per item, written by `fail()` in the pipeline, because that is the layer that knows
+  whether the row was parked or scheduled: `INFO` for parked with a reason, `WARN` when a retry is
+  pending, `ERROR` only when something broke the run itself (recording the failure, a dead store).
+- The loop no longer writes its own copy; it counts. A video's metadata failure is no longer logged
+  where it happens either, because the outcome above already carries it.
+- **A cancelled run claims no outcome.** If the context died while an item was being worked on, `fail`
+  records nothing, schedules nothing and logs nothing as a failure; `Pass` returns the cancellation
+  instead of counting the row. It used to schedule a retry it could not write (the write needs the
+  same dead context), log `a retry is scheduled` with a timestamp, and count a failure for an item
+  that was still queued. Review on #91 found it, which is the third time this class has appeared —
+  the rule is that a cancellation stops the work rather than finishing it.
+- The pass summary's two numbers belong to the pass. `failed` was a field that was never reset, which
+  is how a pass that took 5 rows reported `failed:11` — every failure since the process started. Both
+  counts are now returned by `Pass`, and `failed ≤ processed` is a property rather than a hope.
+
 ### An unreadable answer is retried at the call (2026-11-26, issue #78)
 
 Eight rows spent all three item attempts on `nova write: answer is not JSON: unexpected end of JSON
