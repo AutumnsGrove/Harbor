@@ -397,6 +397,7 @@ job_update() {
 	# at the image that is running (design.md §3 puts the pin first; this order is
 	# the same guarantee with one less way to be left inconsistent).
 	if ! take_snapshot; then
+		restore_checkout
 		status "failed" "snapshot failed; not updating"
 		exit 1
 	fi
@@ -406,6 +407,7 @@ job_update() {
 	if ! compose pull harbor; then
 		reason="pull failed"
 		rewrite_env_image "$old_ref"
+		restore_checkout
 		status "failed" "$reason"
 		exit 1
 	fi

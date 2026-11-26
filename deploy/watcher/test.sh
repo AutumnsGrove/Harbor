@@ -601,6 +601,35 @@ case_checkout_syncs_before_the_pin() {
 	assert_contains "$(status_json)" '"status":"ok"'
 }
 
+# Every exit after the sync restores it, so "the image and the compose file describe
+# the same version" holds after a failed update, not just after a rollback. The pull
+# exit and the snapshot exit were both missing it (review on #95).
+case_pull_failure_restores_the_checkout() {
+	current="a failed pull puts the checkout back"
+	setup
+	make_checkout
+	touch "$STATE/pull_fails"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "pull failed" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest is re-pinned"
+	assert_contains "$(git_calls)" "reset --hard" "the checkout was restored"
+}
+
+case_snapshot_failure_restores_the_checkout() {
+	current="a failed snapshot puts the checkout back"
+	setup
+	make_checkout
+	touch "$STATE/snapshot_fails"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "snapshot failed" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "nothing was pinned"
+	assert_contains "$(git_calls)" "reset --hard" "the checkout was restored"
+}
+
 # The other rollback path. The health-failure path above reaches one restore_checkout;
 # this one reaches the call in the recreate-failed branch, which nothing covered
 # (review on #95).
@@ -771,7 +800,9 @@ for case in \
 	case_unreadable_checkout_state_refuses_to_update \
 	case_rollback_restores_the_checkout \
 	case_recreate_failure_restores_the_checkout \
-	case_rollback_without_a_checkout_touches_no_git; do
+	case_rollback_without_a_checkout_touches_no_git \
+	case_pull_failure_restores_the_checkout \
+	case_snapshot_failure_restores_the_checkout; do
 	"$case"
 done
 
