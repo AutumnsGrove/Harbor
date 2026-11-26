@@ -34,15 +34,26 @@ func (s *Store) FailedItems(ctx context.Context, limit int) ([]model.Item, error
 	return items, rows.Err()
 }
 
-// RetryItem puts a *failed* item back in the queue immediately: attempts reset,
-// no backoff, and the old reason cleared so a successful pass leaves no stale
-// trace. An item that is queued, enriching or ready is left alone — retrying a
-// ready item would re-enrich it and overwrite a summary that already
-// succeeded. A soft-deleted or missing item is ErrNotFound.
+// RetryItem puts an item back in the queue immediately: attempts reset, no
+// backoff, and the old reason cleared so a successful pass leaves no stale
+// trace. It takes a *failed* item, and also a row filed without its page — the
+// walled or dead save whose marker is a prompt_version ending in ".v1" (design
+// §6). That is how a wall that has since lifted is found out about, and why the
+// marker, the reason and a 'dead' verdict are cleared here: a page that answers
+// now is not a page that is still dead.
+//
+// An ordinary ready item, or one already queued or enriching, is left alone —
+// retrying a success would re-enrich it and overwrite a summary that already
+// exists. A soft-deleted or missing item is ErrNotFound.
 func (s *Store) RetryItem(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE items
-		SET state = 'queued', attempts = 0, next_attempt_at = NULL, last_error = ''
-		WHERE id = ? AND deleted_at IS NULL AND state = 'failed'`, id)
+		SET state = 'queued', attempts = 0, next_attempt_at = NULL, last_error = '',
+		    prompt_version = CASE WHEN state = 'failed' THEN prompt_version ELSE '' END,
+		    extract_error = CASE WHEN state = 'failed' THEN extract_error ELSE '' END,
+		    link_status = CASE WHEN state = 'failed' THEN link_status ELSE 'ok' END,
+		    last_checked_at = CASE WHEN state = 'failed' THEN last_checked_at ELSE NULL END
+		WHERE id = ? AND deleted_at IS NULL
+		  AND (state = 'failed' OR (state = 'ready' AND (prompt_version LIKE 'wall.%' OR prompt_version LIKE 'dead.%')))`, id)
 	if err != nil {
 		return fmt.Errorf("retrying %s: %w", id, err)
 	}

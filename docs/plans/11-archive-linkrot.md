@@ -66,7 +66,9 @@ web/src/lib/components/LinkBadge.svelte     dead / paywalled / error
    rewrite the row or the R2 object (assert on the fake R2 put count); a changed hash overwrites the row
    and writes a new object, leaving the old key deleted (or orphan-swept — **decide and test**).
 3. Link check transitions: 200 → `ok`; 404/410 → `dead` + archive retained; 403/429/5xx/timeout →
-   `error` + retry later; a `dead` item that comes back to life → `ok` again.
+   `error` + retry later; a `dead` item that comes back to life → `ok` again. Enrichment already
+   writes `dead` for a 404 it meets (issue #76), so the checker must treat that as its own verdict
+   rather than a foreign value: it may confirm or revive it, never reset it to `error`.
 4. Scheduler: only items older than 30 days and not checked in the last 7 days; at most 50 per run;
    ordering is stable and staggered; a crash mid-run resumes without re-checking the same 50.
 5. Sandbox: the viewer route renders an `<iframe sandbox="">` with no `allow-scripts`, no

@@ -290,3 +290,79 @@ func TestTheUserAgentNamesTheBuild(t *testing.T) {
 		t.Errorf("User-Agent = %q", seen)
 	}
 }
+
+// issue #76, design §6: a page that will not serve this client and a page that
+// is gone are different answers, and neither of them is "broken".
+func TestAnHTTPErrorSaysWhichKindOfNoItWas(t *testing.T) {
+	cases := []struct {
+		status int
+		walled bool
+		dead   bool
+		rate   bool
+	}{
+		{http.StatusUnauthorized, true, false, false},
+		{http.StatusForbidden, true, false, false},
+		{http.StatusUnavailableForLegalReasons, true, false, false},
+		{http.StatusNotFound, false, true, false},
+		{http.StatusGone, false, true, false},
+		{http.StatusTooManyRequests, false, false, true},
+		{http.StatusInternalServerError, false, false, false},
+		{http.StatusOK, false, false, false},
+	}
+	for _, c := range cases {
+		err := &HTTPError{URL: "https://example.com/", Status: c.status}
+		if got := err.Walled(); got != c.walled {
+			t.Errorf("%d: Walled() = %v, want %v", c.status, got, c.walled)
+		}
+		if got := err.Dead(); got != c.dead {
+			t.Errorf("%d: Dead() = %v, want %v", c.status, got, c.dead)
+		}
+		if got := err.RateLimited(); got != c.rate {
+			t.Errorf("%d: RateLimited() = %v, want %v", c.status, got, c.rate)
+		}
+	}
+}
+
+// A host that does not resolve at all is a dead link, not a bad URL: the save
+// was fine, the site is not there any more. The SSRF guard's own refusal stays
+// a separate error, because a sinkholed answer (0.0.0.0) arrives as an address
+// and must not read as "the site is gone" (issues #76, #77).
+func TestAHostThatDoesNotResolveIsADeadLink(t *testing.T) {
+	c := newTestClient(t)
+	_, err := c.Get(context.Background(), "https://there-is-no-such-host.invalid/page")
+	if !errors.Is(err, ErrDeadLink) {
+		t.Fatalf("Get() error = %v, want ErrDeadLink", err)
+	}
+	if errors.Is(err, ErrBlocked) {
+		t.Error("a name that does not resolve was reported as a blocked address")
+	}
+}
+
+// The fetcher presents a browser's User-Agent (open-questions P1): it is what
+// makes a shop that hangs `curl/8` answer at all. One constant, so the next
+// reversal is one line.
+func TestTheDefaultUserAgentIsABrowser(t *testing.T) {
+	var seen string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Get("User-Agent")
+		fmt.Fprint(w, "<html><body>hello</body></html>")
+	}))
+	defer server.Close()
+
+	c := newTestClient(t)
+	page, err := c.Get(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer page.Close()
+
+	if seen != BrowserUserAgent {
+		t.Fatalf("User-Agent = %q, want the browser constant", seen)
+	}
+	if strings.Contains(strings.ToLower(seen), "harbor") || strings.Contains(strings.ToLower(seen), "curl") {
+		t.Errorf("User-Agent = %q; a page that blocks unknown clients is being told exactly what we are", seen)
+	}
+	if !strings.HasPrefix(seen, "Mozilla/5.0") {
+		t.Errorf("User-Agent = %q, want a Mozilla/5.0 shape", seen)
+	}
+}

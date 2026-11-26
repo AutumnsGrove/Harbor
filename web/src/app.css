@@ -633,6 +633,16 @@ a {
 	font-size: var(--t-s);
 }
 
+.card .sub .flag {
+	color: var(--amb);
+	white-space: nowrap;
+}
+
+.card .sub .flag::before {
+	content: '· ';
+	color: var(--dim);
+}
+
 .card .more {
 	max-height: 0;
 	opacity: 0;

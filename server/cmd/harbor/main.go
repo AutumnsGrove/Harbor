@@ -106,8 +106,11 @@ func enrichmentProcessor(cfg build.Config, library *store.Store, log *slog.Logge
 	// The same place that logs a `nova call` records its cost against the item,
 	// so the Settings panel and the log line reconcile (issue #52).
 	novaClient := enrichnova.New(enrichnova.Config{APIKey: cfg.OpenRouterAPIKey, Log: log, Usage: library})
+	// The fetcher presents a browser User-Agent (design §6, open-questions P1):
+	// the build's own name is what 40 of the library's saves were being refused
+	// for, and a page that then serves no readable text files as a wall.
 	pipeline := enrich.New(
-		enrich.HTTPFetcher{Client: fetch.New(fetch.WithUserAgent("Harbor/" + build.Version() + " (+https://github.com/AutumnsGrove/Harbor)"))},
+		enrich.HTTPFetcher{Client: fetch.New()},
 		novaClient, novaClient, novaClient, library, log,
 	)
 	pipeline.PromptVersion = enrichnova.PromptVersion
@@ -169,7 +172,7 @@ func serve(ctx context.Context, getenv func(string) string, stdout io.Writer) er
 	// page fetch has already spent its time (issue #49). A directory that cannot
 	// be created is a startup failure, not a silent placeholder for every card.
 	covers, err := cover.Open(filepath.Join(cfg.DataDir, "covers"),
-		cover.HTTP{Client: fetch.New(fetch.WithUserAgent("Harbor/" + build.Version() + " (+https://github.com/AutumnsGrove/Harbor)"))}, log)
+		cover.HTTP{Client: fetch.New()}, log)
 	if err != nil {
 		return err
 	}

@@ -41,7 +41,18 @@ var (
 	ErrTooManyRedirects = errors.New("fetch: too many redirects")
 	// ErrUnsupportedURL is a scheme or shape Harbor will not fetch.
 	ErrUnsupportedURL = errors.New("fetch: unsupported URL")
+	// ErrDeadLink is a name that does not resolve: the host is gone, which is a
+	// dead link rather than a bad save (issue #76).
+	ErrDeadLink = errors.New("fetch: the host does not resolve")
 )
+
+// BrowserUserAgent is what Harbor presents. It is a browser's, deliberately:
+// a shop that hangs any non-browser client (uniqlo) answers this one in under a
+// second, and most of the 403s were punishing `Harbor/0`. The reversal and its
+// accepted cost are in design §6 and open-questions P1. One constant, so the
+// next reversal is one line.
+const BrowserUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
 
 // HTTPError is a non-2xx answer. Permanent tells the retry policy whether
 // another attempt could help: a 404 will not start working, a 503 might.
@@ -64,6 +75,27 @@ func (e *HTTPError) Permanent() bool {
 	}
 	return false
 }
+
+// Walled reports a site refusing this client rather than the page being broken:
+// a paywall, a bot wall, a sign-in. The save is still hers, so the pipeline
+// files it instead of parking it (design §6).
+func (e *HTTPError) Walled() bool {
+	switch e.Status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusUnavailableForLegalReasons:
+		return true
+	}
+	return false
+}
+
+// Dead reports the page being gone: it was here, it is not. `link_status`'s
+// vocabulary, reached by enrichment as well as by phase 11's checker.
+func (e *HTTPError) Dead() bool {
+	return e.Status == http.StatusNotFound || e.Status == http.StatusGone
+}
+
+// RateLimited reports a site that asked us to come back later. Unlike the two
+// above it is retryable, on its own longer budget (design §6).
+func (e *HTTPError) RateLimited() bool { return e.Status == http.StatusTooManyRequests }
 
 // Page is a fetched response on disk. Close removes the temp file; a caller
 // that forgets leaks one file, never a descriptor.
@@ -133,8 +165,10 @@ func WithMaxRedirects(n int) Option {
 	}
 }
 
-// WithUserAgent sets the User-Agent. A page that blocks unknown clients is
-// allowed to; this only identifies Harbor honestly.
+// WithUserAgent sets the User-Agent. The default is BrowserUserAgent: presenting
+// a browser is a deliberate decision with a cost (design §6, open-questions P1),
+// and a page that then serves no readable text is filed as a wall rather than
+// called a broken save.
 func WithUserAgent(ua string) Option {
 	return func(c *Client) {
 		if strings.TrimSpace(ua) != "" {
@@ -151,7 +185,7 @@ func New(opts ...Option) *Client {
 	c := &Client{
 		maxBytes:     DefaultMaxBytes,
 		maxRedirects: DefaultMaxRedirects,
-		userAgent:    "Harbor/0 (+https://github.com/AutumnsGrove/Harbor)",
+		userAgent:    BrowserUserAgent,
 	}
 	c.http = &http.Client{Timeout: DefaultTimeout}
 
@@ -199,6 +233,13 @@ func (c *Client) Get(ctx context.Context, rawURL string) (*Page, error) {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		// A name that does not resolve is the host being gone, not a fault in
+		// Harbor; it files as a dead link. The guard's own refusal (a sinkholed
+		// 0.0.0.0 answer, a private address) is a different error on purpose.
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			return nil, fmt.Errorf("%w: %s", ErrDeadLink, dnsErr.Name)
+		}
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
 	defer resp.Body.Close()

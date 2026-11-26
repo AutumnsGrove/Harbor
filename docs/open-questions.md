@@ -524,3 +524,50 @@ is a human review against `design/mockup/`, not a gate.
 ### O3. ~~Which port?~~ — **settled: 8897**
 See B3/N12 and spike S7. 8895 is Pixelsort, 8893 Sepia, 8894 Coffer reserved, 8896 Outpost. 8897 was
 verified free on both loopback and the tailnet on 2026-11-18.
+
+## P. What the web answers (2026-11-26)
+
+Prompted by the library's own failure list, read off the potato: **148 rows in Needs attention**, and
+almost none of them a Harbor fault. 39 × `answered 403`, 34 × `answered 404`, 23 × timeout (16 of
+them uniqlo), 6 × `429`, 6 × TLS, 3 × `401`, 2 × dead DNS. Each of these was a real save of hers, so
+each answer below is about keeping the row, not about clearing the number.
+
+### P1. ~~Does the fetcher identify itself honestly?~~ — **settled: no, it presents a browser UA**
+This reverses the earlier decision (design §6 step 1 and the `Harbor/0` User-Agent), on evidence:
+`https://www.uniqlo.com/us/en/products/E478339-000/00?…` answers **200 in 0.7 s with a browser UA**
+and never answers `curl/8` or `Harbor/r250`, and 16 of the 23 timeouts were that one shop. Retail
+sites she actually saves from (rei, etsy, kate spade, swarovski) answer a browser and 403 a stranger.
+Rejected: staying honest and accepting the loss (it is 40+ real saves reading "couldn't read this"),
+and a per-host allowlist of browser UAs (an upkeep list that goes stale the moment a site changes its
+check). Accepted cost: a page that serves *us* a JavaScript shell is now our own doing. It is still
+not a failed save — a body with no readable text goes to the model with its title and Open Graph tags,
+which is how The Strand was filed — and only a save with nothing to file it under fails.
+
+### P2. ~~Is a wall a failed save?~~ — **settled: no — filed `ready`, badged, `wall.v1`**
+401, 403 and 451 are the site refusing this client, which no retry can fix; parking them as `failed`
+put 40+ of her rows in an amber "couldn't read this" strip that was not true. The row keeps its
+imported title and note, gets `prompt_version='wall.v1'` and `extract_error` saying so, and shows a
+**walled** badge.
+**No model call and no tags**: a summary written from a title alone is a fabrication the library
+cannot take back. Rejected: a fifth `state` (design says a walled item *stays* `ready`, and state is
+the queue's vocabulary, not the reader's), a new `walled_at` column (one fact, and
+`prompt_version`'s marker idiom already exists for exactly this — `oembed.v1` does the same job for
+a video), and reusing `link_status='error'` (it means "the checker could not tell", which is phase
+11's retry story, and a permanent 403 is not that).
+
+### P3. ~~Is a dead link a failed save?~~ — **settled: no — `link_status='dead'`**
+404 and 410, and a host that no longer resolves (NXDOMAIN), are the page being gone. The row is filed
+`ready` from what the save has, `prompt_version='dead.v1'`, and carries `link_status='dead'` with
+`last_checked_at`, which is the same answer phase 11's checker would reach — so the checker *updates*
+that verdict (a link that comes back is `ok` again) instead of contradicting it. Rejected: a second
+column for death (two fields holding one fact is the drift design §7 exists to prevent), and leaving
+`link_status` alone until phase 11 (the rows would be filed today with no badge saying why they are
+thin).
+
+### P4. ~~How long is the retry budget?~~ — **settled: 3 tries over ~an hour; 5 over ~16 h for a 429**
+C4's three tries over an hour stands for a broken answer: a 5xx, a timeout, a TLS failure, an
+unparseable body. A 429 is different — the page exists and asked us to come back — so rate limiting
+gets 15 m, 45 m, 3 h, 12 h and parks only after that. Rejected: infinite retry for 429 (an item that
+never leaves the queue and never asks anything of her), and one budget for both causes (a site that
+asked us to slow down is parked inside the hour, which reads as permanent for an answer that was
+explicitly temporary).

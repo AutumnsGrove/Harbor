@@ -103,6 +103,24 @@
 		}
 	}
 
+	// Issue #76: a walled or dead save is filed, not failed, so this is the one
+	// way to ask again — a wall that has lifted, or a link that came back. The
+	// server clears the marker and the verdict, and the loop re-reads it.
+	async function retry() {
+		if (!item || saving) return;
+		saving = true;
+		problem = null;
+		try {
+			const answer = await api.items.retry(item.id);
+			adopt(answer.item);
+			say('Queued for another read.');
+		} catch (error) {
+			problem = message(error);
+		} finally {
+			saving = false;
+		}
+	}
+
 	async function restore() {
 		if (!item || saving) return;
 		saving = true;
@@ -221,6 +239,10 @@
 			{/if}
 			{#if entry.state === 'failed'}
 				<span class="pill amb"><Icon name="alert" size={13} /> Enrichment failed</span>
+			{:else if entry.walled}
+				<span class="pill amb"><Icon name="lock" size={13} /> Behind a wall</span>
+			{:else if entry.linkStatus === 'dead'}
+				<span class="pill amb"><Icon name="alert" size={13} /> Link dead</span>
 			{/if}
 		</div>
 
@@ -228,6 +250,17 @@
 			<p class="callout amb" role="status">
 				<Icon name="alert" size={15} />
 				<span>{entry.lastError || 'Enrichment failed. Retry it from the library when you are ready.'}</span>
+			</p>
+		{:else if entry.walled || entry.linkStatus === 'dead'}
+			<!-- Filed without its page, which is not a failure (issue #76): the row
+			     keeps what the save carried, and this says what it does not have. -->
+			<p class="callout amb" role="status">
+				<Icon name="alert" size={15} />
+				<span>
+					{entry.walled
+						? 'This site would not serve the page to Harbor, so there is no summary or tags. The title and your note are kept.'
+						: 'The page is gone, so there is no summary or tags. The title, your note and the link are kept.'}
+				</span>
 			</p>
 		{/if}
 
@@ -245,6 +278,11 @@
 			{/if}
 			<span class="sp"></span>
 
+			{#if entry.walled || entry.linkStatus === 'dead'}
+				<button class="btn ghost" onclick={retry} disabled={saving}>
+					<Icon name="refresh" /> Try again
+				</button>
+			{/if}
 			{#if confirmingDelete && !entry.deletedAt}
 				<span class="dim">Move to Recently deleted?</span>
 				<button class="btn ghost" onclick={() => (confirmingDelete = false)}>Cancel</button>
@@ -273,7 +311,9 @@
 				<p class="hint">
 					{entry.state === 'failed'
 						? 'No tags: enrichment failed, so none were added.'
-						: 'No tags yet. Enrichment adds them, and they are edited once Spaces arrive.'}
+						: entry.walled || entry.linkStatus === 'dead'
+							? 'No tags: the page could not be read, so none were added.'
+							: 'No tags yet. Enrichment adds them, and they are edited once Spaces arrive.'}
 				</p>
 			{/if}
 		</section>

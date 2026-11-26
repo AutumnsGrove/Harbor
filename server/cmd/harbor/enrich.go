@@ -35,10 +35,19 @@ overstates the damage, and a row whose re-enrichment cannot change og_json — a
 walled video filed from public metadata — keeps matching, so run this once per
 deliberate pass rather than expecting the count to reach zero.
 
+--refile-failed is the third selection, and it exists because a better rule
+cannot help the rows an older one already parked: the 403s and 404s of issue #76
+sit in the failed state until something re-reads them. It queues every parked row, and
+most of them cost no model call at all — a site that refuses this client and a
+page that is gone both file from what the save already carried, with a badge,
+without asking the model anything. The rows that do read a page again are the
+ones whose cause might genuinely be gone (a 5xx, a timeout).
+
 Flags:
-  --limit N     queue at most N items, oldest saved first (default: all)
-  --refresh     re-queue finished items whose stored cover is not an absolute URL
-  --dry-run     report what would be queued and write nothing
+  --limit N        queue at most N items, oldest saved first (default: all)
+  --refresh        re-queue finished items whose stored cover is not an absolute URL
+  --refile-failed  re-queue every parked row so the current rules see it again
+  --dry-run        report what would be queued and write nothing
 
 The queue is drained by ` + "`harbor serve`" + `, so the container must be running with
 OPENROUTER_API_KEY set; without a key the loop only marks rows ready and nothing
@@ -56,11 +65,15 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	limit := flags.Int("limit", 0, "queue at most N items (0: all)")
 	dryRun := flags.Bool("dry-run", false, "report and write nothing")
 	refresh := flags.Bool("refresh", false, "re-queue finished items whose stored cover is not an absolute URL")
+	refileFailed := flags.Bool("refile-failed", false, "re-queue every parked row so the current rules see it again")
 	if err := flags.Parse(args); err != nil {
 		return fmt.Errorf("%s\n\n%s", err, enrichUsage)
 	}
 	if flags.NArg() > 0 {
 		return fmt.Errorf("enrich takes no arguments (unexpected %q)\n\n%s", flags.Arg(0), enrichUsage)
+	}
+	if *refresh && *refileFailed {
+		return fmt.Errorf("--refresh and --refile-failed select different rows; pick one\n\n%s", enrichUsage)
 	}
 
 	cfg, err := build.Load(getenv)
@@ -81,18 +94,24 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	defer library.Close()
 
 	waiting, err := library.UnenrichedCount(ctx)
-	if *refresh {
+	switch {
+	case *refresh:
 		waiting, err = library.RelativeCoverCount(ctx)
+	case *refileFailed:
+		waiting, err = library.FailedCount(ctx)
 	}
 	if err != nil {
 		return err
 	}
 	if waiting == 0 {
-		if *refresh {
+		switch {
+		case *refresh:
 			fmt.Fprintln(stdout, "no finished item holds a cover that is not an absolute URL")
-			return nil
+		case *refileFailed:
+			fmt.Fprintln(stdout, "nothing is parked in Needs attention")
+		default:
+			fmt.Fprintln(stdout, "no items are waiting for their first enrichment")
 		}
-		fmt.Fprintln(stdout, "no items are waiting for their first enrichment")
 		return nil
 	}
 
@@ -104,9 +123,12 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 		if *limit > 0 && *limit < would {
 			would = *limit
 		}
-		if *refresh {
+		switch {
+		case *refresh:
 			fmt.Fprintf(stdout, "would re-queue %d item(s) with a relative cover at priority %d\n", would, enrichPriority)
-		} else {
+		case *refileFailed:
+			fmt.Fprintf(stdout, "would re-queue %d parked item(s) at priority %d\n", would, enrichPriority)
+		default:
 			fmt.Fprintf(stdout, "would queue %d item(s) for enrichment at priority %d\n", would, enrichPriority)
 		}
 		if would < waiting {
@@ -120,17 +142,24 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	// --refresh, quietly queue the whole never-enriched backlog as well — the
 	// bill the dry run was supposed to preview (pi-review on #68).
 	var queued, remaining int
-	if *refresh {
+	switch {
+	case *refresh:
 		queued, remaining, err = library.QueueRelativeCovers(ctx, enrichPriority, *limit)
-	} else {
+	case *refileFailed:
+		// Interactive priority: these are her saves, and this run is watched.
+		queued, remaining, err = library.QueueFailed(ctx, 0, *limit)
+	default:
 		queued, remaining, err = library.QueueUnenriched(ctx, enrichPriority, *limit)
 	}
 	if err != nil {
 		return err
 	}
-	if *refresh {
+	switch {
+	case *refresh:
 		fmt.Fprintf(stdout, "re-queued %d item(s) with a relative cover\n", queued)
-	} else {
+	case *refileFailed:
+		fmt.Fprintf(stdout, "re-queued %d parked item(s); a wall or a dead link will file without a model call\n", queued)
+	default:
 		fmt.Fprintf(stdout, "queued %d item(s) for enrichment\n", queued)
 	}
 	if remaining > 0 {

@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/AutumnsGrove/Harbor/server/internal/model"
+	"github.com/AutumnsGrove/Harbor/server/internal/store"
 )
 
 // plans/03 — the attention strip reads failures from the database, and retry
@@ -43,5 +46,55 @@ func TestAttentionListsFailedItemsAndRetryRequeues(t *testing.T) {
 
 	if rec := itemsRequest(h, http.MethodPost, "/api/items/missing/retry", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("retry of a missing item = %d, want 404", rec.Code)
+	}
+}
+
+// issue #76: a wall or a dead link is filed with a badge, not parked, and the
+// API is where the card learns which badge to draw. A walled save is in the
+// library and out of Needs attention.
+func TestAWalledSaveIsBadgedAndNotInNeedsAttention(t *testing.T) {
+	h, library := itemsHandler(t)
+	ctx := context.Background()
+	walled := saveItem(t, h, map[string]any{"url": "https://www.nytimes.com/2026/11/01/thing.html"})
+	dead := saveItem(t, h, map[string]any{"url": "https://example.com/gone"})
+
+	if _, err := library.ApplyUnreadable(ctx, walled.Item.ID, store.Unreadable{
+		Reason: "the site refuses this client (answered 403)", Marker: model.WallVersion,
+	}); err != nil {
+		t.Fatalf("ApplyUnreadable(wall): %v", err)
+	}
+	if _, err := library.ApplyUnreadable(ctx, dead.Item.ID, store.Unreadable{
+		Reason: "the page is gone (answered 404)", Marker: model.DeadVersion, Dead: true,
+	}); err != nil {
+		t.Fatalf("ApplyUnreadable(dead): %v", err)
+	}
+
+	rec := itemsRequest(h, http.MethodGet, "/api/items/"+walled.Item.ID, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET item = %d (%s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"walled":true`) {
+		t.Errorf("walled item = %s, want the badge flag", body)
+	}
+	if !strings.Contains(body, `"state":"ready"`) {
+		t.Errorf("walled item = %s, want state ready", body)
+	}
+
+	rec = itemsRequest(h, http.MethodGet, "/api/items/"+dead.Item.ID, nil)
+	if body := rec.Body.String(); !strings.Contains(body, `"linkStatus":"dead"`) {
+		t.Errorf("dead item = %s, want linkStatus dead", body)
+	}
+
+	rec = itemsRequest(h, http.MethodGet, "/api/attention", nil)
+	if body := rec.Body.String(); !strings.Contains(body, `"items":[]`) {
+		t.Errorf("attention = %s, want neither save in it", body)
+	}
+
+	// Retry is the path a lifted wall takes, and the API has to allow it on a
+	// ready row or there is no way back.
+	rec = itemsRequest(h, http.MethodPost, "/api/items/"+walled.Item.ID+"/retry", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"queued"`) {
+		t.Errorf("retry of a walled save = %d %s, want 200 and queued", rec.Code, rec.Body.String())
 	}
 }

@@ -314,3 +314,79 @@ func TestEnrichRefreshCountsOnlyUnusableCovers(t *testing.T) {
 		t.Errorf("second run printed %q, want nothing to do", again.String())
 	}
 }
+
+// issue #76: a rule that files a wall or a dead link cannot help the rows an
+// older rule already parked, so this selection exists to give them back.
+func TestEnrichRefileFailedRequeuesOnlyParkedRows(t *testing.T) {
+	dataDir := t.TempDir()
+	library, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	ctx := context.Background()
+	for _, id := range []string{"parked", "other"} {
+		item, err := library.CreateItem(ctx, store.ItemInput{ID: id, Note: id})
+		if err != nil {
+			t.Fatalf("CreateItem(%s): %v", id, err)
+		}
+		_ = item
+	}
+	// One parked row, one that is already filed and must be left alone.
+	if _, err := library.RecordEnrichmentFailure(ctx, "parked", "answered 403", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := library.MarkReady(ctx, "other"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The dry run reports and writes nothing.
+	var dry bytes.Buffer
+	if err := run(ctx, []string{"enrich", "--refile-failed", "--dry-run"},
+		enrichEnv(t, dataDir, "test-key"), &dry); err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if !strings.Contains(dry.String(), "would re-queue 1 parked item") {
+		t.Errorf("dry run said %q", dry.String())
+	}
+	parked, err := library.GetItem(ctx, "parked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parked.State != model.StateFailed {
+		t.Fatalf("the dry run changed the row to %q", parked.State)
+	}
+
+	var out bytes.Buffer
+	if err := run(ctx, []string{"enrich", "--refile-failed"}, enrichEnv(t, dataDir, "test-key"), &out); err != nil {
+		t.Fatalf("enrich --refile-failed: %v", err)
+	}
+	parked, err = library.GetItem(ctx, "parked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parked.State != model.StateQueued || parked.Attempts != 0 || parked.NextAttemptAt != nil || parked.LastError != "" {
+		t.Errorf("parked row after refile = %q, attempts %d, next %v, error %q",
+			parked.State, parked.Attempts, parked.NextAttemptAt, parked.LastError)
+	}
+	other, err := library.GetItem(ctx, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.State != model.StateReady {
+		t.Errorf("a filed row was re-queued: state %q", other.State)
+	}
+	if !strings.Contains(out.String(), "without a model call") {
+		t.Errorf("the command did not say most of these cost nothing: %q", out.String())
+	}
+	if err := library.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Two selections at once would spend --limit twice on different rows.
+func TestEnrichRefusesRefreshAndRefileTogether(t *testing.T) {
+	if err := run(context.Background(), []string{"enrich", "--refresh", "--refile-failed"},
+		enrichEnv(t, t.TempDir(), "test-key"), &bytes.Buffer{}); err == nil {
+		t.Fatal("both selections were accepted")
+	}
+}

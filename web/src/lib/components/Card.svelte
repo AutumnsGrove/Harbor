@@ -29,6 +29,11 @@
 	};
 
 	const isText = $derived(item.kind === 'note' || item.kind === 'tweet');
+
+	// A save the page would not give up is filed, not failed (issue #76): the
+	// card says why it is thin instead of looking like a broken fetch. Walled is
+	// the site refusing this client; Link dead is the page being gone.
+	const badge = $derived(item.walled ? 'Walled' : item.linkStatus === 'dead' ? 'Link dead' : '');
 	const host = $derived(hostOf(item.url));
 	const age = $derived(relative(item.savedAt));
 	const excerpt = $derived(firstLine(item.note || item.summary));
@@ -69,6 +74,9 @@
 			<p class="sub">
 				<Icon name="file-text" size={13} />
 				<span>{kindNames[item.kind] ?? 'Note'} · {age}</span>
+				{#if badge}
+					<span class="flag">{badge}</span>
+				{/if}
 			</p>
 		</div>
 	{:else}
@@ -95,7 +103,12 @@
 		</div>
 		<div class="body">
 			<h3>{item.title || host}</h3>
-			<p class="sub"><span>{host}</span><span>· {age}</span></p>
+			<p class="sub">
+				<span>{host}</span><span>· {age}</span>
+				{#if badge}
+					<span class="flag">{badge}</span>
+				{/if}
+			</p>
 			{#if excerpt}
 				<p class="more">{excerpt}</p>
 			{/if}
