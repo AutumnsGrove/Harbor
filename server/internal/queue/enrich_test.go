@@ -150,3 +150,37 @@ func TestFailedCountBelongsToThePass(t *testing.T) {
 		t.Errorf("failed (%d) is larger than processed (%d): the two numbers cannot be read together", failed, processed)
 	}
 }
+
+// A pass stopped by cancellation is not a pass with a failure in it. The item is
+// unchanged and the next pass finishes it; counting it would report a failure for
+// a row that never failed (issue #80, review on #91).
+func TestCancelledPassDoesNotCountTheItemAsFailed(t *testing.T) {
+	s := openStore(t)
+	if _, err := s.CreateItem(context.Background(), storeInput("a")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	processor := &cancellingProcessor{cancel: cancel, store: s}
+	enricher := NewEnricher(s, processor, nil)
+
+	processed, failed, err := enricher.Pass(ctx)
+	if err == nil {
+		t.Fatal("Pass hid the cancellation")
+	}
+	if failed != 0 {
+		t.Errorf("failed = %d, want 0: the run stopped, the item did not fail", failed)
+	}
+	if processed != 0 {
+		t.Errorf("processed = %d, want 0: the item was handed back, not finished", processed)
+	}
+}
+
+type cancellingProcessor struct {
+	cancel context.CancelFunc
+	store  *store.Store
+}
+
+func (p *cancellingProcessor) Process(ctx context.Context, _ model.Item) error {
+	p.cancel()
+	return ctx.Err()
+}

@@ -108,6 +108,12 @@ func (e *Enricher) Pass(ctx context.Context) (processed int, failed int, err err
 				// the next QueuedItems call will not return it; the batch keeps
 				// going regardless (plans/03 test 14).
 				if err := e.processor.Process(ctx, item); err != nil {
+					if ctx.Err() != nil {
+						// The run is stopping, not the item failing. Counting this
+						// as a failure would make an interruption an outcome, and
+						// the row is unchanged for the next pass to finish.
+						return total, failed, ctx.Err()
+					}
 					// Counted, not logged: the pipeline writes the one line that
 					// says whether the row was parked or scheduled, and it knows
 					// both (issue #80).

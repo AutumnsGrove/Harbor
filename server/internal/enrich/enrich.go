@@ -548,7 +548,18 @@ func videoReason(cause error) string {
 
 // fail advances the retry columns. A permanent error, or the third failure,
 // parks the item as failed with the reason kept.
+//
+// A cancelled run is not an outcome: if the context died while this item was
+// being worked on, nothing is recorded, no retry is scheduled and no failure is
+// claimed. The row keeps the state it had, and the next pass picks it up — which
+// is the whole point of a resumable drain. Recording it would also fail, because
+// the write needs the same dead context (CLAUDE.md's class, issue #80).
 func (e *Enricher) fail(ctx context.Context, item model.Item, cause error) error {
+	if err := ctx.Err(); err != nil {
+		e.Log.Info("enrichment stopped mid-item; the row is unchanged", "item", item.ID, "reason", err.Error())
+		return err
+	}
+
 	attempt := item.Attempts + 1
 	var next *time.Time
 	if !isPermanent(cause) && attempt < MaxAttempts {

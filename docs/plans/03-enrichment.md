@@ -439,6 +439,12 @@ A single failed save wrote three log lines at two levels — `WARN video metadat
   pending, `ERROR` only when something broke the run itself (recording the failure, a dead store).
 - The loop no longer writes its own copy; it counts. A video's metadata failure is no longer logged
   where it happens either, because the outcome above already carries it.
+- **A cancelled run claims no outcome.** If the context died while an item was being worked on, `fail`
+  records nothing, schedules nothing and logs nothing as a failure; `Pass` returns the cancellation
+  instead of counting the row. It used to schedule a retry it could not write (the write needs the
+  same dead context), log `a retry is scheduled` with a timestamp, and count a failure for an item
+  that was still queued. Review on #91 found it, which is the third time this class has appeared —
+  the rule is that a cancellation stops the work rather than finishing it.
 - The pass summary's two numbers belong to the pass. `failed` was a field that was never reset, which
   is how a pass that took 5 rows reported `failed:11` — every failure since the process started. Both
   counts are now returned by `Pass`, and `failed ≤ processed` is a property rather than a hope.
