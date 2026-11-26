@@ -6,8 +6,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/workerclient"
 )
@@ -112,5 +114,36 @@ func TestPendingIsBehindTheIdentityLock(t *testing.T) {
 	rec := request(h, http.MethodGet, "/api/pending", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("GET /api/pending without an identity = %d, want 403", rec.Code)
+	}
+}
+
+// A pending card's title comes from the first line of a note someone typed, which
+// can be in any script. The cut has to land on a rune: a byte cut turned the last
+// word into U+FFFD, and the note's own words are the only thing the greyed card
+// has to show (issue #90).
+func TestPendingTitleCutsOnARune(t *testing.T) {
+	long := strings.Repeat("日本語のメモ", 20) // 60 characters, 180 bytes
+	job := workerclient.Job{Note: &long}
+
+	title := pendingTitle(job)
+	if len(title) > 80 {
+		t.Errorf("title is %d bytes, want at most 80", len(title))
+	}
+	if !utf8.ValidString(title) {
+		t.Errorf("title is not valid UTF-8: %q", title)
+	}
+	if strings.Contains(title, "\uFFFD") {
+		t.Errorf("title carries a replacement character: %q", title)
+	}
+	if !strings.HasPrefix(long, strings.TrimSuffix(title, "…")) {
+		t.Errorf("title is not a prefix of the note: %q", title)
+	}
+}
+
+// A short note is left alone, including the trimming the card has always done.
+func TestPendingTitleLeavesShortNotesAlone(t *testing.T) {
+	note := "  買い物リスト  "
+	if got := pendingTitle(workerclient.Job{Note: &note}); got != "買い物リスト" {
+		t.Errorf("title = %q", got)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/AutumnsGrove/nova/provider"
 	provideror "github.com/AutumnsGrove/nova/provider/openrouter"
 
+	"github.com/AutumnsGrove/Harbor/server/internal/clip"
 	"github.com/AutumnsGrove/Harbor/server/internal/enrich"
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
 	"github.com/AutumnsGrove/Harbor/server/internal/store"
@@ -307,12 +308,10 @@ func finishLabel(reason string) string {
 }
 
 // head returns the first n bytes of an answer, on a line, for an error message.
+// The cut lands on a rune: a model answering in a non-Latin script must not put a
+// broken byte into items.last_error (issue #90).
 func head(answer string, n int) string {
-	answer = strings.Join(strings.Fields(answer), " ")
-	if len(answer) <= n {
-		return answer
-	}
-	return answer[:n] + "…"
+	return clip.Text(strings.Join(strings.Fields(answer), " "), n)
 }
 
 // Embed turns one text into a vector. Nova's Roles enforces 1024 dimensions;

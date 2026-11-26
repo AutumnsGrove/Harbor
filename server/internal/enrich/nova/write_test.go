@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AutumnsGrove/nova/message"
 	"github.com/AutumnsGrove/nova/provider"
@@ -234,5 +235,26 @@ func TestWriteDiscardsAnAnswerAfterTheContextDies(t *testing.T) {
 	}
 	if chat.calls != 1 {
 		t.Errorf("calls = %d, want 1", chat.calls)
+	}
+}
+
+// head() puts the model's opening bytes into items.last_error, which the attention
+// strip shows. A model answering in Japanese must not leave a broken rune there
+// (issue #90).
+func TestHeadCutsOnARune(t *testing.T) {
+	answer := strings.Repeat("応答はこちらです", 20)
+	got := head(answer, 80)
+	if len(got) > 80 {
+		t.Errorf("head is %d bytes, want at most 80", len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("head is not valid UTF-8: %q", got)
+	}
+	if strings.Contains(got, "\uFFFD") {
+		t.Errorf("head carries a replacement character: %q", got)
+	}
+	// Newlines collapse: the error stays one line.
+	if got := head("first\nsecond", 80); got != "first second" {
+		t.Errorf("head did not collapse whitespace: %q", got)
 	}
 }

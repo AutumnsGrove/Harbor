@@ -18,8 +18,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"unicode/utf8"
 
+	"github.com/AutumnsGrove/Harbor/server/internal/clip"
 	"github.com/AutumnsGrove/Harbor/server/internal/extract"
 	"github.com/AutumnsGrove/Harbor/server/internal/fetch"
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
@@ -507,33 +507,13 @@ func refusedVideoReason(cause error) string {
 }
 
 // shorten bounds an error for a field shown to the owner: the reason is one line,
-// and an HTTP error can be long. max is the bound on the result in bytes, ellipsis
-// included, and the cut lands on a rune boundary — this is stored in
-// extract_error and shown in the UI, so half a rune is not an option (review on
-// #89).
+// and an HTTP error can be long. The cutting rule is clip's, so the bound is the
+// bound and the cut lands on a rune (issues #89, #90).
 func shorten(err error, max int) string {
 	if err == nil {
 		return ""
 	}
-	detail := strings.TrimSpace(err.Error())
-	if len(detail) <= max {
-		return detail
-	}
-	const ellipsis = "…"
-	cut := max - len(ellipsis)
-	if cut <= 0 {
-		// A bound too small to hold the ellipsis still gets respected: cut to it
-		// and say nothing about being cut.
-		cut = max
-		for cut > 0 && !utf8.RuneStart(detail[cut]) {
-			cut--
-		}
-		return detail[:cut]
-	}
-	for cut > 0 && !utf8.RuneStart(detail[cut]) {
-		cut--
-	}
-	return detail[:cut] + ellipsis
+	return clip.Text(err.Error(), max)
 }
 
 // videoReason is what the row keeps about the page it could not read. Bounded,
