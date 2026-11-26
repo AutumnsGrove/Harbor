@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/fetch"
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
@@ -895,5 +896,50 @@ func TestProcessFailsARefusedVideoWithNoTitleToFileItUnder(t *testing.T) {
 	}
 	if !strings.Contains(after.LastError, "refused") || !strings.Contains(after.LastError, "no title") {
 		t.Errorf("last_error = %q, want it to say why nothing was filed", after.LastError)
+	}
+}
+
+// The reason fields are shown in the UI and stored in extract_error, so the bound
+// has to be the bound — ellipsis included — and the cut has to land on a rune.
+// Review on #89 found this: detail[:max-1] + "…" is three bytes of ellipsis, so
+// the result was max+2, and a byte cut can split a multi-byte rune.
+func TestShortenIsBoundedAndValidUTF8(t *testing.T) {
+	if got := shorten(nil, 120); got != "" {
+		t.Errorf("shorten(nil) = %q, want empty", got)
+	}
+	if got := shorten(errors.New("  short  "), 120); got != "short" {
+		t.Errorf("shorten(short) = %q, want it trimmed and unchanged", got)
+	}
+	// Exactly at the bound is left alone: no ellipsis for a string that fits.
+	exact := strings.Repeat("a", 120)
+	if got := shorten(errors.New(exact), 120); got != exact {
+		t.Errorf("shorten(exact) changed a string that fits: %d bytes", len(got))
+	}
+
+	for _, tc := range []struct {
+		name string
+		body string
+		max  int
+	}{
+		{"ascii over the bound", strings.Repeat("a", 200), 120},
+		{"two-byte runes", strings.Repeat("é", 100), 120},
+		{"three-byte runes", strings.Repeat("→", 100), 120},
+		{"four-byte runes", strings.Repeat("😀", 100), 120},
+		{"a tiny bound", strings.Repeat("é", 10), 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shorten(errors.New(tc.body), tc.max)
+			if len(got) > tc.max {
+				t.Errorf("length = %d, want at most %d: %q", len(got), tc.max, got)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("not valid UTF-8: %q", got)
+			}
+			// A bound too small for the ellipsis cannot say it was cut; it still
+			// respects the bound.
+			if tc.max > len("…") && !strings.HasSuffix(got, "…") {
+				t.Errorf("%q does not say it was cut", got)
+			}
+		})
 	}
 }
