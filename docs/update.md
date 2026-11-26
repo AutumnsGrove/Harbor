@@ -51,18 +51,30 @@ to `<repo>@sha256:<64 hex>`. Every other byte — comments, secrets — is prese
 1. **Resolve** `ghcr.io/autumnsgrove/harbor:latest` to a digest, via
    `docker buildx imagetools inspect`. If the registry is unreachable, nothing
    changes.
-2. **Refuse a no-op.** If the resolved digest is what is already pinned, the run
-   reports `ok` and pulls nothing.
-3. **Snapshot**: `docker compose run --rm --no-deps --entrypoint /app/harbor
+2. **Sync the checkout.** `~/Harbor` is a clone of this repository, and
+   `docker-compose.yml` comes from it — not from the image. `git fetch` +
+   `git merge --ff-only` runs here, before the no-op check and the pin, so a compose
+   change arrives even when the image has not moved. It refuses rather than guesses:
+   a dirty tree or a branch that has moved on both sides fails the update with a
+   status that says so, because overwriting a hand-edited box throws away somebody's
+   deliberate change. An unreachable origin is only a warning — the image update is
+   still worth doing.
+3. **Refuse a no-op.** If the resolved digest is what is already pinned — and the
+   checkout is now current — the run reports `ok` and pulls nothing.
+4. **Snapshot**: `docker compose run --rm --no-deps --entrypoint /app/harbor
    harbor snapshot --pre-update` → `data/backups/pre-update.db`. This is
    `VACUUM INTO` + `PRAGMA integrity_check` + fsync + rename, so the snapshot is
    either absent, the previous one, or complete. **If the snapshot fails, the
    update does not happen.**
-4. **Pin** the new digest in `.env`.
-5. **Pull and recreate** the container. A pull failure re-pins the old digest and
+5. **Pin** the new digest in `.env`.
+6. **Pull and recreate** the container. A pull failure re-pins the old digest and
    touches nothing else.
-6. **Health** for up to 120 s, polling `http://127.0.0.1:8897/healthz` every
+7. **Health** for up to 120 s, polling `http://127.0.0.1:8897/healthz` every
    0.5 s. This is the same endpoint Docker and Meridian probe.
+
+Why step 2 exists: the resolver pin in #84 sat on `main` while the potato kept a
+compose file from the 18th, and the pin only worked once somebody pulled the
+checkout by hand. A container is only as new as the compose file that starts it.
 
 ## When it fails
 

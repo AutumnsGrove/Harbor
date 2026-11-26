@@ -112,6 +112,7 @@ FAKE
 #!/usr/bin/env bash
 set -uo pipefail
 printf '%s\n' "$*" >>"$FAKE_STATE/calls"
+printf 'docker %s\n' "$*" >>"$FAKE_STATE/trace"
 args=" $* "
 case "$args" in
 *" snapshots "*)
@@ -162,7 +163,50 @@ printf '%s\n' "$*" >>"$FAKE_STATE/systemctl_calls"
 exit 0
 FAKE
 
-	chmod +x "$WORK/bin/docker" "$WORK/bin/curl" "$WORK/bin/systemctl"
+	cat >"$WORK/bin/git" <<'FAKE'
+#!/usr/bin/env bash
+# Records every call so a test can assert the order, and answers from state files.
+set -uo pipefail
+printf '%s\n' "$*" >>"$FAKE_STATE/git_calls"
+printf 'git %s\n' "$*" >>"$FAKE_STATE/trace"
+args=" $* "
+case "$args" in
+*" status --porcelain "*)
+	[ -f "$FAKE_STATE/status_fails" ] && exit 128
+	if [ -f "$FAKE_STATE/dirty" ]; then
+		printf ' M docker-compose.yml\n'
+	fi
+	exit 0
+	;;
+*" fetch "*)
+	[ -f "$FAKE_STATE/fetch_fails" ] && exit 1
+	exit 0
+	;;
+*" merge --ff-only "*)
+	[ -f "$FAKE_STATE/diverged" ] && exit 1
+	touch "$FAKE_STATE/synced"
+	exit 0
+	;;
+*" rev-parse --short "*)
+	if [ -f "$FAKE_STATE/synced" ]; then printf 'def5678\n'; else printf 'abc1234\n'; fi
+	exit 0
+	;;
+*" rev-parse "*)
+	if [ -f "$FAKE_STATE/synced" ]; then
+		printf 'def5678901234567890123456789012345678901\n'
+	else
+		printf 'abc1234567890123456789012345678901234567\n'
+	fi
+	exit 0
+	;;
+*" reset --hard "*)
+	rm -f "$FAKE_STATE/synced"
+	exit 0
+	;;
+esac
+exit 0
+FAKE
+	chmod +x "$WORK/bin/docker" "$WORK/bin/curl" "$WORK/bin/systemctl" "$WORK/bin/git"
 }
 
 # run_watcher <timeout-seconds> [args...]
@@ -210,6 +254,31 @@ file_owner() {
 image_line() { grep '^HARBOR_IMAGE=' "$WORK/.env"; }
 status_json() { cat "$WORK/update-signal/status.json" 2>/dev/null || printf ''; }
 calls() { cat "$STATE/calls" 2>/dev/null || printf ''; }
+git_calls() { cat "$STATE/git_calls" 2>/dev/null || printf ''; }
+trace() { cat "$STATE/trace" 2>/dev/null || printf ''; }
+
+# comes_first asserts that the line matching $1 appears before the one matching $2 in
+# the interleaved trace. The fakes append to one file precisely so this can compare
+# two different tools' calls; a line number inside git's own log cannot.
+comes_first() {
+	local first second first_at second_at
+	first_at=$(trace | grep -n -- "$1" | head -1 | cut -d: -f1)
+	second_at=$(trace | grep -n -- "$2" | head -1 | cut -d: -f1)
+	if [ -z "$first_at" ]; then
+		no "${3:-order}" "no call matching [$1]"
+	elif [ -z "$second_at" ]; then
+		no "${3:-order}" "no call matching [$2]"
+	elif [ "$first_at" -lt "$second_at" ]; then
+		ok "${3:-order}"
+	else
+		no "${3:-order}" "[$1] came at $first_at, after [$2] at $second_at"
+	fi
+}
+
+# make_checkout gives the fixture the git checkout the real box has, which is what
+# sync_checkout looks for. Without it every other case exercises the "no checkout"
+# path, which is why they kept passing when the sync was added.
+make_checkout() { mkdir -p "$WORK/.git"; }
 systemctl_calls() { cat "$STATE/systemctl_calls" 2>/dev/null || printf ''; }
 health_calls() { wc -l <"$STATE/health_calls" | tr -d ' '; }
 
@@ -512,6 +581,197 @@ case_tick_writes_heartbeat_and_catches_up() {
 
 # ── run ─────────────────────────────────────────────────────────────────────
 
+# The image comes from GHCR but the compose file comes from the checkout, so an
+# update has to bring the checkout too — otherwise a compose change (the resolver
+# pin, #84) never reaches the box.
+case_checkout_syncs_before_the_pin() {
+	current="a checkout is fast-forwarded before the pin"
+	setup
+	make_checkout
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "0" "exit code"
+	assert_contains "$(git_calls)" "fetch --quiet origin" "fetches"
+	assert_contains "$(git_calls)" "merge --ff-only" "fast-forwards"
+
+	# Before the container is touched, so the version of the compose file that starts
+	# it is the one we just synced to.
+	comes_first "git .*merge --ff-only" "docker compose .*up -d harbor" \
+		"the sync happens before the container is touched"
+	assert_contains "$(status_json)" '"status":"ok"'
+}
+
+# Every exit after the sync restores it, so "the image and the compose file describe
+# the same version" holds after a failed update, not just after a rollback. The pull
+# exit and the snapshot exit were both missing it (review on #95).
+case_pull_failure_restores_the_checkout() {
+	current="a failed pull puts the checkout back"
+	setup
+	make_checkout
+	touch "$STATE/pull_fails"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "pull failed" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest is re-pinned"
+	assert_contains "$(git_calls)" "reset --hard" "the checkout was restored"
+}
+
+case_snapshot_failure_restores_the_checkout() {
+	current="a failed snapshot puts the checkout back"
+	setup
+	make_checkout
+	touch "$STATE/snapshot_fails"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "snapshot failed" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "nothing was pinned"
+	assert_contains "$(git_calls)" "reset --hard" "the checkout was restored"
+}
+
+# The other rollback path. The health-failure path above reaches one restore_checkout;
+# this one reaches the call in the recreate-failed branch, which nothing covered
+# (review on #95).
+case_recreate_failure_restores_the_checkout() {
+	current="a recreate failure puts the checkout back too"
+	setup
+	make_checkout
+	touch "$STATE/up_fails"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "recreate failed" "the status says why"
+	assert_contains "$(git_calls)" "reset --hard" "the checkout was restored"
+	assert_contains "$(git_calls)" "abc1234567890123456789012345678901234567" "the reset targets the pre-sync commit"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest is back to the old one"
+	# The old image could not be recreated either, which the script tolerates by
+	# logging and reporting the original failure.
+	assert_contains "$(cat "$WORK/watcher.log")" "recreating the old image also failed" "the warning is logged"
+}
+
+# A rollback must not start the old image with a compose file from the new commit: the
+# two describe the same version or the container comes up wrong (review on #95).
+case_rollback_restores_the_checkout() {
+	current="an unhealthy update puts the checkout back too"
+	setup
+	make_checkout
+	rm -f "$STATE/healthy"   # the new image never becomes healthy
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "rolled back" "the status says it rolled back"
+	assert_contains "$(git_calls)" "reset --hard" "the checkout was restored"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest is the old one"
+	# The reset names the commit the run started from, not whatever is current.
+	assert_contains "$(git_calls)" "abc1234567890123456789012345678901234567" "the reset targets the pre-sync commit"
+}
+
+# Nothing to restore when the run never synced.
+case_rollback_without_a_checkout_touches_no_git() {
+	current="a rollback with no checkout calls no git"
+	setup
+	rm -f "$STATE/healthy"
+	run_watcher
+
+	assert_contains "$(status_json)" "rolled back" "the status says it rolled back"
+	assert_eq "$(git_calls)" "" "git was never called"
+}
+
+# The reason the sync sits above the no-op branch: an update that changes only the
+# compose file must still apply. Without this case the ordering can be moved and the
+# suite stays green (review on #95).
+case_compose_change_applies_when_the_image_did_not_move() {
+	current="an already-pinned image still syncs the checkout"
+	setup
+	make_checkout
+	# .env already points at what :latest resolves to.
+	sed -i.bak "s|^HARBOR_IMAGE=.*|HARBOR_IMAGE=$REPO@$NEW_DIGEST|" "$WORK/.env"
+	rm -f "$WORK/.env.bak"
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "0" "exit code"
+	assert_contains "$(status_json)" "already pinned" "the image was not updated"
+	assert_eq "$(grep -c 'pull harbor' "$STATE/calls")" "0" "nothing was pulled"
+	assert_contains "$(git_calls)" "merge --ff-only" "the checkout was still synced"
+	comes_first "git .*merge --ff-only" "docker compose .*up -d harbor" \
+		"the sync happens before the reconcile"
+}
+
+# git that cannot report its own state is not a clean tree: the guard exists to
+# protect a hand edit, so "could not tell" has to fail closed (review on #95).
+case_unreadable_checkout_state_refuses_to_update() {
+	current="a checkout git cannot read refuses to update"
+	setup
+	make_checkout
+	touch "$STATE/status_fails"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "could not read the state" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest was not pinned"
+	assert_not_contains "$(calls)" "pull harbor" "nothing was pulled"
+	assert_not_contains "$(git_calls)" "merge --ff-only" "nothing was merged"
+}
+
+# A hand-edited box is a thing to look at, not to reset: overwriting it would throw
+# away a change somebody made on purpose.
+case_dirty_checkout_refuses_to_update() {
+	current="a dirty checkout refuses to update"
+	setup
+	make_checkout
+	touch "$STATE/dirty"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "local changes" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest was not pinned"
+	assert_not_contains "$(calls)" "pull harbor" "nothing was pulled"
+	assert_contains "$(cat "$WORK/watcher.log")" "docker-compose.yml" "the dirty file is named"
+}
+
+# A branch that has moved on both sides cannot be fast-forwarded, and guessing is how
+# a deploy script eats somebody's work.
+case_diverged_checkout_refuses_to_update() {
+	current="a diverged checkout refuses to update"
+	setup
+	make_checkout
+	touch "$STATE/diverged"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "cannot fast-forward" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest was not pinned"
+	assert_not_contains "$(calls)" "pull harbor" "nothing was pulled"
+}
+
+# The image update is still worth doing without the network the registry needs; the
+# next run picks the compose file up.
+case_fetch_failure_still_updates() {
+	current="a failed fetch warns and updates anyway"
+	setup
+	make_checkout
+	touch "$STATE/fetch_fails"
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "0" "exit code"
+	assert_contains "$(cat "$WORK/watcher.log")" "could not fetch" "the warning is logged"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$NEW_DIGEST" "the digest is pinned"
+	assert_contains "$(status_json)" '"status":"ok"'
+}
+
+# Not every install is a git checkout — a hand-placed compose file is legal, and the
+# watcher must not fail on it.
+case_no_checkout_never_runs_git() {
+	current="no checkout means no git calls"
+	setup
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "0" "exit code"
+	assert_eq "$(git_calls)" "" "git was never called"
+	assert_contains "$(status_json)" '"status":"ok"'
+}
+
 for case in \
 	case_bare_start_updates_and_pins \
 	case_check_only_changes_nothing \
@@ -530,7 +790,19 @@ for case in \
 	case_lock_contention \
 	case_stale_lock_is_taken_over \
 	case_update_dir_is_created \
-	case_tick_writes_heartbeat_and_catches_up; do
+	case_tick_writes_heartbeat_and_catches_up \
+	case_checkout_syncs_before_the_pin \
+	case_dirty_checkout_refuses_to_update \
+	case_diverged_checkout_refuses_to_update \
+	case_fetch_failure_still_updates \
+	case_no_checkout_never_runs_git \
+	case_compose_change_applies_when_the_image_did_not_move \
+	case_unreadable_checkout_state_refuses_to_update \
+	case_rollback_restores_the_checkout \
+	case_recreate_failure_restores_the_checkout \
+	case_rollback_without_a_checkout_touches_no_git \
+	case_pull_failure_restores_the_checkout \
+	case_snapshot_failure_restores_the_checkout; do
 	"$case"
 done
 

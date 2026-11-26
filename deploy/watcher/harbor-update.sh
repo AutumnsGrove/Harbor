@@ -21,6 +21,12 @@ SNAPSHOT="$DATA_DIR/backups/pre-update.db"
 
 DOCKER="${DOCKER:-docker}"
 CURL="${CURL:-curl}"
+GIT="${GIT:-git}"
+
+# CHECKOUT_BEFORE is the commit the checkout was on before this run synced it. A
+# rollback restores it, so the compose file and the image it starts always describe
+# the same version (review on #95).
+CHECKOUT_BEFORE=""
 
 HEALTH_TIMEOUT="${HARBOR_HEALTH_TIMEOUT:-120}"
 HEALTH_INTERVAL="${HARBOR_HEALTH_INTERVAL:-0.5}"
@@ -129,6 +135,103 @@ resolve_digest() {
 }
 
 compose() { "$DOCKER" compose --project-directory "$ROOT" --env-file "$ENV_FILE" "$@"; }
+
+# ── the checkout ────────────────────────────────────────────────────────────
+
+# git_in_repo runs git against the checkout as the user that owns it. The watcher
+# runs as root and the checkout belongs to the deploying user; git refuses to work
+# on a repository owned by somebody else, and `safe.directory` would silence that
+# while leaving root-owned objects in someone's working tree.
+git_in_repo() {
+	if [ "$(id -u)" -eq 0 ] && command -v runuser >/dev/null 2>&1; then
+		local owner
+		owner="$(stat -c %U "$ROOT" 2>/dev/null || printf 'root')"
+		runuser -u "$owner" -- "$GIT" -C "$ROOT" "$@"
+	else
+		"$GIT" -C "$ROOT" "$@"
+	fi
+}
+
+# sync_checkout fast-forwards the checkout the compose file comes from.
+#
+# The image is pulled from GHCR, but docker-compose.yml, the deploy scripts and the
+# docs come from this repository — and nothing used to update them. The resolver pin
+# (#84) therefore sat in main while the potato kept a compose file from the 18th,
+# and the pin only worked once somebody pulled it by hand. A container is only as
+# new as the compose file that starts it.
+#
+# This script is one of the files the merge brings forward, and systemd is running it
+# from the checkout as it happens. That is safe because git writes the new file and
+# renames it into place, so the running bash keeps the inode it opened; a merge that
+# edited the file in place would have this run executing a half-written script
+# (review on #95 tried to reproduce the bad case and could not).
+#
+# A dirty tree fails the update instead of being overwritten: somebody edited the box
+# by hand, and that is a thing to look at rather than reset. A fetch that cannot
+# reach the origin is a warning, not a failure — the image update is still worth
+# doing, and the next run will try again.
+sync_checkout() {
+	if [ ! -d "$ROOT/.git" ]; then
+		log "no git checkout at $ROOT; the compose file is whatever is there"
+		return 0
+	fi
+
+	# A status that fails is not a clean tree. The guard exists to protect a hand
+	# edit, so "git could not tell" has to fail closed: `|| true` here turned a
+	# dubious-ownership refusal into "nothing to see" and let the update run
+	# (review on #95).
+	local dirty
+	if ! dirty="$(git_in_repo status --porcelain 2>/dev/null)"; then
+		status "failed" "could not read the state of the checkout at $ROOT; not updating"
+		return 1
+	fi
+	if [ -n "$dirty" ]; then
+		log "error: $ROOT has local changes:"
+		printf '%s\n' "$dirty" | sed 's/^/  /' >&2
+		status "failed" "the checkout at $ROOT has local changes; not updating"
+		return 1
+	fi
+
+	# Before the merge, not after: this is the commit a rollback returns to.
+	CHECKOUT_BEFORE="$(git_in_repo rev-parse HEAD 2>/dev/null || true)"
+
+	if ! git_in_repo fetch --quiet origin; then
+		log "warning: could not fetch; keeping the compose file as it is"
+		CHECKOUT_BEFORE=""
+		return 0
+	fi
+
+	if ! git_in_repo merge --ff-only --quiet FETCH_HEAD; then
+		CHECKOUT_BEFORE=""
+		status "failed" "the checkout at $ROOT cannot fast-forward; not updating"
+		return 1
+	fi
+
+	log "checkout at $(git_in_repo rev-parse --short HEAD 2>/dev/null || printf '?')"
+	return 0
+}
+
+# restore_checkout puts the checkout back where it was before the sync. Every failed
+# exit after the sync calls it, because the invariant is "the image and the compose
+# file describe the same version" and a half-updated box has to keep it too.
+#
+# One path does not: a SIGTERM (an update interrupted mid-flight, systemd stopping the
+# unit) exits 130 through the signal trap without restoring, and leaves .env pinned at
+# the new digest with the checkout on the new commit. The two agree, so the next run's
+# already-pinned path reconciles them — which is why an interruption needs no cleanup
+# of its own (review on #95). Nothing to do when the run did not sync, or did not move.
+restore_checkout() {
+	[ -n "$CHECKOUT_BEFORE" ] || return 0
+	local now
+	now="$(git_in_repo rev-parse HEAD 2>/dev/null || true)"
+	[ "$now" = "$CHECKOUT_BEFORE" ] && return 0
+	if git_in_repo reset --hard --quiet "$CHECKOUT_BEFORE"; then
+		log "checkout restored to $(git_in_repo rev-parse --short HEAD 2>/dev/null || printf '?')"
+	else
+		log "warning: could not restore the checkout to $CHECKOUT_BEFORE"
+	fi
+	return 0
+}
 
 # ── health ──────────────────────────────────────────────────────────────────
 
@@ -269,6 +372,12 @@ job_update() {
 	fi
 	new_ref="$repo@$digest"
 
+	# Before the pin: a change to the compose file has to arrive even when the image
+	# has not changed, or the box runs yesterday's settings forever.
+	if ! sync_checkout; then
+		exit 1
+	fi
+
 	if [ "$new_ref" = "$old_ref" ]; then
 		# A previous run may have been killed between pinning and recreating: .env
 		# and the running container disagree, and every later run would otherwise
@@ -294,6 +403,7 @@ job_update() {
 	# at the image that is running (design.md §3 puts the pin first; this order is
 	# the same guarantee with one less way to be left inconsistent).
 	if ! take_snapshot; then
+		restore_checkout
 		status "failed" "snapshot failed; not updating"
 		exit 1
 	fi
@@ -303,6 +413,7 @@ job_update() {
 	if ! compose pull harbor; then
 		reason="pull failed"
 		rewrite_env_image "$old_ref"
+		restore_checkout
 		status "failed" "$reason"
 		exit 1
 	fi
@@ -310,6 +421,7 @@ job_update() {
 	if ! compose up -d harbor; then
 		reason="recreate failed"
 		rewrite_env_image "$old_ref"
+		restore_checkout
 		compose up -d harbor || log "warning: recreating the old image also failed"
 		status "failed" "$reason"
 		exit 1
@@ -322,6 +434,7 @@ job_update() {
 
 	log "health check failed within ${HEALTH_TIMEOUT}s; rolling back"
 	rewrite_env_image "$old_ref"
+	restore_checkout
 	restore_snapshot || true
 	if ! compose up -d harbor; then
 		log "warning: could not recreate the old image"
