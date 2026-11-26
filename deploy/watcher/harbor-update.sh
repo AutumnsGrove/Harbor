@@ -21,6 +21,7 @@ SNAPSHOT="$DATA_DIR/backups/pre-update.db"
 
 DOCKER="${DOCKER:-docker}"
 CURL="${CURL:-curl}"
+GIT="${GIT:-git}"
 
 HEALTH_TIMEOUT="${HARBOR_HEALTH_TIMEOUT:-120}"
 HEALTH_INTERVAL="${HARBOR_HEALTH_INTERVAL:-0.5}"
@@ -129,6 +130,63 @@ resolve_digest() {
 }
 
 compose() { "$DOCKER" compose --project-directory "$ROOT" --env-file "$ENV_FILE" "$@"; }
+
+# ── the checkout ────────────────────────────────────────────────────────────
+
+# git_in_repo runs git against the checkout as the user that owns it. The watcher
+# runs as root and the checkout belongs to the deploying user; git refuses to work
+# on a repository owned by somebody else, and `safe.directory` would silence that
+# while leaving root-owned objects in someone's working tree.
+git_in_repo() {
+	if [ "$(id -u)" -eq 0 ] && command -v runuser >/dev/null 2>&1; then
+		local owner
+		owner="$(stat -c %U "$ROOT" 2>/dev/null || printf 'root')"
+		runuser -u "$owner" -- "$GIT" -C "$ROOT" "$@"
+	else
+		"$GIT" -C "$ROOT" "$@"
+	fi
+}
+
+# sync_checkout fast-forwards the checkout the compose file comes from.
+#
+# The image is pulled from GHCR, but docker-compose.yml, the deploy scripts and the
+# docs come from this repository — and nothing used to update them. The resolver pin
+# (#84) therefore sat in main while the potato kept a compose file from the 18th,
+# and the pin only worked once somebody pulled it by hand. A container is only as
+# new as the compose file that starts it.
+#
+# A dirty tree fails the update instead of being overwritten: somebody edited the box
+# by hand, and that is a thing to look at rather than reset. A fetch that cannot
+# reach the origin is a warning, not a failure — the image update is still worth
+# doing, and the next run will try again.
+sync_checkout() {
+	if [ ! -d "$ROOT/.git" ]; then
+		log "no git checkout at $ROOT; the compose file is whatever is there"
+		return 0
+	fi
+
+	local dirty
+	dirty="$(git_in_repo status --porcelain 2>/dev/null || true)"
+	if [ -n "$dirty" ]; then
+		log "error: $ROOT has local changes:"
+		printf '%s\n' "$dirty" | sed 's/^/  /' >&2
+		status "failed" "the checkout at $ROOT has local changes; not updating"
+		return 1
+	fi
+
+	if ! git_in_repo fetch --quiet origin; then
+		log "warning: could not fetch; keeping the compose file as it is"
+		return 0
+	fi
+
+	if ! git_in_repo merge --ff-only --quiet FETCH_HEAD; then
+		status "failed" "the checkout at $ROOT cannot fast-forward; not updating"
+		return 1
+	fi
+
+	log "checkout at $(git_in_repo rev-parse --short HEAD 2>/dev/null || printf '?')"
+	return 0
+}
 
 # ── health ──────────────────────────────────────────────────────────────────
 
@@ -268,6 +326,12 @@ job_update() {
 		exit 1
 	fi
 	new_ref="$repo@$digest"
+
+	# Before the pin: a change to the compose file has to arrive even when the image
+	# has not changed, or the box runs yesterday's settings forever.
+	if ! sync_checkout; then
+		exit 1
+	fi
 
 	if [ "$new_ref" = "$old_ref" ]; then
 		# A previous run may have been killed between pinning and recreating: .env

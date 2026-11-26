@@ -248,6 +248,7 @@ launchd job:
 
 | Symptom | Look at |
 |---|---|
+| A compose/setting change "did not apply" | the watcher syncs `~/Harbor` from git before it recreates (step 2 in [update.md](update.md)); `cat ~/Harbor/update-signal/status.json` says so if the checkout was dirty or could not fast-forward. After a hand edit, `git -C ~/Harbor status` first |
 | Saves do not appear | `harbor serve` logs: is the ingest loop polling, and does the Worker answer? |
 | Items stay `queued` | the enrichment loop; `OPENROUTER_API_KEY` set? |
 | Items go `failed` | the attention strip on Home, and the log line carrying the cause |

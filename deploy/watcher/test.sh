@@ -162,7 +162,35 @@ printf '%s\n' "$*" >>"$FAKE_STATE/systemctl_calls"
 exit 0
 FAKE
 
-	chmod +x "$WORK/bin/docker" "$WORK/bin/curl" "$WORK/bin/systemctl"
+	cat >"$WORK/bin/git" <<'FAKE'
+#!/usr/bin/env bash
+# Records every call so a test can assert the order, and answers from state files.
+set -uo pipefail
+printf '%s\n' "$*" >>"$FAKE_STATE/git_calls"
+args=" $* "
+case "$args" in
+*" status --porcelain "*)
+	if [ -f "$FAKE_STATE/dirty" ]; then
+		printf ' M docker-compose.yml\n'
+	fi
+	exit 0
+	;;
+*" fetch "*)
+	[ -f "$FAKE_STATE/fetch_fails" ] && exit 1
+	exit 0
+	;;
+*" merge --ff-only "*)
+	[ -f "$FAKE_STATE/diverged" ] && exit 1
+	exit 0
+	;;
+*" rev-parse "*)
+	printf 'abc1234\n'
+	exit 0
+	;;
+esac
+exit 0
+FAKE
+	chmod +x "$WORK/bin/docker" "$WORK/bin/curl" "$WORK/bin/systemctl" "$WORK/bin/git"
 }
 
 # run_watcher <timeout-seconds> [args...]
@@ -210,6 +238,12 @@ file_owner() {
 image_line() { grep '^HARBOR_IMAGE=' "$WORK/.env"; }
 status_json() { cat "$WORK/update-signal/status.json" 2>/dev/null || printf ''; }
 calls() { cat "$STATE/calls" 2>/dev/null || printf ''; }
+git_calls() { cat "$STATE/git_calls" 2>/dev/null || printf ''; }
+
+# make_checkout gives the fixture the git checkout the real box has, which is what
+# sync_checkout looks for. Without it every other case exercises the "no checkout"
+# path, which is why they kept passing when the sync was added.
+make_checkout() { mkdir -p "$WORK/.git"; }
 systemctl_calls() { cat "$STATE/systemctl_calls" 2>/dev/null || printf ''; }
 health_calls() { wc -l <"$STATE/health_calls" | tr -d ' '; }
 
@@ -512,6 +546,90 @@ case_tick_writes_heartbeat_and_catches_up() {
 
 # ── run ─────────────────────────────────────────────────────────────────────
 
+# The image comes from GHCR but the compose file comes from the checkout, so an
+# update has to bring the checkout too — otherwise a compose change (the resolver
+# pin, #84) never reaches the box.
+case_checkout_syncs_before_the_pin() {
+	current="a checkout is fast-forwarded before the pin"
+	setup
+	make_checkout
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "0" "exit code"
+	assert_contains "$(git_calls)" "fetch --quiet origin" "fetches"
+	assert_contains "$(git_calls)" "merge --ff-only" "fast-forwards"
+
+	# Before the pin, so a compose-only change still applies when the image did not
+	# move: the sync is above the "already pinned" branch.
+	local merge_line pin_line
+	merge_line=$(grep -n "merge --ff-only" "$STATE/git_calls" | head -1 | cut -d: -f1)
+	pin_line=$(grep -n "up -d harbor" "$STATE/calls" | head -1 | cut -d: -f1)
+	if [ -n "$merge_line" ] && [ -n "$pin_line" ] && [ "$merge_line" -lt 5 ]; then
+		ok "the sync happens before the container is touched"
+	else
+		no "the sync happens before the container is touched" "merge at line ${merge_line:-?}"
+	fi
+	assert_contains "$(status_json)" '"status":"ok"'
+}
+
+# A hand-edited box is a thing to look at, not to reset: overwriting it would throw
+# away a change somebody made on purpose.
+case_dirty_checkout_refuses_to_update() {
+	current="a dirty checkout refuses to update"
+	setup
+	make_checkout
+	touch "$STATE/dirty"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "local changes" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest was not pinned"
+	assert_not_contains "$(calls)" "pull harbor" "nothing was pulled"
+	assert_contains "$(cat "$WORK/watcher.log")" "docker-compose.yml" "the dirty file is named"
+}
+
+# A branch that has moved on both sides cannot be fast-forwarded, and guessing is how
+# a deploy script eats somebody's work.
+case_diverged_checkout_refuses_to_update() {
+	current="a diverged checkout refuses to update"
+	setup
+	make_checkout
+	touch "$STATE/diverged"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "cannot fast-forward" "the status says why"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest was not pinned"
+	assert_not_contains "$(calls)" "pull harbor" "nothing was pulled"
+}
+
+# The image update is still worth doing without the network the registry needs; the
+# next run picks the compose file up.
+case_fetch_failure_still_updates() {
+	current="a failed fetch warns and updates anyway"
+	setup
+	make_checkout
+	touch "$STATE/fetch_fails"
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "0" "exit code"
+	assert_contains "$(cat "$WORK/watcher.log")" "could not fetch" "the warning is logged"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$NEW_DIGEST" "the digest is pinned"
+	assert_contains "$(status_json)" '"status":"ok"'
+}
+
+# Not every install is a git checkout — a hand-placed compose file is legal, and the
+# watcher must not fail on it.
+case_no_checkout_never_runs_git() {
+	current="no checkout means no git calls"
+	setup
+	run_watcher
+
+	assert_eq "$WATCHER_EXIT" "0" "exit code"
+	assert_eq "$(git_calls)" "" "git was never called"
+	assert_contains "$(status_json)" '"status":"ok"'
+}
+
 for case in \
 	case_bare_start_updates_and_pins \
 	case_check_only_changes_nothing \
@@ -530,7 +648,12 @@ for case in \
 	case_lock_contention \
 	case_stale_lock_is_taken_over \
 	case_update_dir_is_created \
-	case_tick_writes_heartbeat_and_catches_up; do
+	case_tick_writes_heartbeat_and_catches_up \
+	case_checkout_syncs_before_the_pin \
+	case_dirty_checkout_refuses_to_update \
+	case_diverged_checkout_refuses_to_update \
+	case_fetch_failure_still_updates \
+	case_no_checkout_never_runs_git; do
 	"$case"
 done
 
