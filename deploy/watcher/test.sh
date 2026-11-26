@@ -601,6 +601,26 @@ case_checkout_syncs_before_the_pin() {
 	assert_contains "$(status_json)" '"status":"ok"'
 }
 
+# The other rollback path. The health-failure path above reaches one restore_checkout;
+# this one reaches the call in the recreate-failed branch, which nothing covered
+# (review on #95).
+case_recreate_failure_restores_the_checkout() {
+	current="a recreate failure puts the checkout back too"
+	setup
+	make_checkout
+	touch "$STATE/up_fails"
+	run_watcher
+
+	if [ "$WATCHER_EXIT" -ne 0 ]; then ok "exit code is non-zero"; else no "exit code is non-zero"; fi
+	assert_contains "$(status_json)" "recreate failed" "the status says why"
+	assert_contains "$(git_calls)" "reset --hard" "the checkout was restored"
+	assert_contains "$(git_calls)" "abc1234567890123456789012345678901234567" "the reset targets the pre-sync commit"
+	assert_eq "$(image_line)" "HARBOR_IMAGE=$REPO@$OLD_DIGEST" "the digest is back to the old one"
+	# The old image could not be recreated either, which the script tolerates by
+	# logging and reporting the original failure.
+	assert_contains "$(cat "$WORK/watcher.log")" "recreating the old image also failed" "the warning is logged"
+}
+
 # A rollback must not start the old image with a compose file from the new commit: the
 # two describe the same version or the container comes up wrong (review on #95).
 case_rollback_restores_the_checkout() {
@@ -750,6 +770,7 @@ for case in \
 	case_compose_change_applies_when_the_image_did_not_move \
 	case_unreadable_checkout_state_refuses_to_update \
 	case_rollback_restores_the_checkout \
+	case_recreate_failure_restores_the_checkout \
 	case_rollback_without_a_checkout_touches_no_git; do
 	"$case"
 done
