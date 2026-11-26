@@ -3,7 +3,7 @@ package store
 import (
 	"errors"
 	"strings"
-	"unicode/utf8"
+	"unicode"
 )
 
 // FTSQuery turns a person's words into an FTS5 MATCH expression.
@@ -49,20 +49,18 @@ var ErrEmptyQuery = errors.New("store: nothing to search for")
 // and the cap keeps one search from building a thousand-term expression.
 const MaxQueryTerms = 16
 
-// hasLetterOrDigit reports whether a term has anything indexable in it. FTS5's
-// tokenizer drops punctuation, so `---` searches for nothing.
+// hasLetterOrDigit reports whether a term has anything FTS5 will index. The
+// tokenizer keeps letters and digits and drops everything else, so this asks the
+// same question of Unicode rather than of ASCII: a search in Japanese or Greek is
+// a real search, and an em dash, an arrow or a smart quote is punctuation in any
+// script.
+//
+// The first version treated every rune above 127 as a letter, which let `Text: "—"`
+// through validation and then matched nothing — the silent failure the check is
+// there to prevent (review on #94).
 func hasLetterOrDigit(term string) bool {
 	for _, r := range term {
-		if r == utf8.RuneError {
-			// A term that is not valid UTF-8 cannot be quoted safely.
-			continue
-		}
-		if ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
-			return true
-		}
-		// Letters outside ASCII are indexable too: a search in Japanese or Greek
-		// must not be treated as punctuation.
-		if r > 127 && (r != '…') {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			return true
 		}
 	}

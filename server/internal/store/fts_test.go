@@ -36,7 +36,12 @@ func TestFTSQueryQuotesEveryTerm(t *testing.T) {
 // An empty box and a query of pure punctuation both mean "nothing to look for",
 // which is not an error to show.
 func TestFTSQueryRefusesNothingToSearchFor(t *testing.T) {
-	for _, input := range []string{"", "   ", "---", "...", "!!! ???"} {
+	for _, input := range []string{
+		"", "   ", "---", "...", "!!! ???",
+		// Non-ASCII punctuation is punctuation: FTS5 drops it in every script, so a
+		// term made of it searches for nothing (review on #94).
+		"—", "“”", "→ ←", "· •", "…",
+	} {
 		if got, err := FTSQuery(input); err == nil {
 			t.Errorf("FTSQuery(%q) = %q, want ErrEmptyQuery", input, got)
 		}
@@ -55,6 +60,26 @@ func TestFTSQueryOutputIsOnlyQuotedTerms(t *testing.T) {
 			if !strings.HasPrefix(term, `"`) {
 				t.Errorf("FTSQuery(%q) = %s: %q is not a quoted term", input, got, term)
 			}
+		}
+	}
+}
+
+// Letters and digits in any script are indexable, which is why the check cannot be
+// an ASCII range.
+func TestFTSQueryKeepsNonLatinWords(t *testing.T) {
+	for input, want := range map[string]string{
+		"日本語 検索":          `"日本語" "検索"`,
+		"griechisch άλφα": `"griechisch" "άλφα"`,
+		"accentué":        `"accentué"`,
+		"числа 42":        `"числа" "42"`,
+	} {
+		got, err := FTSQuery(input)
+		if err != nil {
+			t.Errorf("FTSQuery(%q): %v", input, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("FTSQuery(%q) = %s, want %s", input, got, want)
 		}
 	}
 }

@@ -213,10 +213,13 @@ func TestValidateRejectsWhatCannotBeEvaluated(t *testing.T) {
 		"text that is a doc": {Text: strings.Repeat("x", MaxTextBytes+1)},
 		// Review on #94: both of these parsed clean and then either matched nothing
 		// or failed at evaluation time.
-		"an empty tag":        {TagsAll: []string{"", " "}},
-		"an empty any-tag":    {TagsAny: []string{""}},
-		"text of punctuation": {Text: "---"},
-		"text of symbols":     {Text: "!!! ???"},
+		"an empty tag":                  {TagsAll: []string{"", " "}},
+		"an empty any-tag":              {TagsAny: []string{""}},
+		"text of punctuation":           {Text: "---"},
+		"text of symbols":               {Text: "!!! ???"},
+		"text of non-ASCII punctuation": {Text: "—"},
+		"text of quotes":                {Text: "“”"},
+		"text of arrows":                {Text: "→ ←"},
 	}
 	for name, rule := range cases {
 		if err := rule.Validate(); !errors.Is(err, ErrInvalidRule) {
