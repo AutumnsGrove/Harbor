@@ -215,7 +215,7 @@ func (c *Client) Write(ctx context.Context, input enrich.ContentInput) (enrich.C
 			return content, nil
 		}
 		last = err
-		if !retry || ctx.Err() != nil {
+		if !retry {
 			break
 		}
 		c.log.Warn("nova write answered unreadably; asking again",
@@ -230,7 +230,9 @@ func (c *Client) Write(ctx context.Context, input enrich.ContentInput) (enrich.C
 }
 
 // writeOnce makes one call. retry says whether the failure was the model failing
-// to answer rather than the call failing to arrive.
+// to answer rather than the call failing to arrive, and an interrupted call is
+// reported here rather than retried — this is the only place a cancellation is
+// recognised, so the loop below has no context check of its own to keep in step.
 func (c *Client) writeOnce(ctx context.Context, system string, input enrich.ContentInput) (content enrich.Content, retry bool, err error) {
 	resp, err := c.chat.Stream(ctx, provider.Request{
 		Model: chatModel,
@@ -258,6 +260,14 @@ func (c *Client) writeOnce(ctx context.Context, system string, input enrich.Cont
 		return enrich.Content{}, false, fmt.Errorf("nova write: %w", err)
 	}
 	c.logUsage(ctx, "write", chatModel, resp.Model, resp.Usage)
+
+	// A cancelled call is an interruption, not the model's verdict on the page. The
+	// provider can answer nil-or-empty after the context dies, and an outcome
+	// recorded then would be a run stopping being written down as a failure — the
+	// class this repository has been bitten by before (CLAUDE.md).
+	if cerr := ctx.Err(); cerr != nil {
+		return enrich.Content{}, false, fmt.Errorf("nova write: %w", cerr)
+	}
 
 	content, parseErr := parseContent(resp.Message.Content)
 	if parseErr != nil {

@@ -26,6 +26,9 @@ const goodAnswer = `{"title":"Medieval cat law","summary":"A survey of feline le
 type scriptedChat struct {
 	answers []scriptedAnswer
 	calls   int
+	// onCall runs before the answer is returned, so a test can interrupt the call
+	// itself rather than the loop around it.
+	onCall func(call int)
 }
 
 type scriptedAnswer struct {
@@ -42,7 +45,11 @@ func (s *scriptedChat) Stream(_ context.Context, _ provider.Request, _ func(prov
 	if s.calls > len(s.answers) {
 		return nil, errors.New("the client made more calls than the test scripted")
 	}
-	answer := s.answers[s.calls-1]
+	call := s.calls
+	if s.onCall != nil {
+		s.onCall(call)
+	}
+	answer := s.answers[call-1]
 	if answer.err != nil {
 		return nil, answer.err
 	}
@@ -179,19 +186,53 @@ func TestWriteDoesNotRetryATransportFailure(t *testing.T) {
 	}
 }
 
-// A cancelled context must not turn into a retry loop: the answer is not coming.
+// A cancelled context must stop the retry loop. The assertion is the call count:
+// the loop cannot exceed writeCallAttempts, so "more than the bound" can never
+// fail and would let the guard be deleted without a test noticing (review on #86).
 func TestWriteStopsRetryingWhenTheContextDies(t *testing.T) {
-	chat := &scriptedChat{answers: []scriptedAnswer{
-		{content: "", finish: "stop"},
-		{content: "", finish: "stop"},
-	}}
-	client := writeClient(chat, nil)
-	client.timeout = time.Nanosecond // the call's budget is gone before the first answer
-
-	if _, err := client.Write(context.Background(), writeInput()); err == nil {
-		t.Fatal("Write answered under an expired deadline")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	chat := &scriptedChat{
+		answers: []scriptedAnswer{
+			{content: "", finish: "stop"},
+			{content: goodAnswer, finish: "stop"},
+		},
+		onCall: func(int) { cancel() },
 	}
-	if chat.calls > writeCallAttempts {
-		t.Errorf("calls = %d, want at most %d", chat.calls, writeCallAttempts)
+
+	_, err := writeClient(chat, nil).Write(ctx, writeInput())
+	if err == nil {
+		t.Fatal("Write answered under a cancelled context")
+	}
+	if chat.calls != 1 {
+		t.Fatalf("calls = %d, want 1: a dead context is not asked again", chat.calls)
+	}
+	if !strings.Contains(err.Error(), "context canceled") {
+		t.Errorf("error = %q, want the cancellation", err)
+	}
+	if strings.Contains(err.Error(), "the page was not the problem") {
+		t.Errorf("error = %q blames the page for a cancelled run", err)
+	}
+}
+
+// An answer that arrives after the context died is not an outcome. The pipeline
+// is stopping; recording the answer would make an interruption look like success.
+func TestWriteDiscardsAnAnswerAfterTheContextDies(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	chat := &scriptedChat{
+		answers: []scriptedAnswer{{content: goodAnswer, finish: "stop"}},
+		onCall:  func(int) { cancel() },
+	}
+
+	content, err := writeClient(chat, nil).Write(ctx, writeInput())
+	if err == nil {
+		t.Fatalf("a cancelled call's answer was accepted: %+v", content)
+	}
+	if !strings.Contains(err.Error(), "context canceled") {
+		t.Errorf("error = %q, want the cancellation", err)
+	}
+	if chat.calls != 1 {
+		t.Errorf("calls = %d, want 1", chat.calls)
 	}
 }
