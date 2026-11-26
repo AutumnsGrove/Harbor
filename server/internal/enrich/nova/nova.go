@@ -45,6 +45,20 @@ const (
 
 	callTimeout = 45 * time.Second
 
+	// writeMaxTokens is the answer's budget. It is a constant because the error
+	// message quotes it: "the answer hit the N-token cap" has to name the number
+	// somebody would change (issue #78).
+	writeMaxTokens = 800
+
+	// writeCallAttempts is how many times one Write asks before the item is
+	// charged an attempt. Two is deliberate: the cost of a miss is one extra
+	// call, and a provider that answers nothing twice is not having a hiccup.
+	writeCallAttempts = 2
+
+	// finishLength is provider.NormalizeFinish's word for an answer the model's
+	// own token budget cut off.
+	finishLength = "length"
+
 	// usageWriteTimeout bounds the detached row write. The insert is one small
 	// row on a local database; this is only here so a wedged disk cannot hold
 	// the enrichment loop.
@@ -177,6 +191,12 @@ func (c *Client) Decide(ctx context.Context, input enrich.ClassifyInput) (enrich
 }
 
 // Write asks for the cleaned title, summary and tags as one strict JSON object.
+//
+// A shapeless answer is retried here, before the item is charged for it. The
+// eight rows that found this had spent all three of their attempts on calls that
+// came back empty, so a provider miss looked exactly like a page that will not
+// read (issue #78). A transport failure is not retried: that is the pipeline's
+// retry to spend, and retrying it here would double the bill for a dead network.
 func (c *Client) Write(ctx context.Context, input enrich.ContentInput) (enrich.Content, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -185,6 +205,33 @@ func (c *Client) Write(ctx context.Context, input enrich.ContentInput) (enrich.C
 	if err != nil {
 		return enrich.Content{}, err
 	}
+
+	var last error
+	asked := 0
+	for attempt := 1; attempt <= writeCallAttempts; attempt++ {
+		content, retry, err := c.writeOnce(ctx, system, input)
+		asked = attempt
+		if err == nil {
+			return content, nil
+		}
+		last = err
+		if !retry || ctx.Err() != nil {
+			break
+		}
+		c.log.Warn("nova write answered unreadably; asking again",
+			"attempt", attempt, "of", writeCallAttempts, "error", err)
+	}
+	if last != nil && asked > 1 {
+		// The item's last_error should say how hard we tried, or the next reader
+		// cannot tell one empty answer from a provider that gave nothing twice.
+		last = fmt.Errorf("%w; asked %d times", last, asked)
+	}
+	return enrich.Content{}, last
+}
+
+// writeOnce makes one call. retry says whether the failure was the model failing
+// to answer rather than the call failing to arrive.
+func (c *Client) writeOnce(ctx context.Context, system string, input enrich.ContentInput) (content enrich.Content, retry bool, err error) {
 	resp, err := c.chat.Stream(ctx, provider.Request{
 		Model: chatModel,
 		Messages: []message.Message{
@@ -192,7 +239,7 @@ func (c *Client) Write(ctx context.Context, input enrich.ContentInput) (enrich.C
 			message.User(writeState(input)),
 		},
 		Temperature: floatPtr(0.2),
-		MaxTokens:   800,
+		MaxTokens:   writeMaxTokens,
 		ProviderOptions: map[string]any{
 			"response_format": map[string]any{
 				"type": "json_schema",
@@ -208,15 +255,54 @@ func (c *Client) Write(ctx context.Context, input enrich.ContentInput) (enrich.C
 		if resp != nil {
 			c.recordIfBilled(ctx, "write", chatModel, resp.Model, resp.Usage)
 		}
-		return enrich.Content{}, fmt.Errorf("nova write: %w", err)
+		return enrich.Content{}, false, fmt.Errorf("nova write: %w", err)
 	}
 	c.logUsage(ctx, "write", chatModel, resp.Model, resp.Usage)
 
-	content, err := parseContent(resp.Message.Content)
-	if err != nil {
-		return enrich.Content{}, err
+	content, parseErr := parseContent(resp.Message.Content)
+	if parseErr != nil {
+		// A cut-off answer is deterministic: the same input and the same cap cut
+		// it in the same place, so a second call pays for the same truncation.
+		return enrich.Content{}, resp.FinishReason != finishLength, writeShapeError(resp, parseErr)
 	}
-	return content, nil
+	return content, false, nil
+}
+
+// writeShapeError says what the provider did, not just that JSON failed. The
+// finish reason and the completion length are the whole difference between "the
+// model rambled", "the cap cut it off" and "the provider sent nothing", and the
+// bare JSON error on the item hid all three (issue #78).
+func writeShapeError(resp *provider.Response, parseErr error) error {
+	answer := strings.TrimSpace(resp.Message.Content)
+	switch {
+	case resp.FinishReason == finishLength:
+		return fmt.Errorf("nova write: the answer hit the %d-token cap and was cut off (%d completion tokens); not retried, because the same cap cuts it again",
+			writeMaxTokens, resp.Usage.CompletionTokens)
+	case answer == "":
+		return fmt.Errorf("nova write: the model answered with nothing (%s, %d completion tokens); the page was not the problem",
+			finishLabel(resp.FinishReason), resp.Usage.CompletionTokens)
+	default:
+		return fmt.Errorf("nova write: the answer was not JSON (%s, %d bytes, %d completion tokens): %w; it began %q",
+			finishLabel(resp.FinishReason), len(answer), resp.Usage.CompletionTokens, parseErr, head(answer, 80))
+	}
+}
+
+// finishLabel names an unset finish reason rather than rendering it as a pair of
+// quotes an operator has to interpret.
+func finishLabel(reason string) string {
+	if reason == "" {
+		return "no finish reason"
+	}
+	return "finish " + reason
+}
+
+// head returns the first n bytes of an answer, on a line, for an error message.
+func head(answer string, n int) string {
+	answer = strings.Join(strings.Fields(answer), " ")
+	if len(answer) <= n {
+		return answer
+	}
+	return answer[:n] + "…"
 }
 
 // Embed turns one text into a vector. Nova's Roles enforces 1024 dimensions;
