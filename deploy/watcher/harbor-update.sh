@@ -160,6 +160,12 @@ git_in_repo() {
 # and the pin only worked once somebody pulled it by hand. A container is only as
 # new as the compose file that starts it.
 #
+# This script is one of the files the merge brings forward, and systemd is running it
+# from the checkout as it happens. That is safe because git writes the new file and
+# renames it into place, so the running bash keeps the inode it opened; a merge that
+# edited the file in place would have this run executing a half-written script
+# (review on #95 tried to reproduce the bad case and could not).
+#
 # A dirty tree fails the update instead of being overwritten: somebody edited the box
 # by hand, and that is a thing to look at rather than reset. A fetch that cannot
 # reach the origin is a warning, not a failure — the image update is still worth
