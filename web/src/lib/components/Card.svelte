@@ -3,10 +3,19 @@
 	// by this origin (issue #49); a card without one keeps the gradient and the
 	// kind glyph, which is the honest placeholder for a note or a failed fetch.
 	import type { Item } from '#lib/api';
+	import { coverRatio, lightAt, seedOf } from '#lib/art';
+	import { kindIcons } from '#lib/kinds';
 
 	import Icon from './Icon.svelte';
 
 	let { item }: { item: Item } = $props();
+
+	// A wall of identical placeholders reads as broken, so the item id decides
+	// the proportion and where the light falls (lib/art.ts). The item page uses
+	// the same seed, so the card and the page it opens look like one thing.
+	const seed = $derived(seedOf(item.id));
+	const ratio = $derived(coverRatio(item.kind, seed));
+	const light = $derived(lightAt(seed));
 
 	// A cover that fails to load is the same as no cover: one silent fallback,
 	// not a broken-image icon.
@@ -92,7 +101,7 @@
 			</p>
 		</div>
 	{:else}
-		<div class="cover">
+		<div class="cover" style:--ax={light.x} style:--ay={light.y} style:--ratio={ratio}>
 			{#if showCover}
 				<img
 					class="coverimg"
@@ -106,8 +115,9 @@
 				/>
 			{:else}
 				<span class="kindmark">
-					<Icon name={item.kind === 'video' ? 'image' : 'link'} size={22} />
+					<Icon name={kindIcons[item.kind] ?? 'link'} size={24} />
 				</span>
+				<span class="kindtag">{kindNames[item.kind] ?? 'Link'}</span>
 			{/if}
 			{#if item.readLater}
 				<span class="rl" title="Read later"><Icon name="clock" size={14} /></span>

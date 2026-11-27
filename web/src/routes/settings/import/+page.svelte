@@ -16,6 +16,8 @@
 		type ImportStatusResponse
 	} from '#lib/api';
 
+	import Icon from '../../../lib/components/Icon.svelte';
+
 	type Phase = 'idle' | 'reading' | 'preview' | 'running' | 'finished';
 
 	let phase = $state<Phase>('idle');
@@ -27,6 +29,10 @@
 	let cancelled = $state(false);
 	let dragging = $state(false);
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// Which of the three stages the progress strip is on. It is derived from the
+	// phase, never set on its own, so it cannot disagree with what the page does.
+	const step = $derived(phase === 'idle' || phase === 'reading' ? 1 : phase === 'preview' ? 2 : 3);
 
 	const number = new Intl.NumberFormat();
 
@@ -177,16 +183,34 @@
 	<title>Import — Harbor</title>
 </svelte:head>
 
-<header class="pagehead">
-	<h1 class="h1">Import</h1>
+<p class="breadcrumb">
+	<a href="/settings"><Icon name="arrow-left" size={15} /> Settings</a>
+</p>
+
+<header class="pagehead tight">
+	<h1 class="h1 compact">Import</h1>
 	<p class="lead">
-		Move a Raindrop CSV export or a browser's <span class="code">bookmarks.html</span> in. Everything is
-		merged by canonical link, so importing the same file twice adds nothing the second time and a
-		cancelled run is safe to start again.
+		Bring in a Raindrop CSV export or a browser's <span class="code">bookmarks.html</span>. Links merge
+		by canonical address, so importing twice adds nothing the second time, and a stopped run is safe to
+		start again.
 	</p>
 </header>
 
-<div class="stack">
+<div class="import">
+	<!-- Where you are in the three real stages. It follows the phase, so it can
+	     never say something the page is not doing. -->
+	<ol class="steps3" aria-label="Import progress">
+		<li class:done={step > 1} aria-current={step === 1 ? 'step' : undefined}>
+			<span class="n">{#if step > 1}<Icon name="check" size={13} />{:else}1{/if}</span> Choose a file
+		</li>
+		<li class:done={step > 2} aria-current={step === 2 ? 'step' : undefined}>
+			<span class="n">{#if step > 2}<Icon name="check" size={13} />{:else}2{/if}</span> Check the preview
+		</li>
+		<li class:done={phase === 'finished'} aria-current={step === 3 ? 'step' : undefined}>
+			<span class="n">{#if phase === 'finished'}<Icon name="check" size={13} />{:else}3{/if}</span> Import
+		</li>
+	</ol>
+
 	{#if status?.resumable && phase === 'idle'}
 		<div class="callout amb" role="status">
 			<span>
@@ -196,11 +220,11 @@
 		</div>
 	{/if}
 
-	<section class="panel">
-		<h2 class="h3">The file</h2>
+	<section class="stage">
+		<h2 class="h2">The file</h2>
 		<p class="note">
 			The file is read here and written into the library on the potato; only enrichment ever sends
-			anything further. Collections become Spaces, and highlights survive — they are the one thing in
+			anything further. Collections become Spaces, and highlights survive, which is the one thing in
 			an export that is tedious to recreate.
 		</p>
 
@@ -216,12 +240,17 @@
 				ondragleave={() => (dragging = false)}
 				ondrop={drop}
 			>
+				<span class="beacon idle" class:waiting={phase === 'reading'} aria-hidden="true"></span>
 				{#if phase === 'reading'}
-					<span>Reading the file…</span>
+					<strong>Reading the file…</strong>
 				{:else}
-					<span>Drop the export here, or choose a file</span>
+					<strong>Drop the export here</strong>
+					<span class="pick">or choose a file</span>
 				{/if}
-				<em class="dim">Raindrop CSV, or any browser's bookmarks.html</em>
+				<span class="formats">
+					<span class="pill">Raindrop CSV</span>
+					<span class="pill">bookmarks.html</span>
+				</span>
 				<input
 					id="import-file"
 					type="file"
@@ -236,7 +265,7 @@
 					<div class="grow">
 						<div class="t">{file?.name ?? 'the import file'}</div>
 						<div class="s">
-							{#if file}{Math.max(1, Math.round(file.size / 1024))} kB · {/if}{preview?.report
+							{#if file}{Math.max(1, Math.round(file.size / 1024))} kB{' · '}{/if}{preview?.report
 								.total
 								? `${number.format(preview.report.total)} rows`
 								: `${number.format(records)} records read`}
@@ -259,10 +288,10 @@
 	</section>
 
 	{#if phase === 'preview' && preview}
-		<section class="panel">
+		<section class="stage">
 			<div class="row wrap">
 				<div class="grow">
-					<h2 class="h3">What the import would do</h2>
+					<h2 class="h2">What the import would do</h2>
 					<p class="note">
 						Nothing has been written yet. The counts below come from reading your file against the
 						library as it is now.
@@ -291,7 +320,7 @@
 				<div class="callout amb">
 					<span>
 						An earlier import stopped at record {number.format(status.run?.checkpoint ?? 0)}. If
-						this is the same file, the run continues from there — the counts above describe the
+						this is the same file, the run continues from there. The counts above describe the
 						whole file, not what is left to read.
 					</span>
 				</div>
@@ -314,8 +343,8 @@
 			<label class="check">
 				<input type="checkbox" bind:checked={enrich} />
 				<span>
-					Queue these for the model afterwards. It reads every new save, tags it and summarises it —
-					about $0.0015 a save, so roughly
+					Queue these for the model afterwards. It reads every new save, tags it and summarises it,
+					at about $0.0015 a save, so roughly
 					<span class="code">${((preview.report.imported * 0.0015) || 0).toFixed(2)}</span> for this
 					file, and it drains behind anything you save by hand. Left off, the saves land ready to
 					use and can be enriched later.
@@ -332,10 +361,13 @@
 	{/if}
 
 	{#if phase === 'running' || phase === 'finished'}
-		<section class="panel">
+		<section class="stage">
 			<div class="row wrap">
+				{#if phase === 'running'}
+					<span class="beacon sm waiting" aria-hidden="true"></span>
+				{/if}
 				<div class="grow">
-					<h2 class="h3">
+					<h2 class="h2">
 						{#if phase === 'running'}
 							Importing{status?.run?.checkpoint
 								? ' · ' + number.format(records) + ' records read'
@@ -394,7 +426,7 @@
 			{#each runReport?.errors ?? [] as row (row.record)}
 				<p class="note">
 					record {number.format(row.record)}
-					{#if row.url}<span class="code">{row.url}</span>{/if} — {row.reason}
+					{#if row.url}<span class="code">{row.url}</span>{/if} · {row.reason}
 				</p>
 			{/each}
 
@@ -413,12 +445,9 @@
 		</section>
 	{/if}
 
-	<section class="panel">
-		<h2 class="h3">The CLI still does this</h2>
-		<p class="note">
-			A 1,500-row export is a minute of writing either way, but
-			<span class="code">harbor import FILE --dry-run</span> is the version that survives a closed
-			laptop. <span class="code">docs/import.md</span> is the operator's page for it.
-		</p>
-	</section>
+	<p class="footnote">
+		A 1,500-row export is a minute of writing either way, but
+		<span class="code">harbor import FILE --dry-run</span> is the version that survives a closed
+		laptop. <span class="code">docs/import.md</span> is the operator's page for it.
+	</p>
 </div>

@@ -15,6 +15,11 @@
   --acc:#ff5f93;  --acc-ink:#1f0912;  --acc-soft:rgba(255,95,147,.14);
   --amb:#f2b866;  --amb-ink:#1b1306;  --amb-soft:rgba(242,184,102,.10);
   --ok:#58d4a8;   --ok-soft:rgba(88,212,168,.12);
+  /* the lamp: the wordmark's lit core and the few brand moments (empty, waiting, arriving).
+     Same hue as amber on purpose, so "something is lit" and "something waits" read as one family. */
+  --lamp:#f2b866; --lamp-glow:rgba(242,184,102,.42);
+  /* depth: surfaces sit on the water, they do not float. Shadows are tinted, never black-on-black. */
+  --lift:0 18px 40px -22px rgba(2,8,9,.95), 0 2px 0 0 rgba(232,236,230,.03) inset;
   /* highlight palette (four, stored in highlights.color) */
   --hl-amber:#f2b866; --hl-magenta:#ff5f93; --hl-teal:#58d4a8; --hl-blue:#6ea8ff;
   /* shape */
@@ -23,7 +28,7 @@
   --font:"Schibsted Grotesk",system-ui,-apple-system,sans-serif;
   --code:ui-monospace,"SF Mono",Menlo,monospace;
   /* scale */
-  --t-xs:11.5px; --t-s:12.5px; --t-m:14px; --t-l:16px; --t-xl:20px; --t-2xl:28px; --t-3xl:38px;
+  --t-xs:11.5px; --t-s:12.5px; --t-m:14px; --t-l:16px; --t-xl:21px; --t-2xl:32px; --t-3xl:48px;
   /* motion */
   --ease:cubic-bezier(.2,.7,.2,1); --dur:.22s;
 }

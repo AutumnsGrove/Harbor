@@ -893,6 +893,13 @@ pattern with a floating glass bar.
 - **Colour has three jobs.** Magenta = something you can act on (Save, active chip, focus, selection).
   Amber = something waiting on you (pending saves, needs attention, dead links, Read later). Teal =
   healthy or mirrored. Nothing else is coloured. The mockup has a switch that turns amber off.
+  The one exception is **the lamp** (2026-11-27): the wordmark's lit core and the few brand moments
+  (empty, waiting, arriving), in amber's hue so that "lit" and "waiting" read as one family.
+- **Wordmark** (2026-11-27): lowercase `harbor` in the one face, the `o` drawn as a ring around the lamp
+  (`Wordmark.svelte`; the ring alone is the favicon). Explored in `design/wordmark.html`.
+- **Depth is allowed, borders still are not.** Cards and covers carry a tinted shadow (`--lift`) and lift
+  on hover; cover-less cards get a light that falls differently per item. Headings run 700 at 48 px with
+  -0.04em tracking so hierarchy comes from weight and scale, not colour.
 - **One face**, Schibsted Grotesk, including the reader. No serif, no mono except inline code.
 - **No borders.** Separation is surface tone and space; the one hairline is the 7% rule between list rows.
 - **Per-kind item pages** for all 12 kinds (recipe ingredients and method, video chapters and transcript,

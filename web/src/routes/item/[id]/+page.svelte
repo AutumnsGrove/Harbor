@@ -8,7 +8,8 @@
 	import { onMount } from 'svelte';
 
 	import { api, isApiError, type Item } from '#lib/api';
-	import { kindIcons, kinds } from '#lib/kinds';
+	import { coverRatio, lightAt, seedOf } from '#lib/art';
+	import { kindHeadings, kindIcons, kinds } from '#lib/kinds';
 
 	import Icon from '../../../lib/components/Icon.svelte';
 	import KindPanel from '../../../lib/components/KindPanel.svelte';
@@ -28,6 +29,18 @@
 	let notice = $state<string | null>(null);
 	let titleEl = $state<HTMLTextAreaElement | null>(null);
 	let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+	// The art column: the page's own cover when it has one, otherwise the same
+	// lit placeholder the card showed. Same seed as the card, so the shape and
+	// the light match the thing you clicked. A cover that fails is no cover.
+	let coverFailed = $state(false);
+	const seed = $derived(seedOf(id));
+	const ratio = $derived(coverRatio(item?.kind ?? 'article', seed));
+	const light = $derived(lightAt(seed));
+
+	// Notes and posts are text, and the feed already shows them as text cards
+	// (Card.svelte's isText), so their page has no art column: the words are it.
+	const solo = $derived(item?.kind === 'note' || item?.kind === 'tweet');
 
 	// A confirmation is not a permanent label: it fades so the page is not left
 	// saying "Saved." twenty minutes later.
@@ -193,28 +206,38 @@
 			</div>
 		{/if}
 
-		{#if item.cover}
-			<!-- The same stored cover the card uses (#49). A failure hides the
-			     element rather than leaving a broken-image box. -->
-			<img
-				class="item-cover"
-				src={`/api/items/${item.id}/cover?v=${item.cover}`}
-				alt=""
-				width="1200"
-				height="675"
-				loading="lazy"
-				decoding="async"
-				onerror={(event) => ((event.currentTarget as HTMLImageElement).hidden = true)}
-			/>
+		<div class="hero" class:solo>
+		{#if !solo}
+		<div class="hero-art" style:--ratio={ratio} style:--ax={light.x} style:--ay={light.y}>
+			{#if entry.cover && !coverFailed}
+				<!-- The same stored cover the card uses (#49), cropped to the
+				     proportion the card chose. A failure falls back to the art. -->
+				<img
+					class="item-cover"
+					src={`/api/items/${entry.id}/cover?v=${entry.cover}`}
+					alt=""
+					width="1200"
+					height="900"
+					decoding="async"
+					onerror={() => (coverFailed = true)}
+				/>
+			{:else}
+				<div class="item-art" aria-hidden="true">
+					<span class="kindmark"><Icon name={kindIcons[entry.kind]} size={36} /></span>
+					<span class="kindtag">{kindHeadings[entry.kind]}</span>
+				</div>
+			{/if}
+		</div>
 		{/if}
 
+		<div class="hero-main">
 		<textarea
 			class="in item-title"
 			bind:value={title}
 			bind:this={titleEl}
 			rows={1}
 			aria-label="Title"
-			placeholder="Untitled"
+			placeholder={solo ? 'Add a title (optional)' : 'Untitled'}
 		></textarea>
 
 		<div class="metaline">
@@ -276,6 +299,13 @@
 					{saving ? 'Saving…' : 'Save changes'}
 				</button>
 			{/if}
+			{#if entry.url}
+				<!-- The obvious thing to do with a saved link. It is the primary
+				     action until there are edits to save, then Save takes over. -->
+				<a class="btn" class:pri={!dirty} href={entry.url} target="_blank" rel="noreferrer">
+					<Icon name="external-link" /> Open original
+				</a>
+			{/if}
 			<span class="sp"></span>
 
 			{#if entry.walled || entry.linkStatus === 'dead'}
@@ -298,9 +328,14 @@
 
 		<KindPanel kind={entry.kind} details={entry.details} />
 
-		<label class="field">
-			<span>Your note</span>
-			<textarea class="ta" bind:value={note} placeholder="Anything worth remembering"></textarea>
+		<!-- For a note the text is the item, so it is the page: large, in place. -->
+		<label class="field" class:bignote={solo}>
+			<span class:sr={solo}>Your note</span>
+			<textarea
+				class="ta"
+				bind:value={note}
+				placeholder={solo ? 'Write something' : 'Anything worth remembering'}
+			></textarea>
 		</label>
 
 		<section class="sec">
@@ -337,5 +372,7 @@
 				{/if}
 			</dl>
 		</section>
+		</div>
+		</div>
 	{/if}
 </div>

@@ -79,8 +79,16 @@
 		}
 	}
 
+	let form = $state<HTMLFormElement | null>(null);
+
+	// Escape closes; ⌘↵ (or Ctrl↵) saves from anywhere in the dialog, which is
+	// what the footer hint has always promised.
 	function dismiss(event: KeyboardEvent) {
 		if (event.key === 'Escape' && !saving) onclose();
+		if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !saving) {
+			event.preventDefault();
+			form?.requestSubmit();
+		}
 	}
 </script>
 
@@ -103,26 +111,33 @@
 		aria-labelledby="composer-title"
 		onclick={(event) => event.stopPropagation()}
 	>
-		<form onsubmit={save}>
-		<h2 class="h2" id="composer-title">Save to Harbor</h2>
-		<p class="note">A link, a thought, or both. Enrichment arrives behind it.</p>
+		<form onsubmit={save} bind:this={form} class="composer">
+		<header class="compose-head">
+			<span class="beacon sm" aria-hidden="true"></span>
+			<div>
+				<h2 class="h2" id="composer-title">Save to Harbor</h2>
+				<p class="note">A link, a thought, or both. Enrichment arrives behind it.</p>
+			</div>
+		</header>
 
 		<div class="stack spaced">
 			<div class="field">
-				<label for="composer-url">Link</label>
-				<input
-					class="in"
-					id="composer-url"
-					bind:this={urlField}
-					bind:value={url}
-					placeholder="https://…"
-					autocomplete="off"
-					spellcheck="false"
-				/>
+				<label class="sr" for="composer-url">Link</label>
+				<div class="bigfield">
+					<Icon name="link" size={20} />
+					<input
+						id="composer-url"
+						bind:this={urlField}
+						bind:value={url}
+						placeholder="Paste a link"
+						autocomplete="off"
+						spellcheck="false"
+					/>
+				</div>
 			</div>
 
 			{#if match}
-				<div class="callout" role="status">
+				<div class="callout merge" role="status">
 					<span>
 						Already saved as <b>{match.title || match.url}</b>. Saving again appends your note and
 						refreshes the item.
@@ -131,15 +146,24 @@
 			{/if}
 
 			<div class="field">
-				<label for="composer-note">Note</label>
-				<textarea class="ta" id="composer-note" bind:value={note} placeholder="Why does this matter?"
+				<label class="sr" for="composer-note">Note</label>
+				<textarea class="ta note-in" id="composer-note" bind:value={note} placeholder="Why does this matter? A thought is enough on its own."
 				></textarea>
 			</div>
 
-			<label class="row switchrow">
-				<input class="switch" type="checkbox" bind:checked={readLater} role="switch" />
-				<span>Add to Read later</span>
-			</label>
+			<!-- Read later is a mode of the save, so it is a chip you press, not a
+			     settings switch. Amber: it is something that waits on you. -->
+			<div class="row">
+				<button
+					type="button"
+					class="chip"
+					class:on={readLater}
+					aria-pressed={readLater}
+					onclick={() => (readLater = !readLater)}
+				>
+					<Icon name={readLater ? 'check' : 'clock'} size={15} /> Read later
+				</button>
+			</div>
 		</div>
 
 		{#if problem}
@@ -150,7 +174,7 @@
 		{/if}
 
 		<div class="foot">
-			<span class="hint">⌘↵ to save</span>
+			<span class="hint"><kbd>⌘</kbd><kbd>↵</kbd> save <kbd>esc</kbd> close</span>
 			<button class="btn ghost" type="button" onclick={onclose} disabled={saving}>Cancel</button>
 			<button class="btn pri" type="submit" disabled={saving}>
 				{saving ? 'Saving…' : match ? 'Merge into item' : 'Save'}

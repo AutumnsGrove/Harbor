@@ -3,6 +3,8 @@
 
 	import { page } from '$app/state';
 
+	import Wordmark from '../lib/components/Wordmark.svelte';
+
 	let { children } = $props();
 
 	const onSettings = $derived(page.url.pathname.startsWith('/settings'));
@@ -10,7 +12,7 @@
 
 <div class="app">
 	<header class="top">
-		<a class="brand" href="/">Harbor<em>.</em></a>
+		<a class="brand" href="/" aria-label="Harbor, home"><Wordmark size={24} /></a>
 
 		<!-- Search arrives with phase 10. It is disabled, not decorative: a field
 		     that silently does nothing is worse than one that says so. -->
