@@ -16,6 +16,11 @@
   --acc:#ff5f93;  --acc-ink:#1f0912;  --acc-soft:rgba(255,95,147,.14);
   --amb:#f2b866;  --amb-ink:#1b1306;  --amb-soft:rgba(242,184,102,.10);
   --ok:#58d4a8;   --ok-soft:rgba(88,212,168,.12);
+  /* the lamp: the wordmark's lit core and the few brand moments (empty, waiting, arriving).
+     Same hue as amber on purpose, so "something is lit" and "something waits" read as one family. */
+  --lamp:#f2b866; --lamp-glow:rgba(242,184,102,.42);
+  /* depth: surfaces sit on the water, they do not float. Shadows are tinted, never black-on-black. */
+  --lift:0 18px 40px -22px rgba(2,8,9,.95), 0 2px 0 0 rgba(232,236,230,.03) inset;
   /* highlight palette (four, stored in highlights.color) */
   --hl-amber:#f2b866; --hl-magenta:#ff5f93; --hl-teal:#58d4a8; --hl-blue:#6ea8ff;
   /* shape */
@@ -24,7 +29,7 @@
   --font:"Schibsted Grotesk",system-ui,-apple-system,sans-serif;
   --code:ui-monospace,"SF Mono",Menlo,monospace;
   /* scale */
-  --t-xs:11.5px; --t-s:12.5px; --t-m:14px; --t-l:16px; --t-xl:20px; --t-2xl:28px; --t-3xl:38px;
+  --t-xs:11.5px; --t-s:12.5px; --t-m:14px; --t-l:16px; --t-xl:21px; --t-2xl:32px; --t-3xl:48px;
   /* motion */
   --ease:cubic-bezier(.2,.7,.2,1); --dur:.22s;
 }
@@ -67,7 +72,12 @@ html {
 body {
 	margin: 0;
 	min-height: 100dvh;
-	background: var(--bg);
+	/* A faint lamplight at the top-left, where the wordmark sits. It fades out
+	   within the first screen; below that the ground is the flat teal-black. */
+	background:
+		radial-gradient(60rem 28rem at 4% -6rem, rgba(242, 184, 102, 0.07), transparent 70%),
+		var(--bg);
+	background-repeat: no-repeat;
 	color: var(--ink);
 	font: var(--t-m) / 1.45 var(--font);
 	-webkit-font-smoothing: antialiased;
@@ -132,18 +142,60 @@ a {
 	display: flex;
 	align-items: center;
 	gap: 18px;
-	padding: 18px 36px 14px;
-	background: linear-gradient(var(--bg) 78%, rgba(9, 18, 20, 0));
+	/* Same gutter as .page: the bar is full-bleed but its contents share the
+	   page's left edge, so the wordmark sits over the first column. */
+	padding: 18px max(36px, calc((100cqi - 1280px) / 2 + 36px)) 14px;
+	background: linear-gradient(rgba(9, 18, 20, 0.86) 78%, rgba(9, 18, 20, 0));
 }
 
 .brand {
-	font: 600 20px / 1 var(--font);
-	letter-spacing: -0.02em;
+	display: inline-flex;
+	align-items: center;
+	border-radius: 10px;
 }
 
-.brand em {
-	font-style: normal;
-	color: var(--acc);
+/* The wordmark: the o is a ring with a lit core (design/wordmark.html, option B).
+   Everything is in em, so the mark scales with the font size it is given. */
+.wordmark {
+	display: inline-flex;
+	font: 600 1em / 1 var(--font);
+	letter-spacing: -0.035em;
+	color: var(--ink);
+}
+
+.wordmark .ring {
+	position: relative;
+	display: inline-block;
+	width: 0.54em;
+	height: 0.54em;
+	margin: 0 0.035em 0 0.02em;
+	border: 0.11em solid currentColor;
+	border-radius: 50%;
+	vertical-align: baseline;
+}
+
+.wordmark .ring::after {
+	content: '';
+	position: absolute;
+	inset: 50% auto auto 50%;
+	width: 0.15em;
+	height: 0.15em;
+	margin: -0.075em 0 0 -0.075em;
+	border-radius: 50%;
+	background: var(--lamp);
+	box-shadow: 0 0 0.32em 0.06em var(--lamp-glow);
+	transition:
+		background 0.6s var(--ease),
+		box-shadow 0.6s var(--ease);
+}
+
+.wordmark.unlit .ring::after {
+	background: var(--dim);
+	box-shadow: none;
+}
+
+.brand:hover .ring::after {
+	box-shadow: 0 0 0.5em 0.12em var(--lamp-glow);
 }
 
 .searchbox {
@@ -217,14 +269,14 @@ a {
 /* ── type and surfaces ─────────────────────────────────────────────────────── */
 
 .h1 {
-	font: 600 var(--t-3xl) / 1.1 var(--font);
-	letter-spacing: -0.025em;
+	font: 700 var(--t-3xl) / 1.04 var(--font);
+	letter-spacing: -0.04em;
 	text-wrap: balance;
 }
 
 .h2 {
-	font: 600 var(--t-xl) / 1.2 var(--font);
-	letter-spacing: -0.02em;
+	font: 650 var(--t-xl) / 1.2 var(--font);
+	letter-spacing: -0.025em;
 }
 
 .h3 {
@@ -381,6 +433,66 @@ a {
 	color: var(--mute);
 }
 
+/* ── empty, loading, error ──────────────────────────────────────────────────── */
+
+.empty {
+	display: grid;
+	justify-items: center;
+	gap: 10px;
+	padding: 96px 20px;
+	text-align: center;
+}
+
+.empty h3 {
+	font: 650 var(--t-xl) / 1.2 var(--font);
+	letter-spacing: -0.025em;
+}
+
+.empty p {
+	max-width: 44ch;
+	color: var(--mute);
+	text-wrap: pretty;
+}
+
+.empty .btn {
+	margin-top: 8px;
+}
+
+/* The beacon: the wordmark's ring on its own, large. It is the one decorative
+   mark in the app, and it only appears where Harbor is waiting or has nothing yet. */
+.beacon {
+	position: relative;
+	display: block;
+	width: 56px;
+	height: 56px;
+	margin-bottom: 10px;
+	border: 7px solid var(--ink);
+	border-radius: 50%;
+}
+
+.beacon::after {
+	content: '';
+	position: absolute;
+	inset: 50% auto auto 50%;
+	width: 14px;
+	height: 14px;
+	margin: -7px 0 0 -7px;
+	border-radius: 50%;
+	background: var(--lamp);
+	box-shadow: 0 0 22px 6px var(--lamp-glow);
+}
+
+.beacon.waiting::after {
+	animation: breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+	50% {
+		opacity: 0.35;
+		box-shadow: 0 0 10px 2px var(--lamp-glow);
+	}
+}
+
 /* ── first run ─────────────────────────────────────────────────────────────── */
 
 .firstrun {
@@ -397,6 +509,26 @@ a {
 	padding: 22px;
 	border-radius: var(--r-l);
 	background: var(--surf);
+}
+
+.path .btn {
+	justify-self: start;
+	margin-top: 6px;
+}
+
+.pagehead.hero {
+	padding-top: 48px;
+	gap: 14px;
+}
+
+.path {
+	background: linear-gradient(160deg, var(--surf2), var(--surf) 70%);
+	box-shadow: var(--lift);
+	transition: transform var(--dur) var(--ease);
+}
+
+.path:hover {
+	transform: translateY(-2px);
 }
 
 .path .badge {
@@ -567,16 +699,47 @@ a {
 	aspect-ratio: 16 / 10;
 	border-radius: 16px;
 	overflow: hidden;
+	/* The light falls somewhere different on every placeholder (--ax/--ay come
+	   from the item id in Card.svelte). A real cover paints over all of it. */
 	background:
-		radial-gradient(120% 90% at 20% 0%, var(--surf2) 0%, transparent 60%),
-		linear-gradient(140deg, var(--surf2), var(--surf) 55%, var(--surf3));
+		radial-gradient(70% 90% at var(--ax, 30%) var(--ay, 20%), rgba(242, 184, 102, 0.22), transparent 72%),
+		linear-gradient(150deg, var(--surf2), var(--surf) 60%, var(--surf3));
+	box-shadow: var(--lift);
 	display: grid;
 	place-items: center;
-	transition: transform var(--dur) var(--ease);
+	transition:
+		transform var(--dur) var(--ease),
+		box-shadow var(--dur) var(--ease);
 }
 
-.card:hover .cover {
-	transform: translateY(-2px);
+.card:hover .cover,
+.card:focus-visible .cover {
+	transform: translateY(-3px);
+	box-shadow:
+		0 26px 44px -22px rgba(2, 8, 9, 1),
+		0 0 0 1px rgba(242, 184, 102, 0.16);
+}
+
+.card .kindtag {
+	position: absolute;
+	left: 12px;
+	bottom: 10px;
+	color: var(--mute);
+	font-size: var(--t-xs);
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+@keyframes arrive {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+.card {
+	animation: arrive 0.24s var(--ease) both;
 }
 
 /* The page's own image, same-origin through /api/items/{id}/cover. Explicit
@@ -591,14 +754,14 @@ a {
 }
 
 .card .kindmark {
-	color: var(--dim);
+	color: var(--mute);
 	display: grid;
 	place-items: center;
-	width: 44px;
-	height: 44px;
+	width: 56px;
+	height: 56px;
 	border-radius: 50%;
-	background: rgba(9, 18, 20, 0.45);
-	box-shadow: inset 0 0 0 1px var(--line);
+	background: rgba(9, 18, 20, 0.5);
+	box-shadow: inset 0 0 0 1px rgba(232, 236, 230, 0.1);
 }
 
 .card .rl {
@@ -620,9 +783,10 @@ a {
 }
 
 .card h3 {
-	font: 500 14.5px / 1.35 var(--font);
-	letter-spacing: -0.005em;
+	font: 600 15.5px / 1.3 var(--font);
+	letter-spacing: -0.015em;
 	overflow-wrap: anywhere;
+	text-wrap: balance;
 }
 
 .card .sub {
@@ -665,15 +829,24 @@ a {
 }
 
 .card.text .body {
-	padding: 20px;
+	padding: 22px 22px 20px;
 	border-radius: 16px;
-	background: var(--surf);
+	background: linear-gradient(160deg, var(--surf2), var(--surf) 70%);
+	box-shadow: var(--lift);
+	transition: transform var(--dur) var(--ease);
+}
+
+.card.text:hover .body {
+	transform: translateY(-3px);
 }
 
 .card.text .tx {
-	font-size: 15.5px;
-	line-height: 1.5;
+	font-size: 18px;
+	font-weight: 500;
+	line-height: 1.42;
+	letter-spacing: -0.015em;
 	overflow-wrap: anywhere;
+	text-wrap: pretty;
 }
 
 .card.text .sub {

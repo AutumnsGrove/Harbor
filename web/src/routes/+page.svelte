@@ -187,9 +187,13 @@
 </svelte:head>
 
 {#if loading}
-	<div class="empty"><p class="muted">Reading the library…</p></div>
+	<div class="empty" role="status">
+		<span class="beacon waiting" aria-hidden="true"></span>
+		<p>Reading the library…</p>
+	</div>
 {:else if problem && items.length === 0}
 	<div class="empty">
+		<span class="beacon" aria-hidden="true"></span>
 		<h3>The library did not answer.</h3>
 		<p>{problem}</p>
 		<button class="btn" onclick={load}><Icon name="refresh" /> Try again</button>
@@ -197,7 +201,8 @@
 {:else if items.length === 0 && pending.length === 0}
 	<!-- The real first-run screen from the mockup. Both paths are live now: import
 	     is phase 5's, and the composer works, so neither is a promise. -->
-	<header class="pagehead">
+	<header class="pagehead hero">
+		<span class="beacon" aria-hidden="true"></span>
 		<h1 class="h1">Bring something in.</h1>
 		<p class="lead">
 			Your library is empty. Import the old one, or save a single link and watch it appear.

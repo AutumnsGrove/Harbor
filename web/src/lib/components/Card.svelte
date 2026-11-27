@@ -4,9 +4,16 @@
 	// kind glyph, which is the honest placeholder for a note or a failed fetch.
 	import type { Item } from '#lib/api';
 
+	import { kindIcons } from '#lib/kinds';
+
 	import Icon from './Icon.svelte';
 
 	let { item }: { item: Item } = $props();
+
+	// A cover-less card is a placeholder, and a wall of identical placeholders
+	// reads as broken. The item id seeds where the light falls on each one, so
+	// the same item always looks the same and its neighbours differ.
+	const seed = $derived([...item.id].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) >>> 0, 7));
 
 	// A cover that fails to load is the same as no cover: one silent fallback,
 	// not a broken-image icon.
@@ -80,7 +87,7 @@
 			</p>
 		</div>
 	{:else}
-		<div class="cover">
+		<div class="cover" style:--ax={`${seed % 70}%`} style:--ay={`${(seed >> 3) % 60}%`}>
 			{#if showCover}
 				<img
 					class="coverimg"
@@ -94,8 +101,9 @@
 				/>
 			{:else}
 				<span class="kindmark">
-					<Icon name={item.kind === 'video' ? 'image' : 'link'} size={22} />
+					<Icon name={kindIcons[item.kind] ?? 'link'} size={24} />
 				</span>
+				<span class="kindtag">{kindNames[item.kind] ?? 'Link'}</span>
 			{/if}
 			{#if item.readLater}
 				<span class="rl" title="Read later"><Icon name="clock" size={14} /></span>
