@@ -145,6 +145,46 @@ func TestPDFScanIsEmptyNotAnError(t *testing.T) {
 	}
 }
 
+// TestPDFSparseTextOverSeveralPagesIsAScan covers the half of the rule that
+// "no text at all" does not: a 30-page scan often carries a little text — a
+// header, a stamped watermark — so zero characters is not the test, the ratio is.
+// Deleting the ratio half of the condition used to leave the suite green.
+func TestPDFSparseTextOverSeveralPagesIsAScan(t *testing.T) {
+	// Twelve characters a page over four pages: real text, far under the ratio.
+	sparse := "BT /F1 12 Tf 72 720 Td (Page watermark) Tj ET"
+	pages := []string{sparse, sparse, sparse, sparse}
+	result := readPDFString(t, pdfFixture(t, pages...), "stamped-scan.pdf")
+
+	if result.PDF == nil {
+		t.Fatal("a PDF result must carry PDF info")
+	}
+	if result.PDF.PagesRead != 4 {
+		t.Fatalf("pages read = %d, want 4", result.PDF.PagesRead)
+	}
+	if result.PDF.CharsPerPage >= ScanCharsPerPage {
+		t.Fatalf("fixture chars/page = %.1f; it has to sit under the %d threshold to test it",
+			result.PDF.CharsPerPage, ScanCharsPerPage)
+	}
+	if result.PDF.TextState != TextStateEmpty {
+		t.Errorf("text state = %q, want %q: %.1f chars/page over %d pages is a scan",
+			result.PDF.TextState, TextStateEmpty, result.PDF.CharsPerPage, result.PDF.PagesRead)
+	}
+	if result.Text != "" {
+		t.Errorf("a scan kept its sparse text: %q", result.Text)
+	}
+}
+
+// The other side of the same rule: the identical sparse page, alone. One page is
+// a flyer, not a scan, and its twelve characters are all the text it has.
+func TestPDFSparseTextOnOnePageIsStillADocument(t *testing.T) {
+	page := "BT /F1 12 Tf 72 720 Td (Page watermark) Tj ET"
+	result := readPDFString(t, pdfFixture(t, page), "flyer.pdf")
+	if result.PDF.TextState != TextStateText {
+		t.Errorf("text state = %q over %d page, want %q: the ratio is taken over at least %d pages",
+			result.PDF.TextState, result.PDF.PagesRead, TextStateText, ScanPages)
+	}
+}
+
 // TestPDFPageCapTruncates is the bound that keeps a 400-page report from holding
 // a background worker for a minute: it is read, not refused.
 func TestPDFPageCapTruncates(t *testing.T) {
