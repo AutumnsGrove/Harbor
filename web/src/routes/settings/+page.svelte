@@ -12,6 +12,8 @@
 	} from '#lib/api';
 	import { dailySeries } from '#lib/sparkline';
 
+	import Icon from '../../lib/components/Icon.svelte';
+
 	type UpdateState = 'idle' | 'checking' | 'available' | 'requesting' | 'requested' | 'uptodate';
 
 	let version = $state<VersionResponse | null>(null);
@@ -190,216 +192,240 @@
 	<title>Settings — Harbor</title>
 </svelte:head>
 
-<header class="pagehead">
-	<h1 class="h1">Settings</h1>
-	<p class="lead">
-		The library settings arrive with their phases. What exists now is the deployment: the version,
-		the update path, the import, and what the watcher last did.
-	</p>
+<header class="pagehead tight">
+	<h1 class="h1 compact">Settings</h1>
 </header>
 
-<div class="stack">
-	<section class="panel">
-		<div class="row wrap">
-			<div class="grow">
-				<div class="h3">Version <span class="code">{version?.version ?? '…'}</span></div>
-				<p class="note">
-					{version ? version.deployment + ' deployment · image pinned by digest' : 'reading the running binary'}
-				</p>
-			</div>
+<div class="settings">
+	<nav class="snav" aria-label="Settings sections">
+		<a href="#deployment">Deployment</a>
+		<a href="#import">Import</a>
+		<a href="#ai-usage">AI usage</a>
+		<a href="#recently-deleted">Recently deleted</a>
+		<a href="#later">Coming later</a>
+	</nav>
 
-			{#if updateState === 'idle'}
-				<button class="btn" onclick={checkForUpdates}>Check for updates</button>
-			{:else if updateState === 'checking'}
-				<span class="pill">Checking…</span>
-			{:else if updateState === 'available'}
-				<span class="pill acc">update available</span>
-				<button class="btn pri" onclick={applyUpdate}>Update now</button>
-			{:else if updateState === 'requesting'}
-				<span class="pill">Requesting…</span>
-			{:else if updateState === 'requested'}
-				<span class="pill ok">requested</span>
-			{:else if updateState === 'uptodate'}
-				<span class="pill ok">up to date</span>
-			{/if}
-		</div>
-
-		{#if updateState === 'requested'}
-			<div class="callout">
-				<span>
-					The watcher now pins the digest, snapshots the database with <span class="code">VACUUM INTO</span>,
-					pulls, recreates the container and waits up to 120&nbsp;s for <span class="code">/healthz</span>.
-					If the new version is not healthy it restores the snapshot and the previous digest. This page
-					reloads when the new version answers.
-				</span>
-			</div>
-		{/if}
-
-		{#if available?.available}
-			<div class="callout ok">
-				<span>
-					A newer image is available{available.version ? ` (${available.version})` : ''}. Applying it
-					takes about a minute.
-				</span>
-			</div>
-		{/if}
-
-		{#if problem}
-			<div class="callout amb" role="status">
-				<span>{problem}</span>
-			</div>
-		{/if}
-	</section>
-
-	<section class="panel">
-		<h2 class="h3">Last update</h2>
-		{#if lastUpdate && lastUpdate.status !== 'unknown'}
-			<p class="note">
-				<span class="code">{lastUpdate.status}</span>{#if lastUpdate.version}
-					· {lastUpdate.version}{/if}{#if lastUpdate.at} · {lastUpdate.at}{/if}
-			</p>
-		{:else}
-			<p class="note">
-				The watcher has not recorded a run yet. It writes <span class="code">status.json</span> after
-				every update.
-			</p>
-		{/if}
-	</section>
-
-	<section class="panel">
-		<div class="row wrap">
-			<div class="grow">
-				<div class="h3">Import</div>
-				<p class="note">
-					Move your Raindrop library, or a browser's bookmarks, into Harbor. Merged by canonical link,
-					so importing the same file twice is safe.
-				</p>
-			</div>
-			<a class="btn" href="/settings/import">Open</a>
-		</div>
-	</section>
-
-	<section class="panel">
-		<div class="row wrap">
-			<div class="grow">
-				<div class="h3">AI usage</div>
-				<p class="note">
-					What the model calls cost. A save makes three: the kind, the title and summary, and the
-					vector.
-				</p>
-			</div>
-			{#if usage && usage.calls > 0}
-				<span class="pill">{calls(usage.calls)} recorded</span>
-			{/if}
-		</div>
-
-		{#if usageProblem}
-			<p class="callout amb" role="status">{usageProblem}</p>
-		{:else if !usage}
-			<p class="note">Reading the usage table…</p>
-		{:else if usage.calls === 0}
-			<p class="note">
-				No calls recorded yet. The first save that reaches a model appears here; an empty table is not
-				the same claim as spending nothing.
-			</p>
-		{:else}
-			<div class="usage-month">
-				<div class="row">
-					<span class="grow">{money(usage.monthToDateUsd)} this month</span>
-					<span class="dim num" class:amb={overBudget}
-						>{usage.budgetUsd > 0 ? `of ${money(usage.budgetUsd)}` : 'no budget set'}</span
-					>
+	<div class="sbody">
+		<section class="sset" id="deployment">
+			<div class="row wrap">
+				<div class="grow">
+					<h2 class="h2">Deployment</h2>
+					<p class="note">
+						{version
+							? version.deployment + ' deployment, image pinned by digest'
+							: 'Reading the running binary'}
+					</p>
 				</div>
-				{#if usage.budgetUsd > 0}
-					<svg
-						class="usage-bar"
-						viewBox="0 0 100 6"
-						preserveAspectRatio="none"
-						role="img"
-						aria-label={`${monthPct.toFixed(0)} percent of the monthly budget`}
-					>
-						<rect class="track" width="100" height="6" />
-						<rect class="fill" class:warn={overBudget} width={monthPct} height="6" />
-					</svg>
+
+				<!-- The lamp is lit only once the binary has answered: this page loading
+				     is the proof it is up, and the dot says so without a status word. -->
+				<span class="plate" title="The running version">
+					{#if version}<i class="lamp" aria-hidden="true"></i>{/if}{version?.version ?? '…'}
+				</span>
+
+				{#if updateState === 'idle'}
+					<button class="btn" onclick={checkForUpdates}>Check for updates</button>
+				{:else if updateState === 'checking'}
+					<span class="pill">Checking…</span>
+				{:else if updateState === 'available'}
+					<span class="pill acc">update available</span>
+					<button class="btn pri" onclick={applyUpdate}>Update now</button>
+				{:else if updateState === 'requesting'}
+					<span class="pill">Requesting…</span>
+				{:else if updateState === 'requested'}
+					<span class="pill ok">requested</span>
+				{:else if updateState === 'uptodate'}
+					<span class="pill ok">up to date</span>
 				{/if}
-				<p class="note">
-					{money(usage.totalUsd)} all time over {usage.itemsWithUsage}
-					{usage.itemsWithUsage === 1 ? 'item' : 'items'}
-					{#if usage.itemsWithUsage > 0}· about {money(usage.avgCostPerItem)} a save{/if}
-				</p>
 			</div>
 
-			{#if usage.backlogItems > 0}
-				<p class="note">
-					{usage.backlogItems} still queued ≈ {money(backlogEstimate)} at the recorded average. The
-					provider bills as the queue drains, not before.
-				</p>
+			{#if updateState === 'requested'}
+				<div class="callout">
+					<span>
+						The watcher now pins the digest, snapshots the database with <span class="code">VACUUM INTO</span>,
+						pulls, recreates the container and waits up to 120&nbsp;s for <span class="code">/healthz</span>.
+						If the new version is not healthy it restores the snapshot and the previous digest. This page
+						reloads when the new version answers.
+					</span>
+				</div>
 			{/if}
 
-			<svg
-				class="spark"
-				viewBox={`0 0 ${Math.max(series.length * 4, 4)} 24`}
-				preserveAspectRatio="none"
-				role="img"
-				aria-label="Spend per day for the last month"
-			>
-				{#each series as day, index (day.day)}
-					<rect
-						x={index * 4 + 0.5}
-						y={peakDay > 0 ? 23 - Math.max(1, (day.usd / peakDay) * 21) : 22}
-						width="3"
-						height={peakDay > 0 ? Math.max(1, (day.usd / peakDay) * 21) : 1}
-					/>
-				{/each}
-			</svg>
+			{#if available?.available}
+				<div class="callout ok">
+					<span>
+						A newer image is available{available.version ? ` (${available.version})` : ''}. Applying it
+						takes about a minute.
+					</span>
+				</div>
+			{/if}
 
-			<div class="rows">
-				{#each usage.bySurface as group (group.key)}
-					<div>
-						<div class="grow">
-							<div class="t">{group.key}</div>
-							<div class="s">{calls(group.calls)}</div>
-						</div>
-						<span class="num dim">{money(group.usd)}</span>
-					</div>
-				{/each}
+			{#if problem}
+				<div class="callout amb" role="status">
+					<span>{problem}</span>
+				</div>
+			{/if}
+
+			<dl class="prov">
+				<dt>Last update</dt>
+				<dd class="wrap">
+					{#if lastUpdate && lastUpdate.status !== 'unknown'}
+						<span class="code">{lastUpdate.status}</span>{#if lastUpdate.version}
+							· {lastUpdate.version}{/if}{#if lastUpdate.at} · {lastUpdate.at}{/if}
+					{:else}
+						The watcher has not recorded a run yet. It writes <span class="code">status.json</span> after
+						every update.
+					{/if}
+				</dd>
+			</dl>
+		</section>
+
+		<section class="sset" id="import">
+			<div class="row wrap">
+				<div class="grow">
+					<h2 class="h2">Import</h2>
+					<p class="note">
+						Move your Raindrop library, or a browser's bookmarks, into Harbor. Merged by canonical link,
+						so importing the same file twice is safe.
+					</p>
+				</div>
+				<a class="btn" href="/settings/import">Open <Icon name="arrow-right" size={15} /></a>
 			</div>
-		{/if}
+		</section>
 
-		<p class="note">
-			This is the OpenRouter side only. Cloudflare's D1, R2 and browser rendering have their own bill,
-			which the potato cannot see.
-		</p>
-	</section>
-
-	<section class="panel">
-		<h2 class="h3">Recently deleted</h2>
-		{#if deletedProblem}
-			<p class="callout amb" role="status">{deletedProblem}</p>
-		{:else if deleted.length === 0}
-			<p class="note">Nothing in the bin. Deleted items stay here for 30 days, then they are purged.</p>
-		{:else}
-			<div class="rows">
-				{#each deleted as entry (entry.id)}
-					<div>
-						<div class="grow">
-							<div class="t">{entry.title || entry.url || 'Untitled note'}</div>
-							<div class="s">deleted {deletedWhen(entry.deletedAt)} · {entry.kind}</div>
-						</div>
-						<button class="btn sm" onclick={() => restore(entry)} disabled={restoring === entry.id}>
-							{restoring === entry.id ? 'Restoring…' : 'Restore'}
-						</button>
-					</div>
-				{/each}
+		<section class="sset" id="ai-usage">
+			<div class="row wrap">
+				<div class="grow">
+					<h2 class="h2">AI usage</h2>
+					<p class="note">
+						What the model calls cost. A save makes three: the kind, the title and summary, and the
+						vector.
+					</p>
+				</div>
+				{#if usage && usage.calls > 0}
+					<span class="pill">{calls(usage.calls)} recorded</span>
+				{/if}
 			</div>
-		{/if}
-	</section>
 
-	<section class="panel">
-		<h2 class="h3">Not built yet</h2>
-		<p class="note">
-			Tags, Spaces, Sources and tokens, Search, Status, Export and backup. Each one lands with its
-			phase; none of them is faked here.
-		</p>
-	</section>
+			{#if usageProblem}
+				<p class="callout amb" role="status">{usageProblem}</p>
+			{:else if !usage}
+				<p class="note">Reading the usage table…</p>
+			{:else if usage.calls === 0}
+				<div class="quiet">
+					<span class="beacon sm idle" aria-hidden="true"></span>
+					<div>
+						<strong>No calls recorded yet</strong>
+						<p>
+							The first save that reaches a model appears here. An empty table is not the same claim as
+							spending nothing.
+						</p>
+					</div>
+				</div>
+			{:else}
+				<div class="usage-month">
+					<div class="row">
+						<span class="grow">{money(usage.monthToDateUsd)} this month</span>
+						<span class="dim num" class:amb={overBudget}
+							>{usage.budgetUsd > 0 ? `of ${money(usage.budgetUsd)}` : 'no budget set'}</span
+						>
+					</div>
+					{#if usage.budgetUsd > 0}
+						<svg
+							class="usage-bar"
+							viewBox="0 0 100 6"
+							preserveAspectRatio="none"
+							role="img"
+							aria-label={`${monthPct.toFixed(0)} percent of the monthly budget`}
+						>
+							<rect class="track" width="100" height="6" />
+							<rect class="fill" class:warn={overBudget} width={monthPct} height="6" />
+						</svg>
+					{/if}
+					<p class="note">
+						{money(usage.totalUsd)} all time over {usage.itemsWithUsage}
+						{usage.itemsWithUsage === 1 ? 'item' : 'items'}
+						{#if usage.itemsWithUsage > 0}· about {money(usage.avgCostPerItem)} a save{/if}
+					</p>
+				</div>
+
+				{#if usage.backlogItems > 0}
+					<p class="note">
+						{usage.backlogItems} still queued ≈ {money(backlogEstimate)} at the recorded average. The
+						provider bills as the queue drains, not before.
+					</p>
+				{/if}
+
+				<svg
+					class="spark"
+					viewBox={`0 0 ${Math.max(series.length * 4, 4)} 24`}
+					preserveAspectRatio="none"
+					role="img"
+					aria-label="Spend per day for the last month"
+				>
+					{#each series as day, index (day.day)}
+						<rect
+							x={index * 4 + 0.5}
+							y={peakDay > 0 ? 23 - Math.max(1, (day.usd / peakDay) * 21) : 22}
+							width="3"
+							height={peakDay > 0 ? Math.max(1, (day.usd / peakDay) * 21) : 1}
+						/>
+					{/each}
+				</svg>
+
+				<div class="rows">
+					{#each usage.bySurface as group (group.key)}
+						<div>
+							<div class="grow">
+								<div class="t">{group.key}</div>
+								<div class="s">{calls(group.calls)}</div>
+							</div>
+							<span class="num dim">{money(group.usd)}</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			<p class="note">
+				This is the OpenRouter side only. Cloudflare's D1, R2 and browser rendering have their own bill,
+				which the potato cannot see.
+			</p>
+		</section>
+
+		<section class="sset" id="recently-deleted">
+			<h2 class="h2">Recently deleted</h2>
+			{#if deletedProblem}
+				<p class="callout amb" role="status">{deletedProblem}</p>
+			{:else if deleted.length === 0}
+				<div class="quiet">
+					<span class="beacon sm idle" aria-hidden="true"></span>
+					<div>
+						<strong>Nothing in the bin</strong>
+						<p>Deleted items stay here for 30 days, then they are purged.</p>
+					</div>
+				</div>
+			{:else}
+				<div class="rows">
+					{#each deleted as entry (entry.id)}
+						<div>
+							<div class="grow">
+								<div class="t">{entry.title || entry.url || 'Untitled note'}</div>
+								<div class="s">deleted {deletedWhen(entry.deletedAt)} · {entry.kind}</div>
+							</div>
+							<button class="btn sm" onclick={() => restore(entry)} disabled={restoring === entry.id}>
+								{restoring === entry.id ? 'Restoring…' : 'Restore'}
+							</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</section>
+
+		<section class="sset" id="later">
+			<h2 class="h2">Coming later</h2>
+			<p class="note">
+				Tags, Spaces, Sources and tokens, Search, Status, Export and backup. Each one lands with its
+				phase; none of them is faked here.
+			</p>
+		</section>
+	</div>
 </div>

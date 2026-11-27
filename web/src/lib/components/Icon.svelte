@@ -11,6 +11,8 @@
 		image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m4 18 5-5 4 4 3-3 4 4"/>',
 		trash: '<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/>',
 		'arrow-left': '<path d="M19 12H5"/><path d="m11 18-6-6 6-6"/>',
+		'arrow-right': '<path d="M5 12h14"/><path d="m13 6 6 6-6 6"/>',
+		upload: '<path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/>',
 		x: '<path d="M6 6l12 12"/><path d="M18 6 6 18"/>',
 		search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
 		check: '<path d="m5 12 5 5 9-10"/>',
