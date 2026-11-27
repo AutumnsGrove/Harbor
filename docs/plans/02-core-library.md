@@ -246,8 +246,13 @@ Decisions the plan left open, now made:
 
 Still open in this phase:
 
-- The scheduler skeleton (`task_runs` registry). Nothing in phase 2 registers a task, so this can
-  land with the first phase that needs it; the table already exists in `0001`.
-- The potato demo itself: curl a save, watch it appear, re-save, edit, delete, replay, kill mid-poll.
-  The same flow has been run locally against a fake Worker (claim → item → done, `replay` twice with
-  no change), which is what the automated tests encode; the deploy is what is missing.
+- The scheduler skeleton (`task_runs` registry). It is not free-standing work: it lands with the first
+  phase that registers a task, and that is phase 9's purge job — then phase 11's link checker and
+  phase 12b's nightly set. Nothing in phase 2 registers one, and the table already exists in `0001`.
+  Until phase 9, treat the absence of `server/internal/scheduler/` as expected rather than a missing
+  piece.
+- Two lines of the potato demo below have never been recorded as run: **killing the container
+  mid-poll** (demand 7) and **a second `harbor replay --since`** returning zero new items and zero
+  changes (demand 9). The rest has been exercised in anger — 1,476 real saves through the Worker, then
+  an edit, a delete, a restore and a replay against the real library. The deploy that the old note
+  called "what is missing" happened on 2026-11-23.
