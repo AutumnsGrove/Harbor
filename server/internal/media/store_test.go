@@ -305,3 +305,135 @@ func (r *trackingReader) Read(p []byte) (int, error) {
 	r.onRead(n)
 	return n, nil
 }
+
+// A blob already on disk at the wrong size is a damaged file, not a blob to
+// reuse: serving it would hand back wrong bytes under the right name. Review
+// found this branch untested — `if false` in its place left the suite green.
+func TestABlobAtTheWrongSizeIsRefused(t *testing.T) {
+	s := newStore(t)
+	body := []byte("the bytes this blob is named after")
+	sum := sha256.Sum256(body)
+	sha := hex.EncodeToString(sum[:])
+
+	// A truncated file sitting where the blob should be.
+	abs := filepath.Join(s.Root(), sha[:2], sha)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, []byte("short"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Put(bytes.NewReader(body)); err == nil {
+		t.Fatal("Put reused a damaged blob")
+	} else if !strings.Contains(err.Error(), "exists with 5 bytes") {
+		t.Errorf("error = %v, want the size mismatch named", err)
+	}
+	// And the damaged file is left alone rather than overwritten silently.
+	if got, err := os.ReadFile(abs); err != nil || string(got) != "short" {
+		t.Errorf("the file was modified: %q, %v", got, err)
+	}
+}
+
+// Nothing at a blob path may be reused unless it is a regular file.
+func TestANonRegularFileAtABlobPathIsRefused(t *testing.T) {
+	s := newStore(t)
+	body := []byte("bytes whose path is a directory")
+	sum := sha256.Sum256(body)
+	sha := hex.EncodeToString(sum[:])
+	abs := filepath.Join(s.Root(), sha[:2], sha)
+	if err := os.MkdirAll(abs, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Put(bytes.NewReader(body)); err == nil {
+		t.Fatal("Put accepted a directory as a stored blob")
+	} else if !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("error = %v, want the file type named", err)
+	}
+}
+
+// A rename that fails while the blob is present is success, not an error: the
+// bytes asked for are there. Nothing arranges that state on purpose except a
+// concurrent identical writer, so the rename is injected.
+func TestAFailedRenameWithTheBlobPresentIsSuccess(t *testing.T) {
+	s := newStore(t)
+	body := []byte("a photo that lands while the rename is failing")
+	sum := sha256.Sum256(body)
+	sha := hex.EncodeToString(sum[:])
+	abs := filepath.Join(s.Root(), sha[:2], sha)
+	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// Stand in for the other writer: the blob appears, then our rename fails.
+	s.rename = func(oldpath, newpath string) error {
+		if err := os.WriteFile(newpath, body, 0o640); err != nil {
+			return err
+		}
+		return errors.New("rename: simulated failure")
+	}
+	blob, err := s.Put(bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("Put lost a race it should have won: %v", err)
+	}
+	if blob.SHA != sha || !blob.Existed {
+		t.Errorf("blob = %+v, want the existing blob reported", blob)
+	}
+	if files := countFiles(t, s.Root()); files != 1 {
+		t.Errorf("%d files, want 1", files)
+	}
+}
+
+// A rename that fails with nothing present is a real failure, and leaves no
+// temp file behind.
+func TestAFailedRenameWithNothingThereIsAnError(t *testing.T) {
+	s := newStore(t)
+	s.rename = func(string, string) error { return errors.New("rename: simulated failure") }
+	if _, err := s.Put(bytes.NewReader([]byte("bytes that never land"))); err == nil {
+		t.Fatal("Put reported success when the rename failed and nothing was there")
+	}
+	if files := countFiles(t, s.Root()); files != 0 {
+		t.Errorf("%d files left behind, want 0", files)
+	}
+}
+
+// Two writers of the same bytes at once end with one file, intact. This is the
+// convergence property in the small (plans/06-media test 7), and it is what the
+// rename branch above exists for.
+func TestConcurrentWritersOfTheSameBytesConverge(t *testing.T) {
+	s := newStore(t)
+	body := bytes.Repeat([]byte("converging "), 4096)
+	results := make(chan *Blob, 8)
+	errs := make(chan error, 8)
+	for range 8 {
+		go func() {
+			blob, err := s.Put(bytes.NewReader(body))
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- blob
+		}()
+	}
+	var sha string
+	for range 8 {
+		select {
+		case err := <-errs:
+			t.Fatalf("concurrent Put: %v", err)
+		case blob := <-results:
+			if sha == "" {
+				sha = blob.SHA
+			} else if blob.SHA != sha {
+				t.Fatalf("two identities for one body: %s and %s", sha, blob.SHA)
+			}
+		}
+	}
+	if files := countFiles(t, s.Root()); files != 1 {
+		t.Errorf("%d files after eight concurrent writes, want 1", files)
+	}
+	stored, err := os.ReadFile(filepath.Join(s.Root(), sha[:2], sha))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(stored, body) {
+		t.Error("the surviving file is not the bytes that were written")
+	}
+}

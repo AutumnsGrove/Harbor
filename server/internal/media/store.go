@@ -67,6 +67,10 @@ type Blob struct {
 type Store struct {
 	root string
 	max  int64
+	// rename is os.Rename, and is a field only so the failure branch below can
+	// be tested: a rename that fails while the blob is present must count as
+	// success, and no filesystem makes that easy to arrange on purpose.
+	rename func(oldpath, newpath string) error
 }
 
 // New returns a store rooted at dir, creating it if it does not exist.
@@ -83,7 +87,7 @@ func New(dir string) (*Store, error) {
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		return nil, fmt.Errorf("media: %w", err)
 	}
-	return &Store{root: root, max: MaxBlobBytes}, nil
+	return &Store{root: root, max: MaxBlobBytes, rename: os.Rename}, nil
 }
 
 // Root is the absolute directory the store lives in.
@@ -137,6 +141,11 @@ func (s *Store) Put(r io.Reader) (*Blob, error) {
 	abs := filepath.Join(s.root, filepath.FromSlash(rel))
 
 	if info, err := os.Stat(abs); err == nil {
+		// A directory or a device at a blob path is not this blob: reusing it
+		// would hand back something that is not the bytes asked for.
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("media: %s exists and is not a regular file (%s)", sum, info.Mode().Type())
+		}
 		if info.Size() != written {
 			// Same bytes cannot have two sizes. If it happens, the file on disk
 			// is damaged and reusing it would hand back wrong bytes under the
@@ -159,7 +168,7 @@ func (s *Store) Put(r io.Reader) (*Blob, error) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 		return nil, fmt.Errorf("media: %w", err)
 	}
-	if err := os.Rename(tmpName, abs); err != nil {
+	if err := s.rename(tmpName, abs); err != nil {
 		// Losing a race with an identical writer is a success: the bytes are
 		// there, and they are the same bytes.
 		if _, statErr := os.Stat(abs); statErr == nil {
