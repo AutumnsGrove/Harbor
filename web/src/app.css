@@ -1389,6 +1389,53 @@ input.switch:checked::after {
 	top: 92px;
 }
 
+/* A note or post has no picture to show; its words are the page. One column at
+   reading width, kind and date first, then the text large and editable in place,
+   with the title demoted to an optional line beneath. */
+.hero.solo {
+	grid-template-columns: minmax(0, 760px);
+}
+
+.hero.solo .metaline {
+	order: -2;
+	margin-top: 0;
+}
+
+.hero.solo .bignote {
+	order: -1;
+	gap: 0;
+}
+
+.bignote .ta {
+	field-sizing: content;
+	min-height: 0;
+	height: auto;
+	padding: 8px 10px;
+	margin: -8px -10px;
+	background: none;
+	font: 500 clamp(24px, 2.8vw, 34px) / 1.36 var(--font);
+	letter-spacing: -0.025em;
+	text-wrap: pretty;
+	transition: background var(--dur) var(--ease);
+}
+
+.bignote .ta:hover,
+.bignote .ta:focus {
+	background: var(--surf);
+}
+
+.hero.solo .item-title {
+	font-size: var(--t-l);
+	font-weight: 600;
+	letter-spacing: -0.015em;
+	color: var(--mute);
+}
+
+.hero.solo .item-title::placeholder {
+	color: var(--dim);
+	font-weight: 450;
+}
+
 .hero-main {
 	display: grid;
 	gap: 26px;

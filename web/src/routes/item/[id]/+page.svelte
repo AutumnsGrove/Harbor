@@ -38,6 +38,10 @@
 	const ratio = $derived(coverRatio(item?.kind ?? 'article', seed));
 	const light = $derived(lightAt(seed));
 
+	// Notes and posts are text, and the feed already shows them as text cards
+	// (Card.svelte's isText), so their page has no art column: the words are it.
+	const solo = $derived(item?.kind === 'note' || item?.kind === 'tweet');
+
 	// A confirmation is not a permanent label: it fades so the page is not left
 	// saying "Saved." twenty minutes later.
 	function say(message: string) {
@@ -202,7 +206,8 @@
 			</div>
 		{/if}
 
-		<div class="hero">
+		<div class="hero" class:solo>
+		{#if !solo}
 		<div class="hero-art" style:--ratio={ratio} style:--ax={light.x} style:--ay={light.y}>
 			{#if entry.cover && !coverFailed}
 				<!-- The same stored cover the card uses (#49), cropped to the
@@ -223,6 +228,7 @@
 				</div>
 			{/if}
 		</div>
+		{/if}
 
 		<div class="hero-main">
 		<textarea
@@ -231,7 +237,7 @@
 			bind:this={titleEl}
 			rows={1}
 			aria-label="Title"
-			placeholder="Untitled"
+			placeholder={solo ? 'Add a title (optional)' : 'Untitled'}
 		></textarea>
 
 		<div class="metaline">
@@ -322,9 +328,14 @@
 
 		<KindPanel kind={entry.kind} details={entry.details} />
 
-		<label class="field">
-			<span>Your note</span>
-			<textarea class="ta" bind:value={note} placeholder="Anything worth remembering"></textarea>
+		<!-- For a note the text is the item, so it is the page: large, in place. -->
+		<label class="field" class:bignote={solo}>
+			<span class:sr={solo}>Your note</span>
+			<textarea
+				class="ta"
+				bind:value={note}
+				placeholder={solo ? 'Write something' : 'Anything worth remembering'}
+			></textarea>
 		</label>
 
 		<section class="sec">
