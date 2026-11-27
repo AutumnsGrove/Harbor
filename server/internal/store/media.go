@@ -59,13 +59,20 @@ func (s *Store) AddMedia(ctx context.Context, m model.Media) (model.Media, error
 		if m.CreatedAt.IsZero() {
 			m.CreatedAt = time.Now().UTC()
 		}
+		// Both timestamps go through Stamp: handing the driver a time.Time stores it
+		// in Go's own String format when it is not UTC, which parseStamp cannot read
+		// — and which used to lose derived_at without a word (found in review).
+		var derived any
+		if m.DerivedAt != nil {
+			derived = Stamp(*m.DerivedAt)
+		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO media (id, item_id, kind, filename, content_type, bytes, sha256,
 			                   width, height, local_path, r2_key, pdf_text_state, derived_at, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			m.ID, m.ItemID, string(m.Kind), m.Filename, m.ContentType, m.Bytes, m.SHA256,
 			m.Width, m.Height, m.LocalPath, m.R2Key, m.PDFTextState,
-			m.DerivedAt, m.CreatedAt.UTC())
+			derived, Stamp(m.CreatedAt))
 		if err != nil {
 			return fmt.Errorf("store: adding media: %w", err)
 		}
@@ -241,9 +248,13 @@ func finishMedia(m model.Media, kind string, width, height sql.NullInt64, derive
 		m.Height = &h
 	}
 	if derived.Valid && derived.String != "" {
-		if at, err := parseStamp(derived.String); err == nil {
-			m.DerivedAt = &at
+		at, err := parseStamp(derived.String)
+		if err != nil {
+			// Returning this rather than dropping it is the other half of the fix: a
+			// timestamp the store cannot read is a bug, not a row with no value.
+			return model.Media{}, fmt.Errorf("media %s derived_at: %w", m.ID, err)
 		}
+		m.DerivedAt = &at
 	}
 	at, err := parseStamp(created)
 	if err != nil {

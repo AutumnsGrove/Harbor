@@ -344,3 +344,80 @@ func TestDerivedAtSurvivesTheRoundTrip(t *testing.T) {
 		t.Errorf("a fresh row has derived_at %v", *plain.DerivedAt)
 	}
 }
+
+// A timestamp that is not UTC has to survive anyway. Handing the driver a
+// time.Time stores it in Go's own String format, which parseStamp cannot read,
+// and the read-back used to drop the value with no error at all (found in
+// review: the row then looked never-derived to the re-derive sweep).
+func TestDerivedAtSurvivesANonUTCTime(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	item := mustCreate(t, s, ItemInput{ID: "item-derived-zone"})
+	m := mediaFixture(t, item.ID, shaA)
+	zone := time.FixedZone("UTC+5", 5*60*60)
+	at := time.Date(2026, 1, 1, 10, 0, 0, 0, zone)
+	m.DerivedAt = &at
+
+	if _, err := s.AddMedia(ctx, m); err != nil {
+		t.Fatalf("AddMedia: %v", err)
+	}
+	rows, err := s.MediaByItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("%d rows, want 1", len(rows))
+	}
+	if rows[0].DerivedAt == nil {
+		t.Fatal("a non-UTC derived_at came back nil")
+	}
+	// The same instant, expressed in UTC: 10:00+05:00 is 05:00Z.
+	want := time.Date(2026, 1, 1, 5, 0, 0, 0, time.UTC)
+	if !rows[0].DerivedAt.Equal(want) {
+		t.Errorf("derived_at = %v, want %v", *rows[0].DerivedAt, want)
+	}
+	// And the stored text is the package's own layout, not Go's String form.
+	var raw string
+	if err := s.db.QueryRowContext(ctx, `SELECT derived_at FROM media WHERE id = ?`, rows[0].ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "+0500") || strings.Contains(raw, " +05") {
+		t.Errorf("derived_at stored as %q, want the UTC layout", raw)
+	}
+	// The driver normalises a DATETIME column, so the stored text is not required
+	// to be byte-identical to Stamp — what matters is that it parses back to the
+	// same instant, which the assertions above cover.
+	if _, err := parseStamp(raw); err != nil {
+		t.Errorf("stored derived_at %q does not parse: %v", raw, err)
+	}
+}
+
+// A created_at that is not UTC is stored the same way, which is what the
+// existing rows already do.
+func TestCreatedAtIsStoredInThePackageLayout(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	item := mustCreate(t, s, ItemInput{ID: "item-created-zone"})
+	m := mediaFixture(t, item.ID, shaB)
+	zone := time.FixedZone("UTC-8", -8*60*60)
+	m.CreatedAt = time.Date(2026, 3, 2, 9, 30, 0, 0, zone)
+
+	row, err := s.AddMedia(ctx, m)
+	if err != nil {
+		t.Fatalf("AddMedia: %v", err)
+	}
+	var raw string
+	if err := s.db.QueryRowContext(ctx, `SELECT created_at FROM media WHERE id = ?`, row.ID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "-0800") {
+		t.Errorf("created_at stored in Go's String form: %q", raw)
+	}
+	parsed, err := parseStamp(raw)
+	if err != nil {
+		t.Fatalf("stored created_at %q does not parse: %v", raw, err)
+	}
+	if !parsed.Equal(m.CreatedAt) {
+		t.Errorf("created_at = %v, want %v", parsed, m.CreatedAt.UTC())
+	}
+}
