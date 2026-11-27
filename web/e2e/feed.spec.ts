@@ -117,8 +117,24 @@ for (const { width, columns } of WIDTHS) {
 		const order = await visualOrder(page);
 		expect(order.slice(0, columns)).toEqual(ITEMS.slice(0, columns).map((item) => item.title));
 
-		// And the whole grid is exactly the API order, row by row.
-		expect(order).toEqual(ITEMS.slice(0, 8).map((item) => item.title));
+		// Below the first row the eye order depends on card heights, which differ
+		// on purpose (covers take different proportions, so the feed is a real
+		// masonry). What stays fixed is the deal: item i lands in column i % N,
+		// in API order within its column.
+		const dealt = await page
+			.locator('.feed .col')
+			.evaluateAll((cols) =>
+				cols.map((col) =>
+					[...col.querySelectorAll('.card')].map((card) => card.getAttribute('aria-label') ?? '')
+				)
+			);
+		expect(dealt).toEqual(
+			Array.from({ length: columns }, (_, column) =>
+				ITEMS.slice(0, 8)
+					.filter((_, index) => index % columns === column)
+					.map((item) => item.title)
+			)
+		);
 
 		// Nothing scrolls sideways, at any width.
 		const overflow = await page.evaluate(
