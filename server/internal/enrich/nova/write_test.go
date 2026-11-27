@@ -31,6 +31,9 @@ type scriptedChat struct {
 	// onCall runs before the answer is returned, so a test can interrupt the call
 	// itself rather than the loop around it.
 	onCall func(call int)
+	// onRequest sees the request the client built, so a test can assert what was
+	// actually sent rather than only what came back.
+	onRequest func(req provider.Request)
 }
 
 type scriptedAnswer struct {
@@ -42,8 +45,11 @@ type scriptedAnswer struct {
 
 func (s *scriptedChat) Name() string { return "scripted" }
 
-func (s *scriptedChat) Stream(_ context.Context, _ provider.Request, _ func(provider.StreamEvent)) (*provider.Response, error) {
+func (s *scriptedChat) Stream(_ context.Context, req provider.Request, _ func(provider.StreamEvent)) (*provider.Response, error) {
 	s.calls++
+	if s.onRequest != nil {
+		s.onRequest(req)
+	}
 	if s.calls > len(s.answers) {
 		return nil, errors.New("the client made more calls than the test scripted")
 	}
