@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AutumnsGrove/Harbor/server/internal/model"
 )
@@ -278,5 +279,62 @@ func TestEveryMediaKindRoundTrips(t *testing.T) {
 	}
 	if len(rows) != len(model.MediaKinds()) {
 		t.Errorf("%d rows for %d kinds", len(rows), len(model.MediaKinds()))
+	}
+}
+
+// The queue has a default batch size, so a caller that passes zero (or nothing)
+// still drains instead of asking for an empty page forever.
+func TestMediaNeedingMirrorDefaultsItsBatchSize(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	item := mustCreate(t, s, ItemInput{ID: "item-default-batch"})
+	if _, err := s.AddMedia(ctx, mediaFixture(t, item.ID, shaA)); err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []int{0, -5} {
+		queue, err := s.MediaNeedingMirror(ctx, limit)
+		if err != nil {
+			t.Fatalf("MediaNeedingMirror(%d): %v", limit, err)
+		}
+		if len(queue) != 1 {
+			t.Errorf("MediaNeedingMirror(%d) returned %d rows, want the default batch", limit, len(queue))
+		}
+	}
+}
+
+// derived_at is written by the thumbnail task and read by the re-derive sweep, so
+// it has to survive the round trip: it is a nullable timestamp, which is the
+// column shape most likely to come back wrong.
+func TestDerivedAtSurvivesTheRoundTrip(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	item := mustCreate(t, s, ItemInput{ID: "item-derived"})
+	m := mediaFixture(t, item.ID, shaB)
+	at := time.Date(2026, 11, 27, 13, 45, 0, 0, time.UTC)
+	m.DerivedAt = &at
+
+	if _, err := s.AddMedia(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.MediaByItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("%d rows, want 1", len(rows))
+	}
+	if rows[0].DerivedAt == nil {
+		t.Fatal("derived_at came back nil after being set")
+	}
+	if !rows[0].DerivedAt.Equal(at) {
+		t.Errorf("derived_at = %v, want %v", *rows[0].DerivedAt, at)
+	}
+	// And a row that was never derived has no timestamp, rather than the epoch.
+	plain, err := s.AddMedia(ctx, mediaFixture(t, item.ID, shaA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.DerivedAt != nil {
+		t.Errorf("a fresh row has derived_at %v", *plain.DerivedAt)
 	}
 }
