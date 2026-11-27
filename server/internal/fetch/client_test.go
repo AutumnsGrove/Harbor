@@ -1,6 +1,7 @@
 package fetch
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/AutumnsGrove/Harbor/server/internal/extract"
 )
 
 // plans/03 tests 1–4. The guard is tested both as a policy (table) and through
@@ -381,7 +384,7 @@ func TestADocumentGetsItsOwnCapAndAPageDoesNot(t *testing.T) {
 			fmt.Fprint(w, body)
 		}))
 	}
-	isPDF := func(ct string) bool { return strings.HasPrefix(ct, "application/pdf") }
+	isPDF := func(ct string, _ []byte) bool { return strings.HasPrefix(ct, "application/pdf") }
 
 	pdf := serve("application/pdf")
 	defer pdf.Close()
@@ -415,7 +418,7 @@ func TestTheDocumentCapAppearsInTheRefusal(t *testing.T) {
 	defer server.Close()
 
 	_, err := newTestClient(t,
-		WithDocumentCap(func(ct string) bool { return ct == "application/pdf" }, 2048),
+		WithDocumentCap(func(ct string, _ []byte) bool { return ct == "application/pdf" }, 2048),
 	).Get(context.Background(), server.URL)
 	if !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("Get = %v, want ErrTooLarge", err)
@@ -429,7 +432,7 @@ func TestTheDocumentCapAppearsInTheRefusal(t *testing.T) {
 // before issue #74 had.
 func TestWithoutADocumentCapEverythingUsesThePageCap(t *testing.T) {
 	c := New(WithMaxBytes(64))
-	if got := c.capFor("application/pdf"); got != 64 {
+	if got := c.capFor("application/pdf", nil); got != 64 {
 		t.Errorf("capFor(pdf) = %d with no document rule, want the page cap", got)
 	}
 }
@@ -447,5 +450,54 @@ func TestASinkholedAnswerSaysTheResolverFilteredIt(t *testing.T) {
 	// A private address is still just not public, and still says so.
 	if err := checkIP(net.ParseIP("192.168.1.1")); err == nil || strings.Contains(err.Error(), "resolver") {
 		t.Errorf("a private address was blamed on the resolver: %v", err)
+	}
+}
+
+// The review finding: a PDF served as application/octet-stream is a document by
+// its magic number, so it must get the document cap. Choosing the cap from the
+// header alone refused it at the page cap before anything had read a byte, which
+// is the failure this issue exists to fix.
+func TestAMislabelledPDFGetsTheDocumentCap(t *testing.T) {
+	body := append([]byte("%PDF-1.7\n"), bytes.Repeat([]byte("x"), 4096)...)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprint(w, string(body))
+	}))
+	defer server.Close()
+
+	c := New(WithMaxBytes(1024), WithDocumentCap(extract.IsDocumentBody, 1<<20))
+	c.allowUnsafe = true
+	page, err := c.Get(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("a PDF labelled octet-stream was refused: %v", err)
+	}
+	defer page.Close()
+	if page.Size != int64(len(body)) {
+		t.Errorf("size = %d, want %d (the head must be kept, not dropped)", page.Size, len(body))
+	}
+	// And the bytes really are a PDF, so the reader downstream agrees.
+	head := make([]byte, 5)
+	if _, err := io.ReadFull(page.Body, head); err != nil {
+		t.Fatal(err)
+	}
+	if !extract.LooksLikePDF(head) {
+		t.Errorf("what was written is not a PDF: %q", head)
+	}
+}
+
+// A page with the same mislabelling still gets the page cap: the predicate is
+// about documents, not about octet-stream being trusted.
+func TestAMislabelledPageKeepsThePageCap(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), 4096)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(body)
+	}))
+	defer server.Close()
+
+	c := New(WithMaxBytes(1024), WithDocumentCap(extract.IsDocumentBody, 1<<20))
+	c.allowUnsafe = true
+	if _, err := c.Get(context.Background(), server.URL); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("an unlabelled 4 KB body got the document cap: %v", err)
 	}
 }

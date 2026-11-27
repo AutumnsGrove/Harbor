@@ -114,7 +114,7 @@ func enrichmentProcessor(cfg build.Config, library *store.Store, log *slog.Logge
 	// a paper, and the PDF reader is the only reason to hold a bigger one
 	// (design §6, issue #74).
 	pipeline := enrich.New(
-		enrich.HTTPFetcher{Client: fetch.New(fetch.WithDocumentCap(extract.IsPDF))},
+		enrich.HTTPFetcher{Client: fetch.New(fetch.WithDocumentCap(extract.IsDocumentBody))},
 		novaClient, novaClient, novaClient, library, log,
 	)
 	pipeline.PromptVersion = enrichnova.PromptVersion

@@ -133,12 +133,14 @@ type Client struct {
 	maxRedirects int
 	userAgent    string
 
-	// documentMaxBytes is the ceiling for a content type isDocument accepts,
-	// and isDocument is the caller's rule rather than this package's: what
-	// counts as a document is the extractor's business, and one predicate is
-	// better than two that drift. A nil isDocument means one cap for everything.
+	// documentMaxBytes is the ceiling for a response isDocument accepts, and
+	// isDocument is the caller's rule rather than this package's: what counts as
+	// a document is the extractor's business, and one predicate is better than
+	// two that drift. It is given the first bytes as well as the header, because
+	// a mislabelled document is only identifiable by its magic number. A nil
+	// isDocument means one cap for everything.
 	documentMaxBytes int64
-	isDocument       func(contentType string) bool
+	isDocument       func(contentType string, head []byte) bool
 
 	// allowUnsafe skips both the URL check and the dial-time IP check. It is
 	// only ever set by tests, which serve pages from 127.0.0.1; production has
@@ -158,9 +160,12 @@ func WithMaxBytes(n int64) Option {
 	}
 }
 
-// WithDocumentCap raises the cap for the content types f accepts to
-// DefaultDocumentMaxBytes, or to n when n is positive.
-func WithDocumentCap(f func(contentType string) bool, n ...int64) Option {
+// WithDocumentCap raises the cap for the responses f accepts to
+// DefaultDocumentMaxBytes, or to n when n is positive. f sees the head of the
+// body as well as the content type, so a PDF served as application/octet-stream
+// gets the document cap rather than being refused at the page cap before
+// anything could tell what it is (issue #74).
+func WithDocumentCap(f func(contentType string, head []byte) bool, n ...int64) Option {
 	return func(c *Client) {
 		if f == nil {
 			return
@@ -173,14 +178,19 @@ func WithDocumentCap(f func(contentType string) bool, n ...int64) Option {
 	}
 }
 
-// capFor is the byte ceiling for one response. The content type is a header, so
-// this is decided before a byte of the body is read.
-func (c *Client) capFor(contentType string) int64 {
-	if c.isDocument != nil && c.isDocument(contentType) {
+// capFor is the byte ceiling for one response, from its content type and the
+// first bytes of its body.
+func (c *Client) capFor(contentType string, head []byte) int64 {
+	if c.isDocument != nil && c.isDocument(contentType, head) {
 		return c.documentMaxBytes
 	}
 	return c.maxBytes
 }
+
+// headBytes is how much of a body is read before the cap is chosen. It is the
+// length of the longest magic number Harbor checks, and reading it costs nothing
+// that is not written to the temp file anyway.
+const headBytes = 5
 
 // WithTimeout sets the whole-request timeout.
 func WithTimeout(d time.Duration) Option {
@@ -284,9 +294,18 @@ func (c *Client) Get(ctx context.Context, rawURL string) (*Page, error) {
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &HTTPError{URL: resp.Request.URL.String(), Status: resp.StatusCode}
 	}
-	// A declared length over the cap is refused without reading a byte. The cap
-	// depends on what answered: a paper is not a page.
-	limit := c.capFor(resp.Header.Get("Content-Type"))
+	// The cap depends on what answered, and a mislabelled document can only be
+	// told from its first bytes: a PDF served as application/octet-stream is
+	// still a paper, and it must not be refused at the page cap before the sniff
+	// runs (issue #74, found in review). So the head is read first — it is
+	// written to the temp file regardless — and the limit is chosen after it.
+	head := make([]byte, headBytes)
+	n, headErr := io.ReadFull(resp.Body, head)
+	if headErr != nil && !errors.Is(headErr, io.ErrUnexpectedEOF) && !errors.Is(headErr, io.EOF) {
+		return nil, fmt.Errorf("fetch: reading the head: %w", headErr)
+	}
+	head = head[:n]
+	limit := c.capFor(resp.Header.Get("Content-Type"), head)
 	if resp.ContentLength > limit {
 		return nil, fmt.Errorf("%w: %d bytes declared, cap %d", ErrTooLarge, resp.ContentLength, limit)
 	}
@@ -295,8 +314,14 @@ func (c *Client) Get(ctx context.Context, rawURL string) (*Page, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch: temp file: %w", err)
 	}
+	if _, writeErr := tmp.Write(head); writeErr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return nil, fmt.Errorf("fetch: temp file: %w", writeErr)
+	}
 	// One byte past the cap distinguishes "at the cap" from "over it".
-	written, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, limit+1))
+	written, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, limit-int64(len(head))+1))
+	written += int64(len(head))
 	if copyErr == nil && written > limit {
 		copyErr = fmt.Errorf("%w: more than %d bytes", ErrTooLarge, limit)
 	}

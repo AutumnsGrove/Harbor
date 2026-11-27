@@ -68,6 +68,14 @@ func LooksLikePDF(head []byte) bool {
 	return len(head) >= 5 && string(head[:5]) == "%PDF-"
 }
 
+// IsDocumentBody is the predicate both the byte cap and the reader use: the
+// label, or failing that the magic number. One rule in one place, so a
+// mislabelled document cannot pass one and fail the other — which is exactly
+// what review found when the cap was chosen from the content type alone.
+func IsDocumentBody(contentType string, head []byte) bool {
+	return IsPDF(contentType) || LooksLikePDF(head)
+}
+
 // PDF reads one document's text layer. name is the URL's last path segment,
 // used as the title when the document carries none — which is most of them.
 //
