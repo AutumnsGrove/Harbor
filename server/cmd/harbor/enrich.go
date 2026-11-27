@@ -59,6 +59,11 @@ is still read first.
 // same value the import itself writes (design.md §5).
 const enrichPriority = -1
 
+// refilePriority is the interactive one, because the rows `--refile-failed`
+// brings back are her own saves rather than an import backlog, and the run is
+// watched. The dry run prints this same number, so the two cannot drift.
+const refilePriority = 0
+
 func enrichCommand(ctx context.Context, getenv func(string) string, args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("enrich", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -127,7 +132,9 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 		case *refresh:
 			fmt.Fprintf(stdout, "would re-queue %d item(s) with a relative cover at priority %d\n", would, enrichPriority)
 		case *refileFailed:
-			fmt.Fprintf(stdout, "would re-queue %d parked item(s) at priority %d\n", would, enrichPriority)
+			// The dry run must say what the real run writes: parked rows come
+			// back at the interactive priority, not the import backlog's.
+			fmt.Fprintf(stdout, "would re-queue %d parked item(s) at priority %d\n", would, refilePriority)
 		default:
 			fmt.Fprintf(stdout, "would queue %d item(s) for enrichment at priority %d\n", would, enrichPriority)
 		}
@@ -146,8 +153,7 @@ func enrichCommand(ctx context.Context, getenv func(string) string, args []strin
 	case *refresh:
 		queued, remaining, err = library.QueueRelativeCovers(ctx, enrichPriority, *limit)
 	case *refileFailed:
-		// Interactive priority: these are her saves, and this run is watched.
-		queued, remaining, err = library.QueueFailed(ctx, 0, *limit)
+		queued, remaining, err = library.QueueFailed(ctx, refilePriority, *limit)
 	default:
 		queued, remaining, err = library.QueueUnenriched(ctx, enrichPriority, *limit)
 	}

@@ -348,6 +348,11 @@ func TestEnrichRefileFailedRequeuesOnlyParkedRows(t *testing.T) {
 	if !strings.Contains(dry.String(), "would re-queue 1 parked item") {
 		t.Errorf("dry run said %q", dry.String())
 	}
+	// The number it prints has to be the number the real run writes; it said -1
+	// here while the run queued at 0 (caught on the box, 2026-11-26).
+	if !strings.Contains(dry.String(), "priority 0") {
+		t.Errorf("dry run promised the wrong priority: %q", dry.String())
+	}
 	parked, err := library.GetItem(ctx, "parked")
 	if err != nil {
 		t.Fatal(err)
