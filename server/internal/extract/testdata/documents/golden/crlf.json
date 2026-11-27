@@ -8,6 +8,7 @@
   "CoverURL": "https://cdn.example/cover.png",
   "Text": "First paragraph.\n\nSecond paragraph.",
   "Markdown": "First paragraph.\n\nSecond paragraph.",
+  "PDF": null,
   "OG": {
     "title": "Quoted and CRLF",
     "image": "https://cdn.example/cover.png",

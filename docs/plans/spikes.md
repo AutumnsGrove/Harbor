@@ -18,13 +18,13 @@ one gates and the pass condition that has to be met.
 | S3 | Brute-force vector cache | phase 10 exit | 90 min | pending |
 | S4 | Browser Rendering on the free plan | phase 11 exit | 2 h | pending |
 | S5 | Nova `embed` live call | phase 3 smoke / phase 10 exit | 45 min | **pass** |
-| S6 | PDF text extraction in Go | phase 6 exit | 2 h | pending |
+| S6 | PDF text extraction in Go | phase 6 exit | 2 h | **pass** — ledongthuc/pdf + our walker; OCR split to #99 |
 | S7 | Port 8895 free | phase 0 start | 5 min | **changed-plan → 8897** |
 | S8 | Video transcript source | phase 7 exit | 90 min | pending |
 | S9 | Real Raindrop export sample | phase 5 start | 30 min | **pass, plan corrected** |
 | S10 | Tailscale serve headers + Docker peer address | phase 0 start | 45 min | **pass** |
 | S11 | Nova as a dependency in CI/Docker | phase 0 exit | 45 min | **pass** |
-| S12 | Image decode memory + EXIF | phase 6 exit | 90 min | pending |
+| S12 | Image decode memory + EXIF | phase 6 exit | 90 min | **pass** — 50 MP cap; no EXIF dependency |
 
 S7, S9, S10 and S11 are cheap and can be done now (S9 is ten minutes in Raindrop's export screen
 plus sanitising) — S7, S9, S10 and S11 are all answered now. S1/S2 are prerequisites for writing
@@ -295,6 +295,49 @@ decision in design.md §6, not a silent substitution.
 **Also record:** the chosen library, the scan threshold as a *config default* (e.g. "fewer than 50
 chars/page over ≥3 pages"), and the per-document OCR page cap.
 
+**Verdict (2026-11-27): pass — `github.com/ledongthuc/pdf` with our own walker, and the OCR half
+moves to issue #99.**
+**What happened:** three real documents, measured on this MacBook Air with Go 1.27.4. A 15-page arxiv
+paper (`1706.03762v7`, 2.1 MB, text layer), its own 15 pages rendered at 150 dpi and re-assembled as
+an image-only PDF (3.8 MB — the shape a scanner produces), the 100-page GPT-4 report (5.2 MB), a
+31 MB 40-page image-only file, a 20 KB truncation and 42 bytes of not-a-PDF.
+
+| library | 15-page paper | image-only 15 pages | 100 pages, 5.2 MB | malformed |
+|---|---|---|---|---|
+| `ledongthuc/pdf` `GetPlainText` | 32,387 chars, 0.02 s, 18 MB — **no spaces at all** | 0 chars | — | clean error |
+| `ledongthuc/pdf` + gap walker | 38,620 chars, 2,575/page, 0.63 s, 20 MB | **0 chars** | 110,579 chars, 1.73 s, 19.8 MB | clean error, 0.00 s |
+| `rsc.io/pdf` v0.1.1 | **panics**: `malformed PDF: reading at offset 0: stream not present` | 0 chars | — | — |
+| `pdfcpu` v0.16.4 | 64,071 chars of raw content streams (`(Pro)15(vided)-250(prop)`), 0.96 s, 52.6 MB | 0 chars | 0.10 s, 35.6 MB | clean error |
+
+`GetPlainText` returns "Providedproperattributionisprovided" because these files separate words
+with kerning offsets, not space glyphs. The walker uses the glyph positions the library already
+computes: a gap wider than a fifth of the font size is a space, a jump in Y is a newline, and a run
+that *is* a space glyph counts as one. That recovered "Provided proper attribution is provided…"
+and `grep -ci` found 10 of 10 chosen phrases in the 15-page text and 6 of 8 in the 100-page one (the
+two misses are phrases the report does not use, checked by eye).
+
+`pdfcpu` is not a text extractor: it hands back content streams, so it needs its own Tj/TJ
+interpreter and font decoding — the work ledong has already done — for 2–8× the time, 2–3× the RSS,
+and a dependency tree that pulls in TIFF, YAML, WebP and `x/crypto`. `rsc.io/pdf` is disqualified by
+the panic: a library that panics on a modern arxiv file cannot run in a background worker, and the
+reader keeps a `recover` anyway for exactly that reason.
+
+Bounds, from the same runs: about 50 ms per page and a flat ~20 MB of RSS from 5 to 100 pages and
+from 2 to 31 MB, because the parser reads by offset and never holds the document. 150 pages is the
+cap (≈6 s); a longer file is truncated, not refused.
+
+Scan threshold: total separation — 0 characters per page against 1,106–3,201 — so the threshold is
+`ScanCharsPerPage = 50` over at least `ScanPages = 3` pages, or empty text at any length. A one-page
+flyer with 40 readable characters stays a document.
+
+**The OCR half did not need this spike's verdict and does not get it here.** No pure-Go library
+rasterises pages: the choice is poppler in the image (+90–120 MB on a 6.9 MB distroless image, on a
+box with 600 MB free) or cgo/commercial. OpenRouter will parse a PDF server-side for *any* model, which
+needs no rasteriser at all, but Nova cannot carry a document part yet
+([nova#153](https://github.com/AutumnsGrove/nova/issues/153)). Until one of those lands, a scan is
+filed ready with a badge and no text. That is issue #99, and the per-document OCR page cap is 10
+when it lands (open-questions J4).
+
 ---
 
 ## S8 — Video transcript source from the potato's IP
@@ -475,6 +518,43 @@ likely outcome; pick it from the number); orientation is correct in all four cas
 written as JPEG.
 **Fail:** lower the cap, or shell out to nothing (there is no image tool in a distroless image) — the
 fallback is to store oversized images undescribed with a badge, never to lose the file.
+
+**Verdict (2026-11-27): pass — cap at 50 megapixels, and orientation needs no dependency.**
+**What happened:** a real iPhone photo (5712×4284 = 24.5 MP, 4.4 MB, EXIF orientation 6) and the same
+photo resampled to 8064×6048 (48.8 MP, 6.5 MB), decoded with the standard library on the potato
+(aarch64, 1.9 GB, ~600 MB free) and on the MacBook Air for comparison. Peak RSS is `VmHWM`.
+
+| | potato | MacBook Air |
+|---|---|---|
+| `DecodeConfig` only, 24.5 MP | 7.4 MB, 0.00 s | 9.3 MB, 0.00 s |
+| `DecodeConfig` only, 48.8 MP | 9.6 MB, 0.00 s | 11.6 MB, 0.00 s |
+| decode 24.5 MP | **42.6 MB, 2.24 s** | 44.4 MB, 0.21 s |
+| decode 48.8 MP | **79.5 MB, 4.19 s** | 81.6 MB, 0.36 s |
+| decode 24.5 MP + 1600 px thumbnail + JPEG write | 50.9 MB, 3.07 s | 53.0 MB, 0.25 s |
+
+Two facts fall out. Memory is **1.6 MB per megapixel** and identical on both machines — it is the
+decoded YCbCr plane, so it follows the pixel count and nothing else. Time is **~11× slower on the
+potato**, which is what the 4.2 s is: one decode of one 48 MP photo, serial in the enrichment loop,
+nowhere near a request path. `DecodeConfig` costs 7–10 MB and no decode, so the cap is enforced before
+a single pixel is allocated — that is the guard, and it is cheaper than the JPEG's own headers.
+
+**The cap is 50 MP, and the round number matters.** 8064×6048 is 48.77 MP, so a 48 MP cap refuses the
+exact case this spike is about — measured, not assumed: `-cap 48` answered "refused by the 48 MP cap"
+on the iPhone's own 48 MP geometry. 50 MP covers every consumer phone's full-resolution photo, and a
+108 MP or 200 MP photo is stored with a badge and no description, which is the spike's documented
+fallback: never lose the file, never decode it blindly.
+
+**Orientation needs no library.** A 50-line reader — APP1 segment → TIFF header → IFD0 → tag 0x0112 —
+reads all eight values off the real photo patched into each, and the eight transforms were checked by
+the only test that can tell them apart: a synthetic JPEG whose four quadrants are unmistakable, with a
+real EXIF segment injected per orientation, asserting where every quadrant lands and that the
+dimensions swap for 5–8. (The real photo cannot do this — all four of its corners are the same wall.)
+Scaling before rotating keeps the rotation on the thumbnail's pixels rather than the original's.
+`golang.org/x/image/draw`'s `ApproxBiLinear` does the scale, which is the one dependency this needs.
+
+Formats, as the spike asked: JPEG, PNG and GIF decode in the standard library; WebP decodes only with
+`golang.org/x/image/webp` and has no encoder there, so a WebP thumbnail is written as JPEG and HEIC is
+unsupported — stored, undescribed, badged.
 
 ---
 

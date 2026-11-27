@@ -8,6 +8,7 @@
   "CoverURL": "",
   "Text": "---\n\nThis file opens with a horizontal rule and never closes it. Nothing above is\nmetadata, because there is no closing fence; the whole body is kept, including\nthe rule.\n\nTitle: this line looks like metadata but is body text.",
   "Markdown": "---\n\nThis file opens with a horizontal rule and never closes it. Nothing above is\nmetadata, because there is no closing fence; the whole body is kept, including\nthe rule.\n\nTitle: this line looks like metadata but is body text.",
+  "PDF": null,
   "OG": {
     "url": "https://example.test/rule"
   },

@@ -98,3 +98,42 @@ func TestAWalledSaveIsBadgedAndNotInNeedsAttention(t *testing.T) {
 		t.Errorf("retry of a walled save = %d %s, want 200 and queued", rec.Code, rec.Body.String())
 	}
 }
+
+// issue #74: a document with no text layer is the third "thin, not failed"
+// shape. It shares the badge machinery with a wall, and its own flag so the card
+// can say "No text" rather than "Walled".
+func TestADocumentWithNoTextIsBadgedAndNotInNeedsAttention(t *testing.T) {
+	h, library := itemsHandler(t)
+	ctx := context.Background()
+	scan := saveItem(t, h, map[string]any{"url": "https://example.com/scanned-report.pdf"})
+
+	if _, err := library.ApplyUnreadable(ctx, scan.Item.ID, store.Unreadable{
+		Title: "Scanned report", Marker: model.NoTextVersion,
+		Reason: "the document has no text layer: a scan of 15 page(s)",
+	}); err != nil {
+		t.Fatalf("ApplyUnreadable(no text): %v", err)
+	}
+
+	rec := itemsRequest(h, http.MethodGet, "/api/items/"+scan.Item.ID, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET item = %d (%s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"noText":true`) {
+		t.Errorf("scanned document = %s, want the noText flag", body)
+	}
+	if strings.Contains(body, `"walled":true`) {
+		t.Errorf("scanned document = %s, want it distinguished from a wall", body)
+	}
+	if !strings.Contains(body, `"state":"ready"`) {
+		t.Errorf("scanned document = %s, want state ready", body)
+	}
+	if !strings.Contains(body, `"title":"Scanned report"`) {
+		t.Errorf("scanned document = %s, want the title it was filed with", body)
+	}
+
+	rec = itemsRequest(h, http.MethodGet, "/api/attention", nil)
+	if body := rec.Body.String(); !strings.Contains(body, `"items":[]`) {
+		t.Errorf("attention = %s, want the scan out of it", body)
+	}
+}

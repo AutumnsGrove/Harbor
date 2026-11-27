@@ -8,6 +8,7 @@
   "CoverURL": "",
   "Text": "Unclosed tags are normal on the web.\nAnother blockwith a paragraph inside",
   "Markdown": "Unclosed tags are normal on the web.\n\nAnother block\n\nwith a paragraph inside",
+  "PDF": null,
   "OG": {},
   "Details": {}
 }

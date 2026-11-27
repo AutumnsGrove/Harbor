@@ -209,6 +209,14 @@ export type Item = {
 	walled?: boolean;
 	/** Only sent when it is news: `dead` when the page is gone. */
 	linkStatus?: 'dead' | 'error';
+	/**
+	 * A document that was read and had nothing to read in it — a scan with no
+	 * text layer, or a file that would not open (issue #74). A badge, never a
+	 * failure: OCR is issue #99.
+	 */
+	noText?: boolean;
+	/** Over the body cap: 40 MB for a document, 5 MB for a page (issue #74). */
+	tooLarge?: boolean;
 	/** Filled for one item; absent in a list so the grid stays one query. */
 	tags?: string[];
 	/** details_json, filled for one item; the per-kind layout is built on it. */
