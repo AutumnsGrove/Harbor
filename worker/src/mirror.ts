@@ -23,6 +23,31 @@ export interface MirrorSummary {
 	bytes: number;
 }
 
+/**
+ * The body did not hash to the address it was uploaded under.
+ *
+ * The key alone cannot make this PUT idempotent: two different bodies at one
+ * key are two writes and the second wins. So the address is handed to R2 as a
+ * checksum and R2 refuses a mismatch — which is why this is its own class. A
+ * corrupt upload is the caller's own disagreement with itself, and it must not
+ * read as a 502 the potato would retry forever.
+ */
+export class ChecksumMismatch extends Error {
+	constructor(readonly address: string) {
+		super(`body does not match the content address ${address}`);
+		this.name = 'ChecksumMismatch';
+	}
+}
+
+/**
+ * R2's checksum failure, recognised by its message. Narrow string matching is
+ * not lovely, but the alternative is buffering up to 25 MB to hash it here in a
+ * Worker, and R2 is the party that must refuse the write in any case.
+ */
+export function isChecksumMismatch(err: unknown): boolean {
+	return /checksum/i.test(String(err));
+}
+
 /** The R2 key for a content address, "ab/abcd…" → "media/ab/abcd…". */
 export function mirrorKeyFor(path: string): string {
 	return PREFIX + path;
@@ -54,11 +79,22 @@ export async function putMirror(
 		throw new ReferenceError(`${prefix}/${hash}`);
 	}
 	const key = mirrorKeyFor(`${prefix}/${hash}`);
-	const object = await env.BUCKET.put(key, body, {
-		httpMetadata: { contentType: meta.contentType },
-		// The hash is the object's identity, so repeating it in metadata is not
-		// redundant bookkeeping: it is what a later integrity check reads.
-		customMetadata: { sha256: hash },
-	});
+	let object: R2Object;
+	try {
+		object = await env.BUCKET.put(key, body, {
+			httpMetadata: { contentType: meta.contentType },
+			// The address is the checksum: R2 hashes what it receives and refuses
+			// a mismatch, so a truncated or corrupt upload is a refusal rather
+			// than a permanently wrong object filed under a valid address (found
+			// in review — the key alone could not promise that).
+			sha256: hash,
+			// Repeating the hash in metadata is not redundant bookkeeping: it is
+			// what a later integrity check reads.
+			customMetadata: { sha256: hash },
+		});
+	} catch (err) {
+		if (isChecksumMismatch(err)) throw new ChecksumMismatch(`${prefix}/${hash}`);
+		throw err;
+	}
 	return { key, bytes: object.size };
 }

@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { call, env, seedTokens, TOKENS } from './helpers';
 import { ROUTE_SCOPES } from '../src/index';
-import { mirrorKeyFor, validMirrorKey } from '../src/mirror';
+import { isChecksumMismatch, mirrorKeyFor, validMirrorKey } from '../src/mirror';
 import type { Env } from '../src/types';
 
 // plans/06-media test 10 and this phase's mirror task: the potato holds the only
@@ -10,24 +11,30 @@ import type { Env } from '../src/types';
 // the same bytes), a door token cannot reach it, a bad address is refused before
 // anything is written, and no route reads a blob back out.
 
-const HASH = 'ab' + 'c'.repeat(62);
+// The address has to be the real SHA-256 of the body: R2 checks it, so a
+// made-up one would only prove the check is absent. That is exactly how the
+// first version of these tests missed the defect review found.
+const BODY = 'jpegbytes';
+const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+const HASH = sha256(BODY);
 const PREFIX = HASH.slice(0, 2);
+const OTHER_BODY = 'different bytes entirely';
 /** The R2 key keeps the fan-out: media/<2 hex>/<64 hex> (plans/06-media). */
 const keyOf = (hash: string) => `media/${hash.slice(0, 2)}/${hash}`;
-const BODY = 'jpegbytes';
 
 function mirror(
 	prefix = PREFIX,
 	hash = HASH,
 	headers: Record<string, string> = {},
 	token = TOKENS.potato,
+	body = BODY,
 ) {
 	return call('PUT', `/mirror/${prefix}/${hash}`, {
 		token,
-		body: BODY,
+		body,
 		headers: {
 			// R2 needs a known length for a streamed body.
-			'content-length': String(BODY.length),
+			'content-length': String(body.length),
 			'content-type': 'image/jpeg',
 			...headers,
 		},
@@ -54,12 +61,12 @@ describe('mirror-up', () => {
 	// a dropped connection must cost one PUT and leave one object.
 	it('is idempotent: the same bytes twice are one object', async () => {
 		await seedTokens();
-		const hash = 'cd' + 'e'.repeat(62);
-		const first = await mirror(hash.slice(0, 2), hash);
+		const hash = sha256(OTHER_BODY);
+		const first = await mirror(hash.slice(0, 2), hash, {}, TOKENS.potato, OTHER_BODY);
 		expect(first.res.status).toBe(201);
-		const second = await mirror(hash.slice(0, 2), hash);
+		const second = await mirror(hash.slice(0, 2), hash, {}, TOKENS.potato, OTHER_BODY);
 		expect(second.res.status).toBe(201);
-		expect(await (await (env as unknown as Env).BUCKET.get(keyOf(hash)))!.text()).toBe(BODY);
+		expect(await (await (env as unknown as Env).BUCKET.get(keyOf(hash)))!.text()).toBe(OTHER_BODY);
 	});
 
 	it('refuses a door token and writes nothing', async () => {
@@ -155,5 +162,52 @@ describe('mirror-up', () => {
 		for (const key of bad) {
 			expect(validMirrorKey(key), key).toBe(false);
 		}
+	});
+});
+
+// The defect review found: nothing compared the body with its address, so a
+// corrupt upload was stored under a valid key and a later PUT replaced it, which
+// makes the PUT wrong rather than idempotent. R2 now hashes what it receives.
+describe('the bytes must be the bytes the address names', () => {
+	// Each of these owns an address no other test writes, because the bucket is
+	// shared across the file.
+	it('refuses a body that does not hash to its address, and stores nothing', async () => {
+		await seedTokens();
+		const address = sha256('the body that belongs at this address');
+		const prefix = address.slice(0, 2);
+		const { res, json } = await mirror(prefix, address, {}, TOKENS.potato, 'not the body');
+		expect(res.status).toBe(400);
+		expect(json<{ error: string }>().error).toBe('content does not match the address');
+		expect(await (env as unknown as Env).BUCKET.head(keyOf(address))).toBeNull();
+	});
+
+	// The consequence the finding described: a second PUT of different bytes used
+	// to overwrite the first, so a "retry" could corrupt a good object.
+	it('cannot be overwritten by different bytes at the same address', async () => {
+		await seedTokens();
+		const good = 'the bytes that belong here';
+		const address = sha256(good);
+		const prefix = address.slice(0, 2);
+
+		const first = await mirror(prefix, address, {}, TOKENS.potato, good);
+		expect(first.res.status).toBe(201);
+		const second = await mirror(prefix, address, {}, TOKENS.potato, 'different bytes, same address');
+		expect(second.res.status).toBe(400);
+
+		const stored = await (env as unknown as Env).BUCKET.get(keyOf(address));
+		const bytes = await stored!.text();
+		expect(bytes).toBe(good);
+		// And the object's metadata still names the bytes that are actually there.
+		expect(stored!.customMetadata?.sha256).toBe(address);
+		expect(sha256(bytes)).toBe(address);
+	});
+
+	it('recognises the runtime checksum failure it maps to 400', () => {
+		expect(
+			isChecksumMismatch(
+				new Error('put: The SHA-256 checksum you specified did not match what we received.'),
+			),
+		).toBe(true);
+		expect(isChecksumMismatch(new Error('network connection lost'))).toBe(false);
 	});
 });

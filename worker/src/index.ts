@@ -14,7 +14,7 @@ import {
 	contentAllowed,
 } from './constants';
 import { doorLimit, doorLimitKey, pruneDoorLimits } from './limits';
-import { putMirror, validMirrorKey } from './mirror';
+import { ChecksumMismatch, putMirror, validMirrorKey } from './mirror';
 import { bucketFor, presign, presignConfigured, presignKeyScope } from './presign';
 import {
 	claim,
@@ -392,7 +392,12 @@ route('PUT', '/mirror/:prefix/:hash', 'potato', async (c) => {
 	try {
 		const summary = await putMirror(c.env, prefix, hash, body, { contentType });
 		return json(summary, 201);
-	} catch {
+	} catch (err) {
+		// A body that does not hash to its address is the caller disagreeing with
+		// itself, so it is a 400 rather than a 502 the potato would retry forever.
+		if (err instanceof ChecksumMismatch) {
+			return json({ error: 'content does not match the address', key: `${prefix}/${hash}` }, 400);
+		}
 		return json({ error: 'mirror failed' }, 502);
 	}
 });
