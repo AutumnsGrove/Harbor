@@ -166,6 +166,27 @@ func TestThumbnailFitsTheLongEdgeEitherWayUp(t *testing.T) {
 	}
 }
 
+// A very long, very thin image must not scale to a zero dimension: 4000x1 rounds
+// to a height of 0, and an empty image encodes happily into a thumbnail no
+// browser can draw. Found in review.
+func TestThinImagesKeepAtLeastOnePixel(t *testing.T) {
+	for _, size := range [][2]int{{4000, 1}, {1, 4000}, {5000, 3}, {3, 5000}} {
+		img := image.NewRGBA(image.Rect(0, 0, size[0], size[1]))
+		thumb, err := Thumbnail(bytes.NewReader(jpegOf(t, img)), 0)
+		if err != nil {
+			t.Errorf("%dx%d: %v", size[0], size[1], err)
+			continue
+		}
+		if thumb.Width < 1 || thumb.Height < 1 {
+			t.Errorf("%dx%d produced a %dx%d thumbnail", size[0], size[1], thumb.Width, thumb.Height)
+		}
+		// It must also be a JPEG that decodes, which a zero-height one is not.
+		if _, err := jpeg.Decode(bytes.NewReader(thumb.JPEG)); err != nil {
+			t.Errorf("%dx%d thumbnail does not decode: %v", size[0], size[1], err)
+		}
+	}
+}
+
 // An image already smaller than the long edge is not upscaled: a 300 px icon
 // stays a 300 px icon rather than being blown up and blurred.
 func TestSmallImagesAreNotUpscaled(t *testing.T) {

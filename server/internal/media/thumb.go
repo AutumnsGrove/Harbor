@@ -115,15 +115,20 @@ func checkPixels(w, h int, cap int64) error {
 }
 
 // scale fits an image into longEdge without upscaling it.
+//
+// The clamps are not decoration: a 4000x1 panorama rounds to a height of 0, and
+// an empty image encodes to a 591-byte JPEG that is 1600 px wide and no pixels
+// tall. A thumbnail nobody can draw is worse than a one-pixel-tall one, so no
+// dimension is ever allowed below 1.
 func scale(src image.Image, longEdge int) image.Image {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w <= longEdge && h <= longEdge {
 		return src
 	}
-	nw, nh := longEdge, h*longEdge/w
+	nw, nh := longEdge, max(1, h*longEdge/w)
 	if h > w {
-		nw, nh = w*longEdge/h, longEdge
+		nw, nh = max(1, w*longEdge/h), longEdge
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, nw, nh))
 	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, b, draw.Src, nil)
