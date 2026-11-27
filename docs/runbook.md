@@ -71,6 +71,12 @@ own pace, behind anything saved by hand. `docker compose logs -f harbor` shows e
 home page's needs-attention strip shows the ones that gave up. It refuses to run without
 `OPENROUTER_API_KEY`, and an item the model has already read is never queued again.
 
+**What the model cost, and where the number lives.** Every call writes a `usage_calls` row with its
+model and `cost_usd`, and Settings → usage reads that table. The table arrived with #62/#64 on
+2026-11-25, so spend from *before* it is not in Harbor at all: the 2026-11-23/24 enrichment of 1,476
+saves (~954 calls, about $0.51) is in the OpenRouter dashboard and nowhere else. An empty month in the
+sparkline means "nothing since the table existed", not "free".
+
 ## Restore from a backup
 
 **Stop the container first.** The restore refuses to run while another Harbor holds `data/.lock`, and
@@ -179,15 +185,22 @@ highlights, 25 Spaces, 1,482 memberships, 7,412 item tags, 2,051 tags — and `/
 recovery a bad update would actually need.
 
 What is still outstanding is the *other* half of the milestone: a restore **from R2 on a clean box**.
-It needs two things, and the credential is only one of them:
+Both prerequisites that used to be listed here are done, so what is left is the drill itself — nothing
+in the tree blocks it.
 
-1. The Worker's R2 secret (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) — `/presign`
-   answers "not configured" without it.
-2. **The presign route extended to backup keys.** `presignKeyAllowed` (`worker/src/presign.ts`) allows
-   only `incoming|media|archives`, and `knownKey` (`worker/src/queue.ts`) proves a key by looking it up
-   in D1's `blobs` — so `backups/harbor-<UTC>.db.zst` is a 400 before the credential is even consulted.
-   The bucket is private and the Worker has no read-back route by design, so the download has to be a
-   presigned GET: that route needs the prefix and its own key validation, not a D1 row.
+- **The presign route takes backup keys.** `presignKeyScope` (`worker/src/presign.ts`) accepts
+  `backups/<valid name>`, and `bucketFor` signs a backup against the `BACKUPS` bucket rather than the
+  intake one — signing it against intake answers 404 and looks like a missing snapshot (issues #60,
+  #70). A backup key is proved by its own name, not by a D1 row, because the database cannot be a
+  prerequisite for restoring the database.
+- **The Worker holds the R2 credential.** `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and
+  `R2_SECRET_ACCESS_KEY` are set as Worker secrets (checked with `npx wrangler secret list` in
+  `worker/` on 2026-11-27), so `/presign` no longer answers "not configured".
+
+To take it: `harbor backup --list` for the newest snapshot name, then
+`GET <worker>/presign?key=backups/<name>` with the potato token, and `harbor restore` the file it
+returns on a box that is not the potato. The bucket stays private and the Worker never becomes a read
+surface for the library: the download is a presigned GET, which is the same capability media reads use.
 
 ---
 

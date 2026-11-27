@@ -199,8 +199,8 @@ happened, and `make check` is green on `main`.
 |---|---|---|
 | — | Spikes | ◐ S1, S2, S5, S7, S9, S10, S11 answered (S7 → 8897); S3, S4, S6, S8, S12 pending |
 | 0 | Foundations | ✅ deployed 2026-11-18, updated to `r56.4c93aa8` and rollback-drilled 2026-11-19 |
-| 1 | Worker intake | ✅ deployed 2026-11-19; exit demo run, `/presign` still needs its R2 credential |
-| 2 | Core library | ◐ store, Worker ingest, items API, pending window and the library UI are in the tree and green; the potato demo and scheduler skeleton outstanding |
+| 1 | Worker intake | ✅ deployed 2026-11-19; exit demo run, and the `/presign` R2 credential is now set |
+| 2 | Core library | ◐ store, Worker ingest, items API, pending window and the library UI are in the tree and green; the potato demo ran in anger on 2026-11-23, leaving two demands unrecorded (kill mid-poll, a second `replay --since`), and the scheduler skeleton waits on phase 9 |
 | 3 | Enrichment | ◐ code complete and merged, 95.1% kind accuracy on the 41-case scored set; **the real library was enriched on the potato 2026-11-23/24** — 954 read by the model for $0.51, 359 walled videos filed from public metadata, 163 genuine failures left for phases 6/11. The demo's own two open items: the owner's agreement count, and the RSS/prompt-drift measurements |
 | 4 | Front doors | ☐ |
 | 5 | Import | ✅ **the real library imported on the potato 2026-11-23, from Settings → Import**: 1,476 items, twice (second pass all merges), the HTML twin, and a cancelled-then-resumed pass. The two criteria that need phases 8 and 10 moved to those plans' demos |
@@ -210,7 +210,7 @@ happened, and `make check` is green on `main`.
 | 9 | Tags + Spaces | ☐ |
 | 10 | Hybrid search | ☐ |
 | 11 | Archive + link rot | ☐ |
-| 12a | Backup, restore drill, export (before first real import) | ◐ code complete and merged; **the real drill ran on the potato 2026-11-23** (1,476 saves, backup → restore → identical counts); the clean-box-from-R2 half waits on the Worker's R2 secret **and** on the presign route learning `backups/` |
+| 12a | Backup, restore drill, export (before first real import) | ◐ code complete and merged; **the real drill ran on the potato 2026-11-23** (1,476 saves, backup → restore → identical counts); the clean-box-from-R2 half is unblocked — presign signs `backups/` and the Worker holds the R2 credential — and needs only the drill run |
 | 12b | Status page, maintenance, runbook | ☐ |
 
 ---
