@@ -731,10 +731,11 @@ a {
 	text-transform: uppercase;
 }
 
+/* A fade, not a slide: nothing about a card's position may change after it is
+   placed, and e2e/feed.spec.ts asserts exactly that when "Load more" lands. */
 @keyframes arrive {
 	from {
 		opacity: 0;
-		transform: translateY(8px);
 	}
 }
 
@@ -880,18 +881,203 @@ a {
 	display: grid;
 	place-items: center;
 	padding: 20px;
-	background: rgba(3, 8, 9, 0.66);
-	backdrop-filter: blur(4px);
+	/* The room goes dark and a little lamplight stays behind the dialog, so it
+	   reads as lit from within rather than pasted on. */
+	background:
+		radial-gradient(44rem 30rem at 50% 42%, rgba(242, 184, 102, 0.1), transparent 70%),
+		rgba(3, 8, 9, 0.74);
+	animation: fade-in 0.2s var(--ease) both;
+}
+
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+}
+
+@keyframes rise {
+	from {
+		opacity: 0;
+		transform: translateY(14px) scale(0.985);
+	}
 }
 
 .modal {
-	width: min(560px, 100%);
+	width: min(620px, 100%);
 	max-height: calc(100dvh - 40px);
 	overflow: auto;
-	padding: 26px;
-	border-radius: var(--r-xl);
-	background: #0d191c;
-	box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.9);
+	padding: 30px;
+	border-radius: 28px;
+	background: linear-gradient(165deg, #12242a, #0d191c 55%);
+	box-shadow:
+		0 40px 90px -24px rgba(0, 0, 0, 0.95),
+		0 0 0 1px rgba(232, 236, 230, 0.06);
+	animation: rise 0.26s var(--ease) both;
+}
+
+.compose-head {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+}
+
+.compose-head .note {
+	margin-top: 2px;
+}
+
+.beacon.sm {
+	flex: none;
+	width: 34px;
+	height: 34px;
+	margin: 0;
+	border-width: 4.5px;
+}
+
+.beacon.sm::after {
+	width: 9px;
+	height: 9px;
+	margin: -4.5px 0 0 -4.5px;
+	box-shadow: 0 0 14px 3px var(--lamp-glow);
+}
+
+.sr {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+/* The link is the thing you came to do, so it is the biggest thing here. */
+.bigfield {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	height: 60px;
+	padding: 0 20px;
+	border-radius: var(--r-l);
+	background: var(--surf2);
+	color: var(--dim);
+	transition:
+		box-shadow var(--dur) var(--ease),
+		color var(--dur);
+}
+
+.bigfield:focus-within {
+	box-shadow: 0 0 0 1.5px var(--acc);
+	color: var(--acc);
+}
+
+.bigfield input {
+	flex: 1;
+	min-width: 0;
+	background: none;
+	border: 0;
+	outline: 0;
+	color: var(--ink);
+	caret-color: var(--acc);
+	font: 500 19px var(--font);
+	letter-spacing: -0.01em;
+}
+
+.bigfield input::placeholder {
+	color: var(--dim);
+}
+
+.ta.note-in {
+	min-height: 132px;
+	background: rgba(232, 236, 230, 0.045);
+	font-size: var(--t-l);
+}
+
+.callout.merge {
+	background: var(--amb-soft);
+	color: var(--ink);
+}
+
+.callout.merge b {
+	color: var(--amb);
+	font-weight: 600;
+}
+
+/* A toggle you press: a pill that lights up amber when it is on. */
+.chip {
+	all: unset;
+	box-sizing: border-box;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	height: 36px;
+	padding: 0 15px;
+	border-radius: var(--pill);
+	background: var(--surf);
+	color: var(--mute);
+	font-size: var(--t-m);
+	font-weight: 500;
+	transition:
+		background var(--dur),
+		color var(--dur);
+}
+
+.chip:hover {
+	background: var(--surf2);
+	color: var(--ink);
+}
+
+.chip.on {
+	background: var(--amb-soft);
+	color: var(--amb);
+}
+
+.chip:focus-visible {
+	outline: 2px solid var(--acc);
+	outline-offset: 2px;
+}
+
+kbd {
+	display: inline-grid;
+	place-items: center;
+	min-width: 22px;
+	height: 22px;
+	margin-right: 4px;
+	padding: 0 6px;
+	border-radius: 6px;
+	background: var(--surf2);
+	color: var(--mute);
+	font: 500 var(--t-xs) var(--font);
+}
+
+.hint kbd:not(:first-child) {
+	margin-left: 6px;
+}
+
+@media (max-width: 720px) {
+	/* On a phone the composer is a sheet that rises from the bottom edge. */
+	.scrim {
+		place-items: end center;
+		padding: 0;
+	}
+
+	.modal {
+		width: 100%;
+		max-height: 92dvh;
+		padding: 24px 20px calc(24px + env(safe-area-inset-bottom));
+		border-radius: 28px 28px 0 0;
+		animation-name: sheet;
+	}
+
+	@keyframes sheet {
+		from {
+			transform: translateY(100%);
+		}
+	}
+
+	.modal .foot .hint {
+		display: none;
+	}
 }
 
 .modal .foot {
@@ -1181,21 +1367,79 @@ input.switch:checked::after {
 	color: var(--ink);
 }
 
-/* One column until phase 6 lands covers: an item with no image is prose, and
-   an empty 4:3 placeholder is not a cover. The media column returns with it. */
 .item-page {
 	display: grid;
 	gap: 22px;
-	max-width: 860px;
 	min-width: 0;
-	margin: 0 auto;
+}
+
+/* The hero is two columns, as in the mockup: the art on the left holds still
+   while the facts on the right scroll past it. The art keeps the proportion the
+   card chose in the feed (--ratio), so opening an item feels like the card
+   growing, not a different page. */
+.hero {
+	display: grid;
+	grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+	gap: 20px 64px;
+	align-items: start;
+}
+
+.hero-art {
+	position: sticky;
+	top: 92px;
+}
+
+.hero-main {
+	display: grid;
+	gap: 26px;
+	min-width: 0;
+}
+
+.item-cover,
+.item-art {
+	display: block;
+	width: 100%;
+	aspect-ratio: var(--ratio, 4 / 5);
+	max-height: calc(100dvh - 140px);
+	border-radius: 22px;
+	box-shadow: var(--lift);
 }
 
 .item-cover {
-	width: 100%;
-	aspect-ratio: 16 / 10;
 	object-fit: cover;
-	border-radius: 18px;
+}
+
+/* No picture: the card's lamp-lit placeholder, larger. The same light falls in
+   the same place as on the card (--ax / --ay), so it is recognisably that item. */
+.item-art {
+	position: relative;
+	display: grid;
+	place-items: center;
+	background:
+		radial-gradient(75% 85% at var(--ax, 30%) var(--ay, 20%), rgba(242, 184, 102, 0.26), transparent 72%),
+		linear-gradient(150deg, var(--surf2), var(--surf) 60%, var(--surf3));
+}
+
+.item-art .kindmark {
+	display: grid;
+	place-items: center;
+	width: 96px;
+	height: 96px;
+	border-radius: 50%;
+	color: var(--mute);
+	background: rgba(9, 18, 20, 0.5);
+	box-shadow: inset 0 0 0 1px rgba(232, 236, 230, 0.1);
+}
+
+.item-art .kindtag {
+	position: absolute;
+	left: 22px;
+	bottom: 20px;
+	color: var(--mute);
+	font-size: var(--t-s);
+	font-weight: 500;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
 }
 
 .item-source {
@@ -1239,8 +1483,9 @@ input.switch:checked::after {
 	padding: 6px 8px;
 	margin: -6px -8px 0;
 	background: none;
-	font: 600 var(--t-3xl) / 1.12 var(--font);
-	letter-spacing: -0.025em;
+	font: 700 clamp(30px, 3.4vw, 44px) / 1.06 var(--font);
+	letter-spacing: -0.04em;
+	text-wrap: balance;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 	overflow: hidden;
@@ -1293,15 +1538,34 @@ input.switch:checked::after {
 	padding-right: 1px;
 }
 
-/* the model's summary: prose, and labelled as the model's */
+/* the model's summary: the page's pull-quote, and labelled as the model's. The
+   lamp beside the label marks it as the one thing Harbor itself wrote. */
 .sumbox {
 	display: grid;
+	gap: 10px;
+}
+
+.sumbox .eyebrow {
+	display: flex;
+	align-items: center;
 	gap: 8px;
 }
 
+.sumbox .eyebrow::before {
+	content: '';
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--lamp);
+	box-shadow: 0 0 8px 1px var(--lamp-glow);
+}
+
 .sumbox p {
-	font-size: var(--t-l);
-	line-height: 1.55;
+	max-width: 56ch;
+	font-size: 20px;
+	font-weight: 450;
+	line-height: 1.5;
+	letter-spacing: -0.012em;
 	text-wrap: pretty;
 }
 
@@ -1480,13 +1744,24 @@ p.ambc {
 	.item-page {
 		max-width: none;
 	}
+
+	.hero {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	/* Stacked, the art is a banner above the title, not a wall in front of it. */
+	.hero-art {
+		position: static;
+	}
+
+	.item-cover,
+	.item-art {
+		aspect-ratio: 16 / 10;
+		max-height: 46dvh;
+	}
 }
 
 @media (max-width: 720px) {
-	.modal {
-		padding: 20px;
-	}
-
 	.item-title {
 		font-size: var(--t-2xl);
 	}
