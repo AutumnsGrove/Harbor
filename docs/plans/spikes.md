@@ -24,7 +24,7 @@ one gates and the pass condition that has to be met.
 | S9 | Real Raindrop export sample | phase 5 start | 30 min | **pass, plan corrected** |
 | S10 | Tailscale serve headers + Docker peer address | phase 0 start | 45 min | **pass** |
 | S11 | Nova as a dependency in CI/Docker | phase 0 exit | 45 min | **pass** |
-| S12 | Image decode memory + EXIF | phase 6 exit | 90 min | pending |
+| S12 | Image decode memory + EXIF | phase 6 exit | 90 min | **pass** — 50 MP cap; no EXIF dependency |
 
 S7, S9, S10 and S11 are cheap and can be done now (S9 is ten minutes in Raindrop's export screen
 plus sanitising) — S7, S9, S10 and S11 are all answered now. S1/S2 are prerequisites for writing
@@ -518,6 +518,43 @@ likely outcome; pick it from the number); orientation is correct in all four cas
 written as JPEG.
 **Fail:** lower the cap, or shell out to nothing (there is no image tool in a distroless image) — the
 fallback is to store oversized images undescribed with a badge, never to lose the file.
+
+**Verdict (2026-11-27): pass — cap at 50 megapixels, and orientation needs no dependency.**
+**What happened:** a real iPhone photo (5712×4284 = 24.5 MP, 4.4 MB, EXIF orientation 6) and the same
+photo resampled to 8064×6048 (48.8 MP, 6.5 MB), decoded with the standard library on the potato
+(aarch64, 1.9 GB, ~600 MB free) and on the MacBook Air for comparison. Peak RSS is `VmHWM`.
+
+| | potato | MacBook Air |
+|---|---|---|
+| `DecodeConfig` only, 24.5 MP | 7.4 MB, 0.00 s | 9.3 MB, 0.00 s |
+| `DecodeConfig` only, 48.8 MP | 9.6 MB, 0.00 s | 11.6 MB, 0.00 s |
+| decode 24.5 MP | **42.6 MB, 2.24 s** | 44.4 MB, 0.21 s |
+| decode 48.8 MP | **79.5 MB, 4.19 s** | 81.6 MB, 0.36 s |
+| decode 24.5 MP + 1600 px thumbnail + JPEG write | 50.9 MB, 3.07 s | 53.0 MB, 0.25 s |
+
+Two facts fall out. Memory is **1.6 MB per megapixel** and identical on both machines — it is the
+decoded YCbCr plane, so it follows the pixel count and nothing else. Time is **~11× slower on the
+potato**, which is what the 4.2 s is: one decode of one 48 MP photo, serial in the enrichment loop,
+nowhere near a request path. `DecodeConfig` costs 7–10 MB and no decode, so the cap is enforced before
+a single pixel is allocated — that is the guard, and it is cheaper than the JPEG's own headers.
+
+**The cap is 50 MP, and the round number matters.** 8064×6048 is 48.77 MP, so a 48 MP cap refuses the
+exact case this spike is about — measured, not assumed: `-cap 48` answered "refused by the 48 MP cap"
+on the iPhone's own 48 MP geometry. 50 MP covers every consumer phone's full-resolution photo, and a
+108 MP or 200 MP photo is stored with a badge and no description, which is the spike's documented
+fallback: never lose the file, never decode it blindly.
+
+**Orientation needs no library.** A 50-line reader — APP1 segment → TIFF header → IFD0 → tag 0x0112 —
+reads all eight values off the real photo patched into each, and the eight transforms were checked by
+the only test that can tell them apart: a synthetic JPEG whose four quadrants are unmistakable, with a
+real EXIF segment injected per orientation, asserting where every quadrant lands and that the
+dimensions swap for 5–8. (The real photo cannot do this — all four of its corners are the same wall.)
+Scaling before rotating keeps the rotation on the thumbnail's pixels rather than the original's.
+`golang.org/x/image/draw`'s `ApproxBiLinear` does the scale, which is the one dependency this needs.
+
+Formats, as the spike asked: JPEG, PNG and GIF decode in the standard library; WebP decodes only with
+`golang.org/x/image/webp` and has no encoder there, so a WebP thumbnail is written as JPEG and HEIC is
+unsupported — stored, undescribed, badged.
 
 ---
 
