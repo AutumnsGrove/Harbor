@@ -86,12 +86,14 @@ func (c *Client) Describe(ctx context.Context, input enrich.VisionInput) (enrich
 		return enrich.Vision{}, errors.New("nova vision: no image")
 	}
 	// Three quarters of the body ceiling: 4 MB of base64 carries 3 MB of bytes.
-	if len(input.Image) > visionMaxEncodedBytes/4*3 {
+	// The encoded length is the stdlib's own arithmetic rather than a 4/3
+	// approximation, so the refusal quotes the number that would actually be sent.
+	if encoded := base64.StdEncoding.EncodedLen(len(input.Image)); encoded > visionMaxEncodedBytes {
 		// Not retried: the same bytes are the same size next time. The caller
 		// stores the original and badges it, which is the documented fallback.
 		return enrich.Vision{}, fmt.Errorf(
-			"nova vision: the image is %d bytes, and base64 would make it %d, over the %d-byte request limit; not sent",
-			len(input.Image), len(input.Image)/3*4, visionMaxEncodedBytes)
+			"nova vision: the image is %d bytes, and base64 makes it %d, over the %d-byte request limit; not sent",
+			len(input.Image), encoded, visionMaxEncodedBytes)
 	}
 	system, err := prompt(VisionPromptVersion + ".md")
 	if err != nil {

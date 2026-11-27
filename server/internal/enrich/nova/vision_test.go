@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -226,4 +227,33 @@ func TestDescribeKeepsAValidKind(t *testing.T) {
 			t.Errorf("kind = %q, want %q", vision.Kind, kind)
 		}
 	}
+}
+
+// The refusal quotes the length that would actually be sent, not a rounded
+// approximation: "4194304 bytes, over the 4194304-byte limit" is the kind of
+// message that makes a reader doubt the code (a point from review).
+func TestTheOversizeRefusalQuotesTheEncodedLength(t *testing.T) {
+	chat := &scriptedChat{}
+	input := visionInput()
+	input.Image = make([]byte, visionMaxEncodedBytes/4*3+1)
+	_, err := visionClient(chat, nil).Describe(context.Background(), input)
+	if err != nil {
+		// The message must name the encoded length and the limit, and the length
+		// it names must be strictly greater than the limit.
+		encoded := base64.StdEncoding.EncodedLen(len(input.Image))
+		if !strings.Contains(err.Error(), "base64 makes it") {
+			t.Fatalf("error = %v, want the encoded length named", err)
+		}
+		if !strings.Contains(err.Error(), strconv.Itoa(encoded)) {
+			t.Errorf("error = %v, want it to quote %d", err, encoded)
+		}
+		if strings.Contains(err.Error(), "4194304 bytes, and base64 makes it 4194304") {
+			t.Errorf("the message quotes the limit as the size: %v", err)
+		}
+		if chat.calls != 0 {
+			t.Errorf("%d calls, want none", chat.calls)
+		}
+		return
+	}
+	t.Fatal("an oversized image was accepted")
 }
