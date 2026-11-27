@@ -57,6 +57,14 @@ describe('door dampening', () => {
 	});
 
 	it('answers 429 with Retry-After once the dampener trips', async () => {
+		// The counter is keyed by a fixed 60-second window, so a loop that
+		// straddles a boundary sees it reset and lets a third request through —
+		// which is how this failed once in CI with [200, 200, 200, 429]. Start
+		// with a second of room in the window; the wait is under a second and the
+		// assertion stays as strict.
+		while (Date.now() % (DOOR_LIMIT_PERIOD * 1000) > DOOR_LIMIT_PERIOD * 1000 - 1000) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
 		// The suite's binding sets DOOR_LIMIT_MAX high; override it for one request.
 		const limited = { ...e, DOOR_LIMIT_MAX: '2' } as Env;
 		const ip = `203.0.113.${Math.floor(Math.random() * 200)}`;
