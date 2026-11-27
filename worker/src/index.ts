@@ -14,6 +14,7 @@ import {
 	contentAllowed,
 } from './constants';
 import { doorLimit, doorLimitKey, pruneDoorLimits } from './limits';
+import { ChecksumMismatch, putMirror, validMirrorKey } from './mirror';
 import { bucketFor, presign, presignConfigured, presignKeyScope } from './presign';
 import {
 	claim,
@@ -357,6 +358,47 @@ route('PUT', '/backups/:name', 'potato', async (c) => {
 	} catch (err) {
 		if (err instanceof NameError) return json({ error: 'invalid backup name', name }, 400);
 		throw err;
+	}
+});
+
+// Mirror-up (design.md §11, issue #75): the second copy of an in-app save. The
+// key is the content address, so this is idempotent by construction — a retry
+// after a dropped connection is one more PUT of the same bytes, not a duplicate.
+// There is no list, no delete and no read: the mirror exists to survive the
+// potato, and the Worker stays out of the library's read path.
+route('PUT', '/mirror/:prefix/:hash', 'potato', async (c) => {
+	const prefix = c.req.param('prefix') ?? '';
+	const hash = c.req.param('hash') ?? '';
+	// Both halves are validated before anything is written: the key is derived
+	// from bytes the potato hashed, so a key that is not that shape is a bug
+	// worth surfacing rather than normalising.
+	if (!validMirrorKey(`${prefix}/${hash}`) || prefix !== hash.slice(0, 2)) {
+		return json({ error: 'invalid content address', key: `${prefix}/${hash}` }, 400);
+	}
+	// R2 will not take an unfixed-length stream, so the length is required rather
+	// than counted: the Go client always uploads a file and so always sends one,
+	// and a caller that does not is told why instead of failing inside put().
+	const declared = c.req.header('content-length') ?? null;
+	if (declared === null) return json({ error: 'content-length required' }, 411);
+	const bytes = Number(declared);
+	if (!Number.isFinite(bytes) || bytes <= 0) return json({ error: 'no body' }, 400);
+	if (bytes > MAX_UPLOAD_BYTES) {
+		return json({ error: 'file too large', limit: MAX_UPLOAD_BYTES, got: bytes }, 413);
+	}
+	const body = c.req.raw.body;
+	if (!body) return json({ error: 'no body' }, 400);
+
+	const contentType = (c.req.header('content-type') ?? 'application/octet-stream').split(';')[0]!.trim();
+	try {
+		const summary = await putMirror(c.env, prefix, hash, body, { contentType });
+		return json(summary, 201);
+	} catch (err) {
+		// A body that does not hash to its address is the caller disagreeing with
+		// itself, so it is a 400 rather than a 502 the potato would retry forever.
+		if (err instanceof ChecksumMismatch) {
+			return json({ error: 'content does not match the address', key: `${prefix}/${hash}` }, 400);
+		}
+		return json({ error: 'mirror failed' }, 502);
 	}
 });
 
