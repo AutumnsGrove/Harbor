@@ -257,3 +257,36 @@ func TestTheOversizeRefusalQuotesTheEncodedLength(t *testing.T) {
 	}
 	t.Fatal("an oversized image was accepted")
 }
+
+// The inclusive edge: an image whose base64 is exactly the body ceiling is
+// allowed, one byte more is not. Testing only the over side leaves `>` and `>=`
+// indistinguishable, and `>=` would refuse an image that fits exactly (found in
+// review).
+func TestTheOversizeBoundaryIsInclusive(t *testing.T) {
+	// 3145728 raw bytes encode to exactly 4194304, the ceiling.
+	fits := visionMaxEncodedBytes / 4 * 3
+	if base64.StdEncoding.EncodedLen(fits) != visionMaxEncodedBytes {
+		t.Fatalf("the fixture does not sit on the boundary: %d encodes to %d, ceiling %d",
+			fits, base64.StdEncoding.EncodedLen(fits), visionMaxEncodedBytes)
+	}
+
+	input := visionInput()
+	input.Image = make([]byte, fits)
+	chat := &scriptedChat{answers: []scriptedAnswer{{content: goodVision, finish: "stop"}}}
+	if _, err := visionClient(chat, nil).Describe(context.Background(), input); err != nil {
+		t.Fatalf("an image that fills the request exactly was refused: %v", err)
+	}
+	if chat.calls != 1 {
+		t.Errorf("%d calls, want 1", chat.calls)
+	}
+
+	// And one byte more is refused, which is the other side of the same edge.
+	input.Image = make([]byte, fits+1)
+	over := &scriptedChat{answers: []scriptedAnswer{{content: goodVision, finish: "stop"}}}
+	if _, err := visionClient(over, nil).Describe(context.Background(), input); err == nil {
+		t.Fatal("one byte over the boundary was accepted")
+	}
+	if over.calls != 0 {
+		t.Errorf("%d calls, want none", over.calls)
+	}
+}
