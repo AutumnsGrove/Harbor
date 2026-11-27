@@ -696,7 +696,7 @@ a {
 
 .card .cover {
 	position: relative;
-	aspect-ratio: 16 / 10;
+	aspect-ratio: var(--ratio, 16 / 10);
 	border-radius: 16px;
 	overflow: hidden;
 	/* The light falls somewhere different on every placeholder (--ax/--ay come

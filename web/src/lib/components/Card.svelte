@@ -13,7 +13,38 @@
 	// A cover-less card is a placeholder, and a wall of identical placeholders
 	// reads as broken. The item id seeds where the light falls on each one, so
 	// the same item always looks the same and its neighbours differ.
-	const seed = $derived([...item.id].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) >>> 0, 7));
+	// FNV-1a plus a murmur-style finalizer: ids saved seconds apart share most of
+	// their characters, and a plain multiply-and-add leaves neighbours with the
+	// same proportion, which is the rote look this is here to break.
+	const seed = $derived.by(() => {
+		let h = 2166136261;
+		for (const ch of item.id) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+		h = Math.imul(h ^ (h >>> 16), 2246822507);
+		h = Math.imul(h ^ (h >>> 13), 3266489909);
+		return (h ^ (h >>> 16)) >>> 0;
+	});
+
+	// Masonry only reads as masonry if the tiles differ in height. We do not know
+	// an og:image's real shape before it loads (and a late load must not reflow
+	// the column, #49), so the cover's proportion is chosen up front: stable per
+	// item, weighted by kind (video is wide, a book or product is tall), and the
+	// image is cropped to fit with object-fit.
+	const ratios: Record<string, string[]> = {
+		video: ['16 / 9', '16 / 9', '16 / 10'],
+		movie: ['2 / 3', '3 / 4', '16 / 9'],
+		podcast: ['1 / 1', '1 / 1', '4 / 3'],
+		book: ['3 / 4', '2 / 3', '3 / 4'],
+		product: ['4 / 5', '1 / 1', '3 / 4'],
+		paper: ['3 / 4', '4 / 5', '1 / 1'],
+		image: ['1 / 1', '4 / 5', '3 / 4', '4 / 3', '16 / 10'],
+		place: ['1 / 1', '4 / 3', '5 / 4'],
+		recipe: ['4 / 5', '1 / 1', '4 / 3']
+	};
+	const fallbackRatios = ['16 / 10', '4 / 3', '1 / 1', '4 / 5', '16 / 9', '5 / 4', '3 / 4'];
+	const ratio = $derived.by(() => {
+		const choices = ratios[item.kind] ?? fallbackRatios;
+		return choices[(seed >>> 8) % choices.length];
+	});
 
 	// A cover that fails to load is the same as no cover: one silent fallback,
 	// not a broken-image icon.
@@ -87,7 +118,7 @@
 			</p>
 		</div>
 	{:else}
-		<div class="cover" style:--ax={`${seed % 70}%`} style:--ay={`${(seed >> 3) % 60}%`}>
+		<div class="cover" style:--ax={`${seed % 70}%`} style:--ay={`${(seed >>> 3) % 60}%`} style:--ratio={ratio}>
 			{#if showCover}
 				<img
 					class="coverimg"
