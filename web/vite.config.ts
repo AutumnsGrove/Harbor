@@ -1,11 +1,11 @@
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 
 // One static SPA, served by the Go binary that embeds web/build. No SSR, no
 // Node at runtime, and no asset origin: the shell, its assets and the API share
 // one process and one identity lock (design.md §3).
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
 	plugins: [
 		sveltekit({
 			compilerOptions: {
@@ -29,9 +29,11 @@ export default defineConfig({
 	},
 	server: {
 		// `make dev` runs Go on 8080; `pnpm dev` proxies the API to it so the
-		// shell and the handlers can be worked on together.
+		// shell and the handlers can be worked on together. HARBOR_API points it
+		// elsewhere when 8080 is taken (two worktrees, two servers). loadEnv reads
+		// the process environment, so this needs no Node types.
 		proxy: {
-			'/api': 'http://127.0.0.1:8080'
+			'/api': loadEnv(mode, '.', 'HARBOR_').HARBOR_API ?? 'http://127.0.0.1:8080'
 		}
 	}
-});
+}));
