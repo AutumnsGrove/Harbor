@@ -234,6 +234,12 @@ func TestSetMediaDimensions(t *testing.T) {
 	if err := s.SetMediaDimensions(ctx, row.ID, -1, 10); err == nil {
 		t.Error("a negative width was accepted")
 	}
+	// An unknown id is an error rather than a silent no-op, the same as
+	// SetMediaMirror: a purge can remove the row while the pipeline holds it
+	// (found in review).
+	if err := s.SetMediaDimensions(ctx, "no-such-row", 10, 10); err == nil {
+		t.Error("dimensions were recorded against a row that does not exist")
+	}
 }
 
 // Deleting an item takes its attachments with it (the FK cascade), which is what

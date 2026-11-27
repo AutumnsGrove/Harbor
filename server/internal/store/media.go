@@ -149,10 +149,20 @@ func (s *Store) SetMediaDimensions(ctx context.Context, id string, width, height
 	if width < 0 || height < 0 {
 		return fmt.Errorf("store: %dx%d is not a size", width, height)
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE media SET width = ?, height = ? WHERE id = ?`,
+	res, err := s.db.ExecContext(ctx, `UPDATE media SET width = ?, height = ? WHERE id = ?`,
 		width, height, id)
 	if err != nil {
 		return fmt.Errorf("store: recording dimensions: %w", err)
+	}
+	// A row that is not there is an error, not a no-op: a purge can take an item
+	// while the pipeline is holding it, and losing a write silently is how that
+	// becomes an invisible bug (found in review).
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: recording dimensions: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("store: no media row %q", id)
 	}
 	return nil
 }
