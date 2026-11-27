@@ -1,6 +1,6 @@
 # Phase 6 — Images and documents
 
-**Status:** planned · **Design refs:** [§6](../design.md#6-enrichment-pipeline) (image and document
+**Status:** ◐ the document half landed first (issue #74) · **Design refs:** [§6](../design.md#6-enrichment-pipeline) (image and document
 jobs), [§11](../design.md#11-operations) (content addressing, mirror), [H1/J4](../open-questions.md)
 **Depends on:** phase 2 (phase 4 for remote intake in practice) · **Gate:**
 [S6](spikes.md#s6--pdf-text-extraction-in-pure-go),
@@ -111,8 +111,13 @@ web/src/lib/components/MediaGrid.svelte, Lightbox.svelte, PdfBadge.svelte
 - [ ] Thumbnails as a generated artifact with a `derived_at` so a re-generation task can sweep.
 - [ ] Vision call: one JSON-schema call, `message.Parts` carrying the image, prompt version.
 - [ ] Embedding input = OCR text + description (+ filename as a weak signal); cap the input.
-- [ ] PDF: extract, page count, chars/page, scan detection with configurable threshold, OCR cap
-      (default 10 pages), and a `pdf_text_state` (`text|ocr|empty`) on the media row.
+- [x] PDF text layer: extract, page count, chars/page, scan detection — `server/internal/extract/pdf.go`,
+      S6's verdict in [spikes.md](spikes.md), and an unreadable document is filed ready with a badge
+      rather than failed (issue #74). `pdf_text_state` is carried in the extraction result for now and
+      becomes a column with the OCR slice.
+- [ ] PDF OCR for a scan: capped at 10 pages, `pdf_text_state = ocr`. Blocked on how a page gets
+      rasterised or sent — poppler in the image, or a document content part in Nova
+      ([nova#153](https://github.com/AutumnsGrove/nova/issues/153)). Issue #99.
 - [ ] Worker `PUT /mirror/<key>` (potato scope; scope-matrix test; 25 MB cap) and the mirror loop:
       batch of 10, exponential retry, `mirror_pending` count for the Status page.
 - [ ] Storage accounting: bytes by kind, count of files, disk free; the guardrail warning at a

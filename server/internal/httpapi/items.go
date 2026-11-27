@@ -73,6 +73,13 @@ type itemDTO struct {
 	// Needs attention.
 	Walled     bool   `json:"walled,omitempty"`
 	LinkStatus string `json:"linkStatus,omitempty"`
+	// NoText is a document that was read and had nothing to read in it: a scan
+	// with no text layer, or a file that would not open (issue #74). Like Walled
+	// it is an amber badge and never a row in Needs attention.
+	NoText bool `json:"noText,omitempty"`
+	// TooLarge is a body past its cap — 40 MB for a document, 5 MB for a page.
+	// Deterministic, so it is filed with the numbers rather than retried.
+	TooLarge bool `json:"tooLarge,omitempty"`
 
 	CreatedAt time.Time  `json:"createdAt"`
 	SavedAt   time.Time  `json:"savedAt"`
@@ -116,6 +123,8 @@ func toDTO(item model.Item) itemDTO {
 		Cover:       coverVersion(item),
 		Walled:      item.Walled(),
 		LinkStatus:  linkStatusOf(item),
+		NoText:      item.NoText(),
+		TooLarge:    item.TooLarge(),
 		CreatedAt:   item.CreatedAt,
 		SavedAt:     item.SavedAt,
 		UpdatedAt:   item.UpdatedAt,

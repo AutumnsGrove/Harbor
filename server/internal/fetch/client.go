@@ -22,12 +22,16 @@ import (
 	"time"
 )
 
-// Defaults are design.md §6's numbers: a 5 MB cap and a 20 s timeout.
+// Defaults are design.md §6's numbers: a 5 MB cap and a 20 s timeout for a
+// page, and a 40 MB one for a document, because a 5 MB ceiling is right for a
+// page and wrong for a paper — arxiv alone will never fit under it, and the ten
+// rows on the box that failed on the cap declared up to 38.7 MB (issue #74).
 const (
-	DefaultMaxBytes     int64 = 5 << 20
-	DefaultTimeout            = 20 * time.Second
-	DefaultMaxRedirects       = 5
-	dialTimeout               = 10 * time.Second
+	DefaultMaxBytes         int64 = 5 << 20
+	DefaultDocumentMaxBytes int64 = 40 << 20
+	DefaultTimeout                = 20 * time.Second
+	DefaultMaxRedirects           = 5
+	dialTimeout                   = 10 * time.Second
 )
 
 var (
@@ -129,6 +133,15 @@ type Client struct {
 	maxRedirects int
 	userAgent    string
 
+	// documentMaxBytes is the ceiling for a response isDocument accepts, and
+	// isDocument is the caller's rule rather than this package's: what counts as
+	// a document is the extractor's business, and one predicate is better than
+	// two that drift. It is given the first bytes as well as the header, because
+	// a mislabelled document is only identifiable by its magic number. A nil
+	// isDocument means one cap for everything.
+	documentMaxBytes int64
+	isDocument       func(contentType string, head []byte) bool
+
 	// allowUnsafe skips both the URL check and the dial-time IP check. It is
 	// only ever set by tests, which serve pages from 127.0.0.1; production has
 	// no option for it. TestDefaultClientBlockLocalhost proves the default.
@@ -146,6 +159,38 @@ func WithMaxBytes(n int64) Option {
 		}
 	}
 }
+
+// WithDocumentCap raises the cap for the responses f accepts to
+// DefaultDocumentMaxBytes, or to n when n is positive. f sees the head of the
+// body as well as the content type, so a PDF served as application/octet-stream
+// gets the document cap rather than being refused at the page cap before
+// anything could tell what it is (issue #74).
+func WithDocumentCap(f func(contentType string, head []byte) bool, n ...int64) Option {
+	return func(c *Client) {
+		if f == nil {
+			return
+		}
+		c.isDocument = f
+		c.documentMaxBytes = DefaultDocumentMaxBytes
+		if len(n) > 0 && n[0] > 0 {
+			c.documentMaxBytes = n[0]
+		}
+	}
+}
+
+// capFor is the byte ceiling for one response, from its content type and the
+// first bytes of its body.
+func (c *Client) capFor(contentType string, head []byte) int64 {
+	if c.isDocument != nil && c.isDocument(contentType, head) {
+		return c.documentMaxBytes
+	}
+	return c.maxBytes
+}
+
+// headBytes is how much of a body is read before the cap is chosen. It is the
+// length of the longest magic number Harbor checks, and reading it costs nothing
+// that is not written to the temp file anyway.
+const headBytes = 5
 
 // WithTimeout sets the whole-request timeout.
 func WithTimeout(d time.Duration) Option {
@@ -228,7 +273,9 @@ func (c *Client) Get(ctx context.Context, rawURL string) (*Page, error) {
 		return nil, fmt.Errorf("%w: %v", ErrUnsupportedURL, err)
 	}
 	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.1")
+	// A PDF is asked for explicitly, because a save that points at one should get
+	// the document rather than a preview page or a 406 (issue #74).
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.8,*/*;q=0.1")
 	req.Header.Set("Accept-Language", "en;q=0.9,*;q=0.5")
 
 	resp, err := c.http.Do(req)
@@ -247,19 +294,36 @@ func (c *Client) Get(ctx context.Context, rawURL string) (*Page, error) {
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &HTTPError{URL: resp.Request.URL.String(), Status: resp.StatusCode}
 	}
-	// A declared length over the cap is refused without reading a byte.
-	if resp.ContentLength > c.maxBytes {
-		return nil, fmt.Errorf("%w: %d bytes declared, cap %d", ErrTooLarge, resp.ContentLength, c.maxBytes)
+	// The cap depends on what answered, and a mislabelled document can only be
+	// told from its first bytes: a PDF served as application/octet-stream is
+	// still a paper, and it must not be refused at the page cap before the sniff
+	// runs (issue #74, found in review). So the head is read first — it is
+	// written to the temp file regardless — and the limit is chosen after it.
+	head := make([]byte, headBytes)
+	n, headErr := io.ReadFull(resp.Body, head)
+	if headErr != nil && !errors.Is(headErr, io.ErrUnexpectedEOF) && !errors.Is(headErr, io.EOF) {
+		return nil, fmt.Errorf("fetch: reading the head: %w", headErr)
+	}
+	head = head[:n]
+	limit := c.capFor(resp.Header.Get("Content-Type"), head)
+	if resp.ContentLength > limit {
+		return nil, fmt.Errorf("%w: %d bytes declared, cap %d", ErrTooLarge, resp.ContentLength, limit)
 	}
 
 	tmp, err := os.CreateTemp("", "harbor-fetch-*")
 	if err != nil {
 		return nil, fmt.Errorf("fetch: temp file: %w", err)
 	}
+	if _, writeErr := tmp.Write(head); writeErr != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return nil, fmt.Errorf("fetch: temp file: %w", writeErr)
+	}
 	// One byte past the cap distinguishes "at the cap" from "over it".
-	written, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, c.maxBytes+1))
-	if copyErr == nil && written > c.maxBytes {
-		copyErr = fmt.Errorf("%w: more than %d bytes", ErrTooLarge, c.maxBytes)
+	written, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, limit-int64(len(head))+1))
+	written += int64(len(head))
+	if copyErr == nil && written > limit {
+		copyErr = fmt.Errorf("%w: more than %d bytes", ErrTooLarge, limit)
 	}
 	if copyErr == nil {
 		_, copyErr = tmp.Seek(0, io.SeekStart)

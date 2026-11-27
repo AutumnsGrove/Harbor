@@ -45,6 +45,11 @@ type Result struct {
 	Text     string
 	Markdown string
 
+	// PDF, when set, describes a PDF: how many pages it has, how much text it
+	// gave up, and whether it carried a text layer at all. It is nil for every
+	// other shape, so nothing else in the pipeline has to know about it.
+	PDF *PDFInfo
+
 	OG      OpenGraph
 	Details map[string]any
 }

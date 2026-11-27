@@ -8,6 +8,7 @@
   "CoverURL": "https://video.example/thumb.jpg",
   "Text": "A walk through the build, from an empty directory to a deployed image.",
   "Markdown": "A walk through the build, from an empty directory to a deployed image.",
+  "PDF": null,
   "OG": {
     "title": "Building a static site",
     "type": "video.other",

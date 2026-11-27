@@ -7,6 +7,7 @@
 package enrich
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -45,8 +47,10 @@ const (
 	// not prompts — no model ran — which is the point: the API badges a row by
 	// them and a manual retry clears them (design §6, issues #76, #79). The
 	// values live in model, because the badge is decided there too.
-	WallVersion = model.WallVersion
-	DeadVersion = model.DeadVersion
+	WallVersion     = model.WallVersion
+	DeadVersion     = model.DeadVersion
+	NoTextVersion   = model.NoTextVersion
+	TooLargeVersion = model.TooLargeVersion
 
 	// EmbeddingDims is pplx-embed-v1-0.6b's dimension (spike S5). A different
 	// model means changing this deliberately, not silently accepting a vector
@@ -81,7 +85,11 @@ type FetchedPage struct {
 	Body        io.ReadSeeker
 	URL         *url.URL
 	ContentType string
-	close       func() error
+	// Size is how many bytes Body holds, used by the PDF reader, which needs an
+	// offset-addressed view rather than a stream (issue #74). Zero is allowed:
+	// the reader measures the body itself in that case.
+	Size  int64
+	close func() error
 }
 
 // Close releases the page.
@@ -111,7 +119,56 @@ func (f HTTPFetcher) Fetch(ctx context.Context, rawURL string) (*FetchedPage, er
 	if err != nil {
 		return nil, err
 	}
-	return &FetchedPage{Body: page.Body, URL: page.URL, ContentType: page.ContentType, close: page.Close}, nil
+	return &FetchedPage{Body: page.Body, URL: page.URL, ContentType: page.ContentType, Size: page.Size, close: page.Close}, nil
+}
+
+// looksLikePDF reports whether the bytes start with %PDF-, and leaves the body
+// where it found it. The content type is not the test: a CDN that labels a paper
+// application/octet-stream, or sends nothing at all, still hands over a
+// document, and refusing it would fail the save for the wrong reason (issue
+// #74).
+func (p *FetchedPage) looksLikePDF() (bool, error) {
+	head := make([]byte, 5)
+	n, err := io.ReadFull(p.Body, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return false, fmt.Errorf("enrich: reading the head: %w", err)
+	}
+	if _, err := p.Body.Seek(0, io.SeekStart); err != nil {
+		return false, fmt.Errorf("enrich: rewinding: %w", err)
+	}
+	return extract.LooksLikePDF(head[:n]), nil
+}
+
+// pdf reads the document. The reader needs offsets, not a stream, and the body
+// is a temp file or a fake in memory; anything else is read into memory, which
+// the fetch cap already bounds.
+func (p *FetchedPage) pdf() (*extract.Result, error) {
+	name := ""
+	if p.URL != nil {
+		name = path.Base(p.URL.Path)
+	}
+	size := p.Size
+	if size <= 0 {
+		end, err := p.Body.Seek(0, io.SeekEnd)
+		if err != nil {
+			return nil, fmt.Errorf("enrich: sizing the document: %w", err)
+		}
+		size = end
+	}
+	if reader, ok := p.Body.(io.ReaderAt); ok {
+		return extract.PDF(reader, size, name)
+	}
+	// A body that cannot be addressed is read once and addressed in memory; the
+	// fetch cap bounds it, and the temp file the real fetcher hands over is
+	// already an *os.File.
+	if _, err := p.Body.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("enrich: rewinding the document: %w", err)
+	}
+	body, err := io.ReadAll(io.LimitReader(p.Body, size))
+	if err != nil {
+		return nil, fmt.Errorf("enrich: reading the document: %w", err)
+	}
+	return extract.PDF(bytes.NewReader(body), int64(len(body)), name)
 }
 
 // ClassifyInput is the model's view of the page for the kind decision.
@@ -286,6 +343,19 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 	if hasURL(item) {
 		page, err := e.Fetcher.Fetch(ctx, *item.URL)
 		if err != nil {
+			// A body over its cap is deterministic: no retry makes a 52 MB file
+			// smaller, so the row is filed with the number that refused it rather
+			// than parked in Needs attention forever (issue #74). The error text
+			// carries both the size and the cap.
+			if errors.Is(err, fetch.ErrTooLarge) {
+				if done, handled := e.tryVideoMetadata(ctx, item, nil, err); done || handled != nil {
+					return handled
+				}
+				return e.fileUnreadable(ctx, item, nil, refusal{
+					marker: TooLargeVersion,
+					reason: shorten(err, 200) + "; filed from what the save has, with no summary or tags",
+				})
+			}
 			cause := classifyFetchError(err)
 			// A video is still worth a real row even when its page refuses us;
 			// the zero-cost metadata endpoint is the better answer, so it is
@@ -305,11 +375,22 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 			base = &url.URL{}
 		}
 
-		// Three readable shapes, one refusal. A Markdown or plain-text body is read
+		// A PDF is recognised by its bytes before the content type is consulted:
+		// a document that arrives labelled octet-stream is still a document, and
+		// its reader is the only one that needs offsets rather than a stream.
+		isPDF, err := page.looksLikePDF()
+		if err != nil {
+			return permanent(err)
+		}
+
+		// Four readable shapes, one refusal. A Markdown or plain-text body is read
 		// as text instead of being fed to an HTML parser that would find no
-		// article in it (issue #73); anything else — a PDF, an image, a zip — is
-		// still a permanent failure until its own phase gives it a reader.
+		// article in it (issue #73), a PDF is read for its text layer (issue #74),
+		// and anything else — an image, a zip — is still a permanent failure until
+		// its own phase gives it a reader.
 		switch {
+		case isPDF:
+			extracted, err = page.pdf()
 		case extract.IsHTML(page.ContentType):
 			extracted, err = extract.HTML(page.Body, base)
 		case extract.IsDocument(page.ContentType):
@@ -322,11 +403,31 @@ func (e *Enricher) enrich(ctx context.Context, item model.Item) error {
 			return cause
 		}
 		if err != nil {
+			// A document that will not open is not a failed save, it is a save
+			// with nothing to read in it (issue #74). Everything else keeps the
+			// old rule: a page that will not parse can still be filed by hand or
+			// retried, and a silent pass would hide a real parser bug.
+			if isPDF {
+				return e.fileUnreadable(ctx, item, extracted, refusal{
+					marker: model.NoTextVersion,
+					reason: "the document could not be read (" + shorten(err, 120) + "); filed from its title, with no summary or tags",
+				})
+			}
 			cause := permanent(err)
 			if done, handled := e.tryVideoMetadata(ctx, item, extracted, cause); done || handled != nil {
 				return handled
 			}
 			return cause
+		}
+		// A document with no text layer is a scan, and a scan gets its own answer:
+		// filed ready and titled, with the reason said plainly, rather than a
+		// model call that would invent a summary of a title (issue #74). OCR is
+		// issue #99 and this row is what it will pick up.
+		if extracted != nil && extracted.PDF != nil && extracted.PDF.TextState == extract.TextStateEmpty {
+			return e.fileUnreadable(ctx, item, extracted, refusal{
+				marker: model.NoTextVersion,
+				reason: fmt.Sprintf("the document has no text layer: a scan of %d page(s); filed from its title, with no summary or tags until OCR lands (issue #99)", extracted.PDF.Pages),
+			})
 		}
 		// A wall can answer 200 with a document that has no text at all. For a
 		// video that is still recoverable from its metadata; for anything else,
