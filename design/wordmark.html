@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harbor wordmark: three directions</title>
+<style>
+@font-face{font-family:"Schibsted Grotesk";font-weight:400 700;src:url("../web/static/fonts/schibsted-grotesk-latin.woff2") format("woff2")}
+:root{
+  --bg:#091214; --surf:#0f1a1d; --surf2:#142428; --ink:#e8ece6; --mute:#8aa09b; --dim:#566d6d;
+  --acc:#ff5f93; --amb:#f2b866; --ok:#58d4a8;
+  --font:"Schibsted Grotesk",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--font);-webkit-font-smoothing:antialiased}
+main{max-width:1180px;margin:0 auto;padding:48px 36px 80px;display:grid;gap:28px}
+h1{font:600 28px/1.1 var(--font);letter-spacing:-.02em;margin:0}
+.lead{color:var(--mute);max-width:62ch;margin:0}
+.opt{background:var(--surf);border-radius:24px;padding:32px 36px;display:grid;grid-template-columns:1fr 280px;gap:32px;align-items:center}
+.opt .tag{color:var(--dim);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;margin:0 0 6px}
+.opt h2{font:600 18px/1.2 var(--font);margin:0 0 6px;letter-spacing:-.01em}
+.opt p.why{color:var(--mute);margin:0;max-width:48ch;font-size:13px}
+.stage{display:grid;place-items:center;height:170px;background:var(--bg);border-radius:18px}
+.small{display:flex;align-items:center;gap:18px;margin-top:18px;color:var(--mute);font-size:12px}
+.chip{display:grid;place-items:center;background:var(--bg);border-radius:12px;padding:12px 16px}
+.bar{display:flex;align-items:center;height:60px;background:var(--bg);border-radius:14px;padding:0 20px;gap:14px}
+.bar .fake{flex:1;height:34px;border-radius:99px;background:var(--surf);max-width:240px}
+
+/* ───── A: Lantern ───── */
+.a{display:inline-flex;align-items:center;gap:.34em;font:600 var(--s,56px)/1 var(--font);letter-spacing:-.035em;color:var(--ink)}
+.a svg{width:.98em;height:.98em;flex:none;overflow:visible}
+
+/* ───── B: the o is the light ───── */
+.b{display:inline-flex;align-items:baseline;font:600 var(--s,64px)/1 var(--font);letter-spacing:-.035em;color:var(--ink)}
+.b .o{display:inline-block;width:.56em;height:.56em;border-radius:50%;border:.115em solid currentColor;position:relative;margin:0 .035em 0 .02em;transform:translateY(.005em)}
+.b .o::after{content:"";position:absolute;left:50%;top:50%;width:.15em;height:.15em;margin:-.075em 0 0 -.075em;border-radius:50%;background:var(--amb);box-shadow:0 0 .32em .06em color-mix(in oklch,var(--amb) 70%,transparent)}
+
+/* ───── C: mooring H ───── */
+.c{display:inline-flex;align-items:center;gap:.3em;font:600 var(--s,56px)/1 var(--font);letter-spacing:-.03em;color:var(--ink)}
+.c svg{width:1em;height:1em;flex:none}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Harbor, three ways to sign it</h1>
+    <p class="lead">Each lockup is shown large, at nav-bar size beside the search field, and as the favicon at 16, 32 and 48 px. All three keep the teal-black ground; the light is warm because a harbour at dusk is lit, not neon.</p>
+  </header>
+
+  <!-- A -->
+  <section class="opt">
+    <div>
+      <p class="tag">A</p>
+      <h2>Lantern</h2>
+      <p class="why">A harbour light: an arched lantern with a lit core. The most literal and the most mark-like, it holds up as an app icon and gives the empty states a character to use.</p>
+      <div class="small">
+        <div class="bar">
+          <span class="a" style="--s:22px">
+            <svg viewBox="0 0 48 48" fill="none"><defs><radialGradient id="ga" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#f2b866" stop-opacity=".55"/><stop offset="1" stop-color="#f2b866" stop-opacity="0"/></radialGradient></defs><circle cx="24" cy="25" r="22" fill="url(#ga)"/><path d="M13 41V24a11 11 0 0 1 22 0v17M8 41h32" stroke="#e8ece6" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="26" r="4.6" fill="#f2b866"/></svg>
+            harbor
+          </span>
+          <span class="fake"></span>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="stage">
+        <span class="a" style="--s:58px">
+          <svg viewBox="0 0 48 48" fill="none"><defs><radialGradient id="ga2" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#f2b866" stop-opacity=".55"/><stop offset="1" stop-color="#f2b866" stop-opacity="0"/></radialGradient></defs><circle cx="24" cy="25" r="22" fill="url(#ga2)"/><path d="M13 41V24a11 11 0 0 1 22 0v17M8 41h32" stroke="#e8ece6" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="26" r="4.6" fill="#f2b866"/></svg>
+          harbor
+        </span>
+      </div>
+      <div class="small">
+        <span class="chip"><svg width="16" height="16" viewBox="0 0 48 48" fill="none"><path d="M13 41V24a11 11 0 0 1 22 0v17M8 41h32" stroke="#e8ece6" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="26" r="5" fill="#f2b866"/></svg></span>
+        <span class="chip"><svg width="32" height="32" viewBox="0 0 48 48" fill="none"><path d="M13 41V24a11 11 0 0 1 22 0v17M8 41h32" stroke="#e8ece6" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="26" r="4.8" fill="#f2b866"/></svg></span>
+        <span class="chip"><svg width="48" height="48" viewBox="0 0 48 48" fill="none"><path d="M13 41V24a11 11 0 0 1 22 0v17M8 41h32" stroke="#e8ece6" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="26" r="4.6" fill="#f2b866"/></svg></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- B -->
+  <section class="opt">
+    <div>
+      <p class="tag">B</p>
+      <h2>The o is the light</h2>
+      <p class="why">No icon. The second o in "harbor" becomes a ring with a lit core, so the name carries the whole idea. Quietest of the three; favicon is the ring alone.</p>
+      <div class="small">
+        <div class="bar">
+          <span class="b" style="--s:22px">harb<span class="o"></span>r</span>
+          <span class="fake"></span>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="stage"><span class="b" style="--s:68px">harb<span class="o"></span>r</span></div>
+      <div class="small">
+        <span class="chip"><svg width="16" height="16" viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="#e8ece6" stroke-width="7"/><circle cx="24" cy="24" r="5.4" fill="#f2b866"/></svg></span>
+        <span class="chip"><svg width="32" height="32" viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="#e8ece6" stroke-width="6.4"/><circle cx="24" cy="24" r="5.2" fill="#f2b866"/></svg></span>
+        <span class="chip"><svg width="48" height="48" viewBox="0 0 48 48"><circle cx="24" cy="24" r="16" fill="none" stroke="#e8ece6" stroke-width="6"/><circle cx="24" cy="24" r="5" fill="#f2b866"/></svg></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- C -->
+  <section class="opt">
+    <div>
+      <p class="tag">C</p>
+      <h2>Mooring H</h2>
+      <p class="why">Two quay posts and a line slung between them make the H. It reads as a letter first and a harbour second, and the magenta rope keeps the brand's "act" colour in the mark.</p>
+      <div class="small">
+        <div class="bar">
+          <span class="c" style="--s:22px">
+            <svg viewBox="0 0 48 48" fill="none"><path d="M12 9v30M36 9v30" stroke="#e8ece6" stroke-width="5.2" stroke-linecap="round"/><path d="M12 21c4 11 20 11 24 0" stroke="#ff5f93" stroke-width="4" stroke-linecap="round"/></svg>
+            harbor
+          </span>
+          <span class="fake"></span>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="stage">
+        <span class="c" style="--s:58px">
+          <svg viewBox="0 0 48 48" fill="none"><path d="M12 9v30M36 9v30" stroke="#e8ece6" stroke-width="5.2" stroke-linecap="round"/><path d="M12 21c4 11 20 11 24 0" stroke="#ff5f93" stroke-width="4" stroke-linecap="round"/></svg>
+          harbor
+        </span>
+      </div>
+      <div class="small">
+        <span class="chip"><svg width="16" height="16" viewBox="0 0 48 48" fill="none"><path d="M12 9v30M36 9v30" stroke="#e8ece6" stroke-width="6.4" stroke-linecap="round"/><path d="M12 21c4 11 20 11 24 0" stroke="#ff5f93" stroke-width="5.2" stroke-linecap="round"/></svg></span>
+        <span class="chip"><svg width="32" height="32" viewBox="0 0 48 48" fill="none"><path d="M12 9v30M36 9v30" stroke="#e8ece6" stroke-width="5.6" stroke-linecap="round"/><path d="M12 21c4 11 20 11 24 0" stroke="#ff5f93" stroke-width="4.4" stroke-linecap="round"/></svg></span>
+        <span class="chip"><svg width="48" height="48" viewBox="0 0 48 48" fill="none"><path d="M12 9v30M36 9v30" stroke="#e8ece6" stroke-width="5.2" stroke-linecap="round"/><path d="M12 21c4 11 20 11 24 0" stroke="#ff5f93" stroke-width="4" stroke-linecap="round"/></svg></span>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>
