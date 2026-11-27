@@ -487,8 +487,14 @@ into a 300 MB OOM on this box. It is a *separate stage* from ingest (§5 job lif
 Per job:
 
 1. **Fetch** the URL through the SSRF guard (§3 access control) with a `Content-Length` cap
-   (~5 MB) and a timeout. Stream to a temp file.
-2. **Parse from disk** with `go-readability` + `goquery` so peak RSS stays flat. A 4 MB HTML doc
+   and a timeout, both chosen by what answered: **5 MB** for a page, **40 MB** for a document,
+   decided from the `Content-Type` header before a byte of the body is read (issue #74 — arxiv alone
+   will never fit under the page cap, and the ten rows that failed on it declared up to 38.7 MB).
+   Stream to a temp file, so the cap bounds disk and time rather than RSS.
+2. **Parse from disk** with `go-readability` + `goquery` so peak RSS stays flat. A PDF is parsed the
+   same way, from the same temp file, by `ledongthuc/pdf` addressed by offset (S6: ~50 ms/page, flat
+   ~20 MB): its text layer becomes `content_text`, and a document with no text layer is filed ready
+   with a badge instead of failing (issue #74; OCR is #99). A 4 MB HTML doc
    parsed into a DOM is 40–80 MB resident — the only real memory spike in the system. Store the
    readable text (`content_text`) and Markdown (`content_md`, what the reader renders), and parse
    JSON-LD/microdata (schema.org Recipe, Product, Book, Movie, Place, VideoObject,

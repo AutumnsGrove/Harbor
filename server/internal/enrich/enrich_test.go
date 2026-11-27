@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1228,5 +1230,171 @@ func Test503KeepsTheThreeTryBudget(t *testing.T) {
 	}
 	if !retriesRateLimited(&fetch.HTTPError{Status: 429}) {
 		t.Error("a 429 lost its rate-limit budget")
+	}
+}
+
+// --- documents (issue #74) ------------------------------------------------
+
+// pdfFetcher serves a real PDF from the extractor's own testdata, so the
+// pipeline meets bytes a PDF parser accepts rather than a shape invented here.
+func pdfFetcher(t *testing.T, fixture, contentType, rawURL string) *fakeFetcher {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("..", "extract", "testdata", fixture))
+	if err != nil {
+		t.Fatalf("fixture %s: %v", fixture, err)
+	}
+	final, _ := url.Parse(rawURL)
+	return &fakeFetcher{body: string(body), contentType: contentType, final: final}
+}
+
+// A PDF with a text layer is an ordinary document now: the text reaches the
+// model and the item is enriched, rather than parked in Needs attention with
+// "content type application/pdf is not HTML".
+func TestAPDFWithATextLayerIsReadAndEnriched(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	it := createItem(t, s, store.ItemInput{ID: "a", URL: ptr("https://arxiv.org/pdf/1706.03762")})
+
+	// The content type is deliberately wrong: a CDN that labels a paper
+	// application/octet-stream still hands over a document, and the bytes decide.
+	f := pdfFetcher(t, "text-page.pdf", "application/octet-stream", "https://arxiv.org/pdf/1706.03762")
+	d, w, em := &fakeDecider{result: Classification{Kind: model.KindPaper}},
+		&fakeWriter{result: Content{Title: "Attention Is All You Need", Summary: "A paper.", Tags: []string{"ml"}}},
+		&fakeEmbedder{}
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, it); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if d.calls != 1 || w.calls != 1 {
+		t.Fatalf("model calls: decide %d, write %d; a readable document should reach both", d.calls, w.calls)
+	}
+	if !strings.Contains(d.last.Text, "Attention is") && !strings.Contains(d.last.Text, "Attention is All") {
+		t.Errorf("the classifier did not see the document's text: %q", d.last.Text)
+	}
+
+	after, err := s.GetItem(ctx, it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != model.StateReady {
+		t.Errorf("state = %q, want ready", after.State)
+	}
+	if after.PromptVersion == NoTextVersion {
+		t.Error("a readable document was badged as having no text")
+	}
+	if after.ContentText == "" {
+		t.Error("the document's text was not stored, so it can never be searched")
+	}
+}
+
+// A scan is the case issue #74 splits out: it is not a failure and it is not
+// worth a model call — the model would write a summary of a title. The row is
+// filed ready, titled, badged, and left for the OCR path (#99).
+func TestAScannedPDFIsFiledNotFailedAndCostsNothing(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	it := createItem(t, s, store.ItemInput{ID: "a", URL: ptr("https://example.com/scanned-report.pdf")})
+
+	f := pdfFetcher(t, "scan-page.pdf", "application/pdf", "https://example.com/scanned-report.pdf")
+	_, d, w, em := happyFakes()
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, it); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if d.calls+w.calls+em.calls != 0 {
+		t.Errorf("a scan cost model calls: decide %d, write %d, embed %d", d.calls, w.calls, em.calls)
+	}
+
+	after, err := s.GetItem(ctx, it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != model.StateReady {
+		t.Errorf("state = %q, want ready: a scan is not a failed save", after.State)
+	}
+	if after.PromptVersion != NoTextVersion {
+		t.Errorf("prompt_version = %q, want %q (the marker the badge reads)", after.PromptVersion, NoTextVersion)
+	}
+	if !strings.Contains(after.ExtractError, "no text layer") {
+		t.Errorf("extract_error = %q, want the reason it is thin", after.ExtractError)
+	}
+	if after.ExtractError != "" && strings.Contains(after.ExtractError, "issue #99") == false {
+		t.Error("the row should say where OCR will pick it up")
+	}
+	if after.Title == "" || after.Title == *after.URL {
+		t.Errorf("title = %q, want the document's own name", after.Title)
+	}
+	failed, err := s.FailedItems(ctx, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 0 {
+		t.Errorf("FailedItems = %v, want the scan out of Needs attention", failed)
+	}
+}
+
+// A PDF that will not open is the same shape as a scan: her save, nothing to
+// read in it, and a reason that names what happened.
+func TestAnUnreadablePDFIsFiledWithItsReason(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	it := createItem(t, s, store.ItemInput{ID: "a", URL: ptr("https://example.com/broken.pdf")})
+
+	final, _ := url.Parse("https://example.com/broken.pdf")
+	f := &fakeFetcher{body: "%PDF-1.5\n1 0 obj\n<< /Type /Catalog", contentType: "application/pdf", final: final}
+	_, d, w, em := happyFakes()
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, it); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	after, err := s.GetItem(ctx, it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != model.StateReady || after.PromptVersion != NoTextVersion {
+		t.Errorf("state/marker = %q/%q, want ready/%s", after.State, after.PromptVersion, NoTextVersion)
+	}
+	if !strings.Contains(after.ExtractError, "could not be read") {
+		t.Errorf("extract_error = %q, want the parse failure named", after.ExtractError)
+	}
+	if d.calls != 0 {
+		t.Error("an unreadable document was sent to the model anyway")
+	}
+}
+
+// A document past its cap is the last shape that used to park in Needs
+// attention forever: no retry makes a 52 MB file smaller, so the row is filed
+// with the numbers that refused it (issue #74).
+func TestADocumentOverTheCapIsFiledWithTheNumbers(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	it := createItem(t, s, store.ItemInput{ID: "a", URL: ptr("https://cdn.example/big-report.pdf")})
+
+	f, d, w, em := happyFakes()
+	f.err = fmt.Errorf("%w: %d bytes declared, cap %d", fetch.ErrTooLarge, 52<<20, 40<<20)
+
+	if err := newTestEnricher(t, s, f, d, w, em).Process(ctx, it); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if d.calls+w.calls+em.calls != 0 {
+		t.Errorf("an over-cap fetch cost model calls: decide %d, write %d, embed %d", d.calls, w.calls, em.calls)
+	}
+	after, err := s.GetItem(ctx, it.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != model.StateReady || after.PromptVersion != TooLargeVersion {
+		t.Errorf("state/marker = %q/%q, want ready/%s", after.State, after.PromptVersion, TooLargeVersion)
+	}
+	// Both numbers, so the next reader does not have to guess which cap applied.
+	if !strings.Contains(after.ExtractError, "54525952") || !strings.Contains(after.ExtractError, "41943040") {
+		t.Errorf("extract_error = %q, want the size and the cap", after.ExtractError)
+	}
+	failed, err := s.FailedItems(ctx, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failed) != 0 {
+		t.Errorf("FailedItems = %v, want the over-cap row out of Needs attention", failed)
 	}
 }

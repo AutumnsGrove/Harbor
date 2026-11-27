@@ -30,10 +30,22 @@
 
 	const isText = $derived(item.kind === 'note' || item.kind === 'tweet');
 
-	// A save the page would not give up is filed, not failed (issue #76): the
-	// card says why it is thin instead of looking like a broken fetch. Walled is
-	// the site refusing this client; Link dead is the page being gone.
-	const badge = $derived(item.walled ? 'Walled' : item.linkStatus === 'dead' ? 'Link dead' : '');
+	// A save the page would not give up is filed, not failed (issues #74, #76):
+	// the card says why it is thin instead of looking like a broken fetch.
+	// Walled is the site refusing this client, Link dead is the page being gone,
+	// No text is a document that was read and had nothing in it, and Too large is
+	// a body past its cap — which no retry makes smaller.
+	const badge = $derived(
+		item.walled
+			? 'Walled'
+			: item.linkStatus === 'dead'
+				? 'Link dead'
+				: item.noText
+					? 'No text'
+					: item.tooLarge
+						? 'Too large'
+						: ''
+	);
 	const host = $derived(hostOf(item.url));
 	const age = $derived(relative(item.savedAt));
 	const excerpt = $derived(firstLine(item.note || item.summary));

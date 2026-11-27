@@ -21,6 +21,7 @@ import (
 	"github.com/AutumnsGrove/Harbor/server/internal/datalock"
 	"github.com/AutumnsGrove/Harbor/server/internal/enrich"
 	enrichnova "github.com/AutumnsGrove/Harbor/server/internal/enrich/nova"
+	"github.com/AutumnsGrove/Harbor/server/internal/extract"
 	"github.com/AutumnsGrove/Harbor/server/internal/fetch"
 	"github.com/AutumnsGrove/Harbor/server/internal/httpapi"
 	"github.com/AutumnsGrove/Harbor/server/internal/queue"
@@ -109,8 +110,11 @@ func enrichmentProcessor(cfg build.Config, library *store.Store, log *slog.Logge
 	// The fetcher presents a browser User-Agent (design §6, open-questions P1):
 	// the build's own name is what 40 of the library's saves were being refused
 	// for, and a page that then serves no readable text files as a wall.
+	// Documents get their own body cap: 5 MB is right for a page and wrong for
+	// a paper, and the PDF reader is the only reason to hold a bigger one
+	// (design §6, issue #74).
 	pipeline := enrich.New(
-		enrich.HTTPFetcher{Client: fetch.New()},
+		enrich.HTTPFetcher{Client: fetch.New(fetch.WithDocumentCap(extract.IsPDF))},
 		novaClient, novaClient, novaClient, library, log,
 	)
 	pipeline.PromptVersion = enrichnova.PromptVersion

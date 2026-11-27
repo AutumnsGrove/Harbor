@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -364,5 +365,87 @@ func TestTheDefaultUserAgentIsABrowser(t *testing.T) {
 	}
 	if !strings.HasPrefix(seen, "Mozilla/5.0") {
 		t.Errorf("User-Agent = %q, want a Mozilla/5.0 shape", seen)
+	}
+}
+
+// --- the document cap (issue #74) ----------------------------------------
+
+// A paper is not a page: the same server, the same bytes, two ceilings. The ten
+// rows on the box that failed on the 5 MB cap declared up to 38.7 MB, so without
+// this the PDF reader never gets to see them.
+func TestADocumentGetsItsOwnCapAndAPageDoesNot(t *testing.T) {
+	body := strings.Repeat("x", 4096)
+	serve := func(contentType string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", contentType)
+			fmt.Fprint(w, body)
+		}))
+	}
+	isPDF := func(ct string) bool { return strings.HasPrefix(ct, "application/pdf") }
+
+	pdf := serve("application/pdf")
+	defer pdf.Close()
+	// 4 KB against a 1 KB page cap: refused as a page, accepted as a document.
+	page, err := newTestClient(t, WithMaxBytes(1024), WithDocumentCap(isPDF, 1<<20)).Get(context.Background(), pdf.URL)
+	if err != nil {
+		t.Fatalf("a 4 KB PDF was refused: %v", err)
+	}
+	defer page.Close()
+	if page.Size != int64(len(body)) {
+		t.Errorf("size = %d, want %d", page.Size, len(body))
+	}
+
+	html := serve("text/html; charset=utf-8")
+	defer html.Close()
+	if _, err := newTestClient(t, WithMaxBytes(1024), WithDocumentCap(isPDF, 1<<20)).Get(context.Background(), html.URL); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("a 4 KB page got the document cap: %v", err)
+	}
+}
+
+// The refusal has to name the ceiling that actually applied, or the next person
+// reads "cap 5242880" on a document that was measured against 40 MB.
+func TestTheDocumentCapAppearsInTheRefusal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		// Declared explicitly, so the refusal happens before a byte is read: that
+		// is the message with both numbers in it.
+		w.Header().Set("Content-Length", "4096")
+		fmt.Fprint(w, strings.Repeat("x", 4096))
+	}))
+	defer server.Close()
+
+	_, err := newTestClient(t,
+		WithDocumentCap(func(ct string) bool { return ct == "application/pdf" }, 2048),
+	).Get(context.Background(), server.URL)
+	if !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("Get = %v, want ErrTooLarge", err)
+	}
+	if !strings.Contains(err.Error(), "cap 2048") {
+		t.Errorf("the refusal does not name the cap that applied: %v", err)
+	}
+}
+
+// No predicate means one ceiling for everything, which is what every caller
+// before issue #74 had.
+func TestWithoutADocumentCapEverythingUsesThePageCap(t *testing.T) {
+	c := New(WithMaxBytes(64))
+	if got := c.capFor("application/pdf"); got != 64 {
+		t.Errorf("capFor(pdf) = %d with no document rule, want the page cap", got)
+	}
+}
+
+// A sinkholed answer is the household blocklist talking, not a private address
+// (issue #77): the message is the whole value of the distinction.
+func TestASinkholedAnswerSaysTheResolverFilteredIt(t *testing.T) {
+	err := checkIP(net.ParseIP("0.0.0.0"))
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("checkIP(0.0.0.0) = %v, want ErrBlocked", err)
+	}
+	if !strings.Contains(err.Error(), "resolver") {
+		t.Errorf("0.0.0.0 does not name the resolver: %v", err)
+	}
+	// A private address is still just not public, and still says so.
+	if err := checkIP(net.ParseIP("192.168.1.1")); err == nil || strings.Contains(err.Error(), "resolver") {
+		t.Errorf("a private address was blamed on the resolver: %v", err)
 	}
 }

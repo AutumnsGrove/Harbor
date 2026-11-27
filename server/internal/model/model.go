@@ -61,8 +61,10 @@ type Item struct {
 // page. They are not prompts — no model ran — which is the point: the API badges
 // a row by them and a manual retry clears them (design §6, issues #76, #79).
 const (
-	WallVersion = "wall.v1" // the site refused this client (401/403/451)
-	DeadVersion = "dead.v1" // the page is gone (404/410, or the host no longer resolves)
+	WallVersion     = "wall.v1"      // the site refused this client (401/403/451)
+	DeadVersion     = "dead.v1"      // the page is gone (404/410, or the host no longer resolves)
+	NoTextVersion   = "no-text.v1"   // a document was read and had no text layer, or would not open (issue #74)
+	TooLargeVersion = "too-large.v1" // the body was over its cap, which no retry changes (issue #74)
 )
 
 // Link statuses: what can be said about a URL's existence, and nothing about its
@@ -76,6 +78,16 @@ const (
 // Walled reports a row filed because the site refused this client, rather than
 // because the page could not be read. It is the card's amber badge.
 func (i Item) Walled() bool { return i.PromptVersion == WallVersion }
+
+// NoText reports a document that was read and gave up nothing: a scan with no
+// text layer, or a file that would not open. It is a badge, not a failure
+// (issue #74) — the save is hers and the row is ready.
+func (i Item) NoText() bool { return i.PromptVersion == NoTextVersion }
+
+// TooLarge reports a body over its cap — a document past 40 MB, or a page past
+// 5 MB. Deterministic, so it is filed rather than retried, and the reason names
+// both numbers (issue #74).
+func (i Item) TooLarge() bool { return i.PromptVersion == TooLargeVersion }
 
 // Dead reports a link known to be gone. Phase 11's checker owns the verdict
 // after enrichment records it, so it can also come back to `ok`.

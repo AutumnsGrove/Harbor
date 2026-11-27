@@ -22,12 +22,16 @@ import (
 	"time"
 )
 
-// Defaults are design.md §6's numbers: a 5 MB cap and a 20 s timeout.
+// Defaults are design.md §6's numbers: a 5 MB cap and a 20 s timeout for a
+// page, and a 40 MB one for a document, because a 5 MB ceiling is right for a
+// page and wrong for a paper — arxiv alone will never fit under it, and the ten
+// rows on the box that failed on the cap declared up to 38.7 MB (issue #74).
 const (
-	DefaultMaxBytes     int64 = 5 << 20
-	DefaultTimeout            = 20 * time.Second
-	DefaultMaxRedirects       = 5
-	dialTimeout               = 10 * time.Second
+	DefaultMaxBytes         int64 = 5 << 20
+	DefaultDocumentMaxBytes int64 = 40 << 20
+	DefaultTimeout                = 20 * time.Second
+	DefaultMaxRedirects           = 5
+	dialTimeout                   = 10 * time.Second
 )
 
 var (
@@ -129,6 +133,13 @@ type Client struct {
 	maxRedirects int
 	userAgent    string
 
+	// documentMaxBytes is the ceiling for a content type isDocument accepts,
+	// and isDocument is the caller's rule rather than this package's: what
+	// counts as a document is the extractor's business, and one predicate is
+	// better than two that drift. A nil isDocument means one cap for everything.
+	documentMaxBytes int64
+	isDocument       func(contentType string) bool
+
 	// allowUnsafe skips both the URL check and the dial-time IP check. It is
 	// only ever set by tests, which serve pages from 127.0.0.1; production has
 	// no option for it. TestDefaultClientBlockLocalhost proves the default.
@@ -145,6 +156,30 @@ func WithMaxBytes(n int64) Option {
 			c.maxBytes = n
 		}
 	}
+}
+
+// WithDocumentCap raises the cap for the content types f accepts to
+// DefaultDocumentMaxBytes, or to n when n is positive.
+func WithDocumentCap(f func(contentType string) bool, n ...int64) Option {
+	return func(c *Client) {
+		if f == nil {
+			return
+		}
+		c.isDocument = f
+		c.documentMaxBytes = DefaultDocumentMaxBytes
+		if len(n) > 0 && n[0] > 0 {
+			c.documentMaxBytes = n[0]
+		}
+	}
+}
+
+// capFor is the byte ceiling for one response. The content type is a header, so
+// this is decided before a byte of the body is read.
+func (c *Client) capFor(contentType string) int64 {
+	if c.isDocument != nil && c.isDocument(contentType) {
+		return c.documentMaxBytes
+	}
+	return c.maxBytes
 }
 
 // WithTimeout sets the whole-request timeout.
@@ -228,7 +263,9 @@ func (c *Client) Get(ctx context.Context, rawURL string) (*Page, error) {
 		return nil, fmt.Errorf("%w: %v", ErrUnsupportedURL, err)
 	}
 	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.1")
+	// A PDF is asked for explicitly, because a save that points at one should get
+	// the document rather than a preview page or a 406 (issue #74).
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.8,*/*;q=0.1")
 	req.Header.Set("Accept-Language", "en;q=0.9,*;q=0.5")
 
 	resp, err := c.http.Do(req)
@@ -247,9 +284,11 @@ func (c *Client) Get(ctx context.Context, rawURL string) (*Page, error) {
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &HTTPError{URL: resp.Request.URL.String(), Status: resp.StatusCode}
 	}
-	// A declared length over the cap is refused without reading a byte.
-	if resp.ContentLength > c.maxBytes {
-		return nil, fmt.Errorf("%w: %d bytes declared, cap %d", ErrTooLarge, resp.ContentLength, c.maxBytes)
+	// A declared length over the cap is refused without reading a byte. The cap
+	// depends on what answered: a paper is not a page.
+	limit := c.capFor(resp.Header.Get("Content-Type"))
+	if resp.ContentLength > limit {
+		return nil, fmt.Errorf("%w: %d bytes declared, cap %d", ErrTooLarge, resp.ContentLength, limit)
 	}
 
 	tmp, err := os.CreateTemp("", "harbor-fetch-*")
@@ -257,9 +296,9 @@ func (c *Client) Get(ctx context.Context, rawURL string) (*Page, error) {
 		return nil, fmt.Errorf("fetch: temp file: %w", err)
 	}
 	// One byte past the cap distinguishes "at the cap" from "over it".
-	written, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, c.maxBytes+1))
-	if copyErr == nil && written > c.maxBytes {
-		copyErr = fmt.Errorf("%w: more than %d bytes", ErrTooLarge, c.maxBytes)
+	written, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, limit+1))
+	if copyErr == nil && written > limit {
+		copyErr = fmt.Errorf("%w: more than %d bytes", ErrTooLarge, limit)
 	}
 	if copyErr == nil {
 		_, copyErr = tmp.Seek(0, io.SeekStart)

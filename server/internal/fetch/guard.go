@@ -84,7 +84,15 @@ func checkIP(ip net.IP) error {
 	if ip == nil {
 		return fmt.Errorf("%w: address did not resolve to an IP", ErrBlocked)
 	}
-	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() ||
+	// 0.0.0.0 is the answer a filtering resolver gives — AdGuard and its
+	// relatives rewrite a blocked A record to it — and it is a different thing
+	// from a private address. Saying so is the difference between a one-line
+	// diagnosis and an hour spent reading this guard for a bug that is not here
+	// (issue #77).
+	if ip.IsUnspecified() {
+		return fmt.Errorf("%w: the local resolver answered %s, which is a filtered domain rather than a public address", ErrBlocked, ip)
+	}
+	if ip.IsLoopback() || ip.IsMulticast() ||
 		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
 		return fmt.Errorf("%w: %s is not a public address", ErrBlocked, ip)
 	}

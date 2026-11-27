@@ -70,6 +70,20 @@ describe('Card', () => {
 		expect(container.querySelector('.flag')?.textContent?.trim()).toBe('Link dead');
 	});
 
+	// Issue #74: a document with no text layer, and a body past its cap, are
+	// both filed rather than failed — and the card says which kind of thin.
+	it('badges a document with no text layer', () => {
+		const { container } = render(Card, { item: item({ noText: true }) });
+
+		expect(container.querySelector('.flag')?.textContent?.trim()).toBe('No text');
+	});
+
+	it('badges a body over its cap', () => {
+		const { container } = render(Card, { item: item({ tooLarge: true }) });
+
+		expect(container.querySelector('.flag')?.textContent?.trim()).toBe('Too large');
+	});
+
 	it('says nothing when the page was readable', () => {
 		const { container } = render(Card, { item: item() });
 

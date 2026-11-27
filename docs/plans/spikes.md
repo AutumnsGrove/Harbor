@@ -18,7 +18,7 @@ one gates and the pass condition that has to be met.
 | S3 | Brute-force vector cache | phase 10 exit | 90 min | pending |
 | S4 | Browser Rendering on the free plan | phase 11 exit | 2 h | pending |
 | S5 | Nova `embed` live call | phase 3 smoke / phase 10 exit | 45 min | **pass** |
-| S6 | PDF text extraction in Go | phase 6 exit | 2 h | pending |
+| S6 | PDF text extraction in Go | phase 6 exit | 2 h | **pass** — ledongthuc/pdf + our walker; OCR split to #99 |
 | S7 | Port 8895 free | phase 0 start | 5 min | **changed-plan → 8897** |
 | S8 | Video transcript source | phase 7 exit | 90 min | pending |
 | S9 | Real Raindrop export sample | phase 5 start | 30 min | **pass, plan corrected** |
@@ -294,6 +294,49 @@ decision in design.md §6, not a silent substitution.
 
 **Also record:** the chosen library, the scan threshold as a *config default* (e.g. "fewer than 50
 chars/page over ≥3 pages"), and the per-document OCR page cap.
+
+**Verdict (2026-11-27): pass — `github.com/ledongthuc/pdf` with our own walker, and the OCR half
+moves to issue #99.**
+**What happened:** three real documents, measured on this MacBook Air with Go 1.27.4. A 15-page arxiv
+paper (`1706.03762v7`, 2.1 MB, text layer), its own 15 pages rendered at 150 dpi and re-assembled as
+an image-only PDF (3.8 MB — the shape a scanner produces), the 100-page GPT-4 report (5.2 MB), a
+31 MB 40-page image-only file, a 20 KB truncation and 42 bytes of not-a-PDF.
+
+| library | 15-page paper | image-only 15 pages | 100 pages, 5.2 MB | malformed |
+|---|---|---|---|---|
+| `ledongthuc/pdf` `GetPlainText` | 32,387 chars, 0.02 s, 18 MB — **no spaces at all** | 0 chars | — | clean error |
+| `ledongthuc/pdf` + gap walker | 38,620 chars, 2,575/page, 0.63 s, 20 MB | **0 chars** | 110,579 chars, 1.73 s, 19.8 MB | clean error, 0.00 s |
+| `rsc.io/pdf` v0.1.1 | **panics**: `malformed PDF: reading at offset 0: stream not present` | 0 chars | — | — |
+| `pdfcpu` v0.16.4 | 64,071 chars of raw content streams (`(Pro)15(vided)-250(prop)`), 0.96 s, 52.6 MB | 0 chars | 0.10 s, 35.6 MB | clean error |
+
+`GetPlainText` returns "Providedproperattributionisprovided" because these files separate words
+with kerning offsets, not space glyphs. The walker uses the glyph positions the library already
+computes: a gap wider than a fifth of the font size is a space, a jump in Y is a newline, and a run
+that *is* a space glyph counts as one. That recovered "Provided proper attribution is provided…"
+and `grep -ci` found 10 of 10 chosen phrases in the 15-page text and 6 of 8 in the 100-page one (the
+two misses are phrases the report does not use, checked by eye).
+
+`pdfcpu` is not a text extractor: it hands back content streams, so it needs its own Tj/TJ
+interpreter and font decoding — the work ledong has already done — for 2–8× the time, 2–3× the RSS,
+and a dependency tree that pulls in TIFF, YAML, WebP and `x/crypto`. `rsc.io/pdf` is disqualified by
+the panic: a library that panics on a modern arxiv file cannot run in a background worker, and the
+reader keeps a `recover` anyway for exactly that reason.
+
+Bounds, from the same runs: about 50 ms per page and a flat ~20 MB of RSS from 5 to 100 pages and
+from 2 to 31 MB, because the parser reads by offset and never holds the document. 150 pages is the
+cap (≈6 s); a longer file is truncated, not refused.
+
+Scan threshold: total separation — 0 characters per page against 1,106–3,201 — so the threshold is
+`ScanCharsPerPage = 50` over at least `ScanPages = 3` pages, or empty text at any length. A one-page
+flyer with 40 readable characters stays a document.
+
+**The OCR half did not need this spike's verdict and does not get it here.** No pure-Go library
+rasterises pages: the choice is poppler in the image (+90–120 MB on a 6.9 MB distroless image, on a
+box with 600 MB free) or cgo/commercial. OpenRouter will parse a PDF server-side for *any* model, which
+needs no rasteriser at all, but Nova cannot carry a document part yet
+([nova#153](https://github.com/AutumnsGrove/nova/issues/153)). Until one of those lands, a scan is
+filed ready with a badge and no text. That is issue #99, and the per-document OCR page cap is 10
+when it lands (open-questions J4).
 
 ---
 

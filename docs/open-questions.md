@@ -338,10 +338,18 @@ search page.
 Multi-select with a bulk bar: **Delete, Tag, Add to Space, Refresh**. Long-press on mobile. Built
 for cleaning up the Raindrop import.
 
-### J4. ~~PDFs and documents~~ — **settled**
-Local text-layer extraction for FTS5 and embeddings. If the text layer is empty or tiny compared
-to the page count, OCR the first ~10 pages with `deepseek/deepseek-v4.1-flash-1017`, capped per
-document. PDF archives stay on demand.
+### J4. ~~PDFs and documents~~ — **settled; the text layer is built, the OCR is #99**
+Local text-layer extraction for FTS5 and embeddings, by `github.com/ledongthuc/pdf` with Harbor's own
+gap-aware walker — spike S6's verdict, with the numbers in [spikes.md](plans/spikes.md#s6--pdf-text-extraction-in-pure-go).
+A document under 50 characters per page over at least 3 pages, or with no text at all, is filed ready
+with a badge and no model call (issue #74).
+
+If the text layer is empty or tiny compared to the page count, OCR the first ~10 pages with
+`deepseek/deepseek-v4.1-flash-1017`, capped per document. **Not built, and not buildable as written:**
+no pure-Go library rasterises a PDF page, so "OCR the first N pages" needs poppler in the image or a
+page renderer as a dependency, and OpenRouter's own PDF parsing needs a document part Nova does not
+carry yet ([nova#153](https://github.com/AutumnsGrove/nova/issues/153)). Issue #99 holds the decision.
+PDF archives stay on demand.
 
 ### J5. ~~Tag management~~ — **settled: full manager + AI normalization**
 - On write: trim, collapse whitespace, lowercase, and **reuse an existing canonical tag** when one
