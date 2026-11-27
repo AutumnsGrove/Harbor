@@ -166,7 +166,9 @@ func TestDescribeNamesWhyAnAnswerIsUnusable(t *testing.T) {
 func TestDescribeRefusesAnImageTooLargeToSend(t *testing.T) {
 	chat := &scriptedChat{answers: []scriptedAnswer{{content: goodVision, finish: "stop"}}}
 	input := visionInput()
-	input.Image = make([]byte, visionMaxImageBytes+1)
+	// One byte over what base64 can carry: the limit is on the encoded body, so
+	// the raw ceiling is three quarters of it.
+	input.Image = make([]byte, visionMaxEncodedBytes/4*3+1)
 	_, err := visionClient(chat, nil).Describe(context.Background(), input)
 	if err == nil {
 		t.Fatal("an oversized image was sent")

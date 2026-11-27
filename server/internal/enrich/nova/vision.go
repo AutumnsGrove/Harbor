@@ -34,9 +34,16 @@ const (
 	// budget would truncate the transcription rather than the description.
 	visionMaxTokens = 3000
 
-	// visionMaxImageBytes is the provider's own ceiling for an inline image. The
-	// store's 25 MB is about disk; this is about what one request body can be.
-	visionMaxImageBytes = 4 << 20
+	// visionMaxEncodedBytes is the ceiling for one request body, and the body
+	// carries the image base64-encoded. The store's 25 MB is about disk; this is
+	// about what a single request can be.
+	//
+	// It is deliberately the *encoded* number: base64 is a third larger than the
+	// bytes it carries, so a raw ceiling of the same figure would let a 4 MB image
+	// become a 5.3 MB body and fail at the provider instead of here. The raw limit
+	// is derived from it (review asked which side the provider measures, and the
+	// answer is that both fit if the raw size is three quarters).
+	visionMaxEncodedBytes = 4 << 20
 
 	// visionTagMin and visionTagMax are the range the prompt asks for. Fewer than
 	// three is a thin answer; more than six is a tag cloud.
@@ -78,11 +85,13 @@ func (c *Client) Describe(ctx context.Context, input enrich.VisionInput) (enrich
 	if len(input.Image) == 0 {
 		return enrich.Vision{}, errors.New("nova vision: no image")
 	}
-	if len(input.Image) > visionMaxImageBytes {
+	// Three quarters of the body ceiling: 4 MB of base64 carries 3 MB of bytes.
+	if len(input.Image) > visionMaxEncodedBytes/4*3 {
 		// Not retried: the same bytes are the same size next time. The caller
 		// stores the original and badges it, which is the documented fallback.
-		return enrich.Vision{}, fmt.Errorf("nova vision: the image is %d bytes, over the %d-byte request limit; not sent",
-			len(input.Image), visionMaxImageBytes)
+		return enrich.Vision{}, fmt.Errorf(
+			"nova vision: the image is %d bytes, and base64 would make it %d, over the %d-byte request limit; not sent",
+			len(input.Image), len(input.Image)/3*4, visionMaxEncodedBytes)
 	}
 	system, err := prompt(VisionPromptVersion + ".md")
 	if err != nil {
